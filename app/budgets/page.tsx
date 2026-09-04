@@ -1,0 +1,87 @@
+"use client";
+
+import { FormEvent, useEffect, useState } from "react";
+
+type Budget = { budgetId: string; financialYear: string; period: string; accountId: string; projectId: string; budgetAmount: number | string; actualAmount: number | string; variance: number | string };
+type Account = { accountId: string; accountCode: string; accountName: string };
+type Project = { projectId: string; projectName: string };
+
+const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
+
+export default function BudgetsPage() {
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [secret, setSecret] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function load() {
+    try {
+      const [b, m] = await Promise.all([
+        fetch("/api/budgets", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/masters", { cache: "no-store" }).then((r) => r.json()),
+      ]);
+      if (!b.ok) throw new Error(b.error || "Budget load failed");
+      if (!m.ok) throw new Error(m.error || "Project load failed");
+      setBudgets(b.budgets || []);
+      setAccounts(b.accounts || []);
+      setProjects(m.projects || []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Load failed");
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/budgets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret, record: Object.fromEntries(form.entries()) }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Budget save failed");
+      setMessage(`Budget ${body.row.budgetId} created.`);
+      event.currentTarget.reset();
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Budget save failed");
+    }
+  }
+
+  return (
+    <>
+      <h2>Budget vs Actual</h2>
+      <p className="small">Budget control by financial year, period, account and optional project. Actuals are recalculated from posted journals.</p>
+
+      <section className="panel"><label>APP_SECRET<input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" /></label></section>
+      {message && <section className="panel"><strong>Status:</strong> {message}</section>}
+
+      <form className="panel form-grid" onSubmit={submit}>
+        <h3 className="form-title">New Budget</h3>
+        <label>Budget ID<input name="budgetId" placeholder="Optional auto ID" /></label>
+        <label>Financial Year<input name="financialYear" defaultValue={new Date().getFullYear()} required /></label>
+        <label>Period<input name="period" defaultValue="ANNUAL" placeholder="ANNUAL or YYYY-MM" required /></label>
+        <label>Account<select name="accountId" required defaultValue=""><option value="" disabled>Select account</option>{accounts.map((a) => <option key={a.accountId} value={a.accountId}>{a.accountCode} — {a.accountName}</option>)}</select></label>
+        <label>Project<select name="projectId" defaultValue=""><option value="">Company-wide</option>{projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName} ({p.projectId})</option>)}</select></label>
+        <label>Budget Amount<input name="budgetAmount" type="number" min="0" step="0.01" required /></label>
+        <div className="form-wide"><button type="submit">Create Budget</button></div>
+      </form>
+
+      <section className="panel table-wrap">
+        <table className="data-table"><thead><tr><th>Budget</th><th>FY</th><th>Period</th><th>Account</th><th>Project</th><th>Budget</th><th>Actual</th><th>Variance</th><th>Utilisation</th></tr></thead><tbody>
+          {budgets.map((row) => {
+            const budget = Number(row.budgetAmount || 0);
+            const actual = Number(row.actualAmount || 0);
+            const utilisation = budget ? (actual / budget) * 100 : 0;
+            return <tr key={row.budgetId}><td>{row.budgetId}</td><td>{row.financialYear}</td><td>{row.period}</td><td>{row.accountId}</td><td>{row.projectId || "—"}</td><td>{money(budget)}</td><td>{money(actual)}</td><td>{money(row.variance)}</td><td>{utilisation.toFixed(1)}%</td></tr>;
+          })}
+          {!budgets.length && <tr><td colSpan={9}>No budgets created yet.</td></tr>}
+        </tbody></table>
+      </section>
+    </>
+  );
+}

@@ -1,0 +1,57 @@
+export const INITIAL_CHART_OF_ACCOUNTS = [
+  { accountId: "ACC-1000", accountCode: "1000", accountName: "Assets", accountType: "Asset", parentAccount: "", active: true },
+  { accountId: "ACC-1100", accountCode: "1100", accountName: "Current Assets", accountType: "Asset", parentAccount: "ACC-1000", active: true },
+  { accountId: "ACC-1110", accountCode: "1110", accountName: "Cash on Hand", accountType: "Asset", parentAccount: "ACC-1100", active: true },
+  { accountId: "ACC-1120", accountCode: "1120", accountName: "Bank Account", accountType: "Asset", parentAccount: "ACC-1100", active: true },
+  { accountId: "ACC-1130", accountCode: "1130", accountName: "Accounts Receivable", accountType: "Asset", parentAccount: "ACC-1100", active: true },
+  { accountId: "ACC-1140", accountCode: "1140", accountName: "GST Receivable / Input GST", accountType: "Asset", parentAccount: "ACC-1100", active: true },
+  { accountId: "ACC-1150", accountCode: "1150", accountName: "Inventory / Project Materials", accountType: "Asset", parentAccount: "ACC-1100", active: true },
+  { accountId: "ACC-1200", accountCode: "1200", accountName: "Non-Current Assets", accountType: "Asset", parentAccount: "ACC-1000", active: true },
+  { accountId: "ACC-1210", accountCode: "1210", accountName: "Computer & ICT Equipment", accountType: "Asset", parentAccount: "ACC-1200", active: true },
+  { accountId: "ACC-1220", accountCode: "1220", accountName: "Office Equipment", accountType: "Asset", parentAccount: "ACC-1200", active: true },
+  { accountId: "ACC-1230", accountCode: "1230", accountName: "Accumulated Depreciation", accountType: "Contra Asset", parentAccount: "ACC-1200", active: true },
+
+  { accountId: "ACC-2000", accountCode: "2000", accountName: "Liabilities", accountType: "Liability", parentAccount: "", active: true },
+  { accountId: "ACC-2100", accountCode: "2100", accountName: "Current Liabilities", accountType: "Liability", parentAccount: "ACC-2000", active: true },
+  { accountId: "ACC-2110", accountCode: "2110", accountName: "Accounts Payable", accountType: "Liability", parentAccount: "ACC-2100", active: true },
+  { accountId: "ACC-2120", accountCode: "2120", accountName: "GST Payable / Output GST", accountType: "Liability", parentAccount: "ACC-2100", active: true },
+  { accountId: "ACC-2130", accountCode: "2130", accountName: "Third-Party Loan Payable", accountType: "Liability", parentAccount: "ACC-2100", active: true },
+  { accountId: "ACC-2140", accountCode: "2140", accountName: "Accrued Interest Payable", accountType: "Liability", parentAccount: "ACC-2100", active: true },
+  { accountId: "ACC-2150", accountCode: "2150", accountName: "Customer Advances", accountType: "Liability", parentAccount: "ACC-2100", active: true },
+
+  { accountId: "ACC-3000", accountCode: "3000", accountName: "Equity", accountType: "Equity", parentAccount: "", active: true },
+  { accountId: "ACC-3100", accountCode: "3100", accountName: "Owner's Capital", accountType: "Equity", parentAccount: "ACC-3000", active: true },
+  { accountId: "ACC-3200", accountCode: "3200", accountName: "Retained Earnings", accountType: "Equity", parentAccount: "ACC-3000", active: true },
+
+  { accountId: "ACC-4000", accountCode: "4000", accountName: "Revenue", accountType: "Income", parentAccount: "", active: true },
+  { accountId: "ACC-4100", accountCode: "4100", accountName: "IT Services Revenue", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4200", accountCode: "4200", accountName: "Hardware Sales Revenue", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4300", accountCode: "4300", accountName: "Software & Digital Solutions Revenue", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4400", accountCode: "4400", accountName: "Managed IT Revenue", accountType: "Income", parentAccount: "ACC-4000", active: true },
+
+  { accountId: "ACC-5000", accountCode: "5000", accountName: "Cost of Sales", accountType: "Expense", parentAccount: "", active: true },
+  { accountId: "ACC-5100", accountCode: "5100", accountName: "Hardware & Materials Cost", accountType: "Expense", parentAccount: "ACC-5000", active: true },
+  { accountId: "ACC-5200", accountCode: "5200", accountName: "Project Direct Costs", accountType: "Expense", parentAccount: "ACC-5000", active: true },
+  { accountId: "ACC-5300", accountCode: "5300", accountName: "Subcontractor / Consultant Cost", accountType: "Expense", parentAccount: "ACC-5000", active: true },
+
+  { accountId: "ACC-6000", accountCode: "6000", accountName: "Operating Expenses", accountType: "Expense", parentAccount: "", active: true },
+  { accountId: "ACC-6100", accountCode: "6100", accountName: "Interest Expense", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6200", accountCode: "6200", accountName: "Internet & Communications", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6300", accountCode: "6300", accountName: "Transport & Travel", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6400", accountCode: "6400", accountName: "Marketing & Advertising", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6500", accountCode: "6500", accountName: "Software & Subscriptions", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6600", accountCode: "6600", accountName: "Office & Administration", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6700", accountCode: "6700", accountName: "Repairs & Maintenance", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6800", accountCode: "6800", accountName: "Depreciation Expense", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+] as const;
+
+export const INITIAL_ACCOUNT_IDS = {
+  cash: "ACC-1110",
+  bank: "ACC-1120",
+  accountsReceivable: "ACC-1130",
+  accountsPayable: "ACC-2110",
+  gstPayable: "ACC-2120",
+  loanPayable: "ACC-2130",
+  accruedInterestPayable: "ACC-2140",
+  interestExpense: "ACC-6100",
+} as const;
