@@ -9,7 +9,7 @@ const normalize = (value: unknown) => String(value || "").trim().toUpperCase().r
 
 export default function PurchasePaymentStaged() {
   const router = useRouter();
-  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [supplierInvoices, setSupplierInvoices] = useState<any[]>([]);
   const [showApproved, setShowApproved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -24,12 +24,12 @@ export default function PurchasePaymentStaged() {
     try {
       const response = await fetch("/api/erp/transactions", { cache: "no-store" });
       const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error(body.error || "Purchase documents load failed");
-      const rows = Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [];
-      setPurchaseOrders(rows);
+      if (!response.ok || !body.ok) throw new Error(body.error || "Supplier Invoices load failed");
+      const rows = Array.isArray(body.supplierBills) ? body.supplierBills : [];
+      setSupplierInvoices(rows);
       return rows;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Purchase documents load failed");
+      setStatus(error instanceof Error ? error.message : "Supplier Invoices load failed");
       return [];
     } finally {
       setLoading(false);
@@ -48,23 +48,23 @@ export default function PurchasePaymentStaged() {
 
   useEffect(() => { void loadNextNo(); }, []);
 
-  const approved = useMemo(() => purchaseOrders.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.totalAmount || 0) > 0), [purchaseOrders]);
+  const approved = useMemo(() => supplierInvoices.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0), [supplierInvoices]);
 
   async function toggleApproved() {
     if (showApproved) { setShowApproved(false); return; }
-    if (!purchaseOrders.length) await loadTransactions();
+    if (!supplierInvoices.length) await loadTransactions();
     setShowApproved(true);
   }
 
   async function searchApproved() {
-    let rows = purchaseOrders;
+    let rows = supplierInvoices;
     if (!rows.length) rows = await loadTransactions();
     const q = normalize(search);
-    if (!q) { setSearched(null); setStatus("Enter a Purchase Order number"); return; }
-    const available = rows.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.totalAmount || 0) > 0);
-    const match = available.find((row) => normalize(row.poNumber) === q || normalize(row.poId) === q)
-      || available.find((row) => normalize(row.poNumber).includes(q) || normalize(row.poId).includes(q));
-    if (!match) { setSearched(null); setStatus(`Approved Purchase Order not found: ${search}`); return; }
+    if (!q) { setSearched(null); setStatus("Enter a Supplier Invoice number"); return; }
+    const available = rows.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0);
+    const match = available.find((row) => normalize(row.billNumber) === q || normalize(row.billId) === q)
+      || available.find((row) => normalize(row.billNumber).includes(q) || normalize(row.billId).includes(q));
+    if (!match) { setSearched(null); setStatus(`Approved Supplier Invoice with outstanding amount not found: ${search}`); return; }
     setStatus("");
     setSearched(match);
   }
@@ -84,8 +84,9 @@ export default function PurchasePaymentStaged() {
     try {
       const form = new FormData(event.currentTarget);
       const amount = Number(form.get("amount") || 0);
+      const outstanding = Number(selected.outstandingAmount ?? selected.totalAmount ?? 0);
       if (!(amount > 0)) throw new Error("Payment amount must be greater than zero");
-      if (amount > Number(selected.totalAmount || 0) + 0.001) throw new Error("Payment amount cannot exceed Purchase Order total");
+      if (amount > outstanding + 0.001) throw new Error("Payment amount cannot exceed Supplier Invoice outstanding amount");
       const response = await fetch("/api/erp/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -102,8 +103,8 @@ export default function PurchasePaymentStaged() {
             paymentMethod: form.get("paymentMethod"),
             cashBankAccountId: form.get("cashBankAccountId"),
             reference: form.get("reference") || "",
-            againstDocumentType: "Purchase Order",
-            againstDocumentId: selected.poId,
+            againstDocumentType: "Supplier Invoice",
+            againstDocumentId: selected.billId,
           },
         }),
       });
@@ -123,48 +124,50 @@ export default function PurchasePaymentStaged() {
     <section className="panel">
       <div className="form-title-row">
         <div>
-          <h3>Purchase Order → Purchase Payment / Receipt</h3>
-          <p className="small">Choose an approved Purchase Order first. Convert Now only opens the Payment Entry form; no draft is created until Save Draft.</p>
+          <h3>Supplier Invoice → Purchase Payment Entry / Receipt</h3>
+          <p className="small">Choose an approved Supplier Invoice first. Convert Now only opens the Payment Entry form; no draft is created until Save Draft.</p>
         </div>
         <span className="auto-badge">Next Payment No: {nextNo}</span>
       </div>
       <div className="button-row" style={{ marginTop: 18 }}>
-        <button type="button" onClick={() => void toggleApproved()} disabled={loading}>{loading ? "Loading…" : showApproved ? "Hide Approved Purchase Orders" : "View Approved Purchase Order to Payment Entry"}</button>
+        <button type="button" onClick={() => void toggleApproved()} disabled={loading}>{loading ? "Loading…" : showApproved ? "Hide Approved Supplier Invoices" : "View Approved Supplier Invoice to Payment Entry"}</button>
       </div>
     </section>
 
     {showApproved && <section className="panel table-wrap">
-      <div className="form-title-row"><h3>Approved Purchase Orders Pending Payment Entry</h3><span className="auto-badge">{approved.length} Pending</span></div>
-      <table className="data-table"><thead><tr><th>Purchase Order</th><th>Supplier</th><th>Project</th><th>PO Total</th><th>Action</th></tr></thead><tbody>
-        {approved.length === 0 && <tr><td colSpan={5}>No approved Purchase Orders pending payment.</td></tr>}
-        {approved.map((po) => <tr key={po.poId}><td><Link href={`/transactions/purchaseOrder/${po.poId}`}><strong>{po.poNumber || po.poId}</strong></Link></td><td>{po.supplierId || "—"}</td><td>{po.projectId || "—"}</td><td><strong>{money(po.totalAmount)}</strong></td><td><button type="button" onClick={() => selectForPayment(po)}>Convert Now</button></td></tr>)}
+      <div className="form-title-row"><h3>Approved Supplier Invoices Pending Payment Entry</h3><span className="auto-badge">{approved.length} Pending</span></div>
+      <table className="data-table"><thead><tr><th>Supplier Invoice</th><th>Supplier</th><th>Project</th><th>Invoice Total</th><th>Outstanding</th><th>Action</th></tr></thead><tbody>
+        {approved.length === 0 && <tr><td colSpan={6}>No approved Supplier Invoices with outstanding balance.</td></tr>}
+        {approved.map((invoice) => <tr key={invoice.billId}><td><Link href={`/transactions/supplierBill/${invoice.billId}`}><strong>{invoice.billNumber || invoice.billId}</strong></Link></td><td>{invoice.supplierId || "—"}</td><td>{invoice.projectId || "—"}</td><td>{money(invoice.totalAmount)}</td><td><strong>{money(invoice.outstandingAmount ?? invoice.totalAmount)}</strong></td><td><button type="button" onClick={() => selectForPayment(invoice)}>Convert Now</button></td></tr>)}
       </tbody></table>
     </section>}
 
     <section className="panel">
-      <h3>Manual Search by Purchase Order No</h3>
+      <h3>Manual Search by Supplier Invoice No</h3>
       <div className="form-grid" style={{ marginTop: 16 }}>
-        <label>Purchase Order No<input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchApproved(); } }} placeholder="e.g. PO-2026-00001" autoComplete="off" /></label>
+        <label>Supplier Invoice No<input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchApproved(); } }} placeholder="e.g. PB-2026-00001" autoComplete="off" /></label>
         <div style={{ display: "flex", alignItems: "end" }}><button type="button" style={{ width: "100%", height: 52 }} onClick={() => void searchApproved()} disabled={loading}>{loading ? "Searching…" : "Search"}</button></div>
       </div>
       {searched && <div style={{ marginTop: 20 }}><div className="document-meta">
-        <div><span>Purchase Order</span><strong><Link href={`/transactions/purchaseOrder/${searched.poId}`}>{searched.poNumber || searched.poId}</Link></strong></div>
+        <div><span>Supplier Invoice</span><strong><Link href={`/transactions/supplierBill/${searched.billId}`}>{searched.billNumber || searched.billId}</Link></strong></div>
         <div><span>Supplier</span><strong>{searched.supplierId || "—"}</strong></div>
         <div><span>Project</span><strong>{searched.projectId || "—"}</strong></div>
-        <div><span>PO Total</span><strong>{money(searched.totalAmount)}</strong></div>
+        <div><span>Invoice Total</span><strong>{money(searched.totalAmount)}</strong></div>
+        <div><span>Outstanding</span><strong>{money(searched.outstandingAmount ?? searched.totalAmount)}</strong></div>
         <div><span>Status</span><strong>{searched.status}</strong></div>
       </div><div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => selectForPayment(searched)}>Convert to Payment Entry</button></div></div>}
     </section>
 
     {selected && <form id="purchase-payment-draft-form" className="panel form-grid" onSubmit={saveDraft}>
-      <h3 className="form-title">New Purchase Payment / Receipt</h3>
-      <label>Purchase Order<input value={selected.poNumber || selected.poId} readOnly /></label>
+      <h3 className="form-title">New Purchase Payment Entry / Receipt</h3>
+      <label>Supplier Invoice<input value={selected.billNumber || selected.billId} readOnly /></label>
       <label>Supplier<input value={selected.supplierId || ""} readOnly /></label>
       <label>Project<input value={selected.projectId || "No project"} readOnly /></label>
       <label>Auto Purchase Payment / Receipt No<input value={nextNo} readOnly /></label>
-      <label>Purchase Order Total<input value={money(selected.totalAmount)} readOnly /></label><div></div>
+      <label>Invoice Total<input value={money(selected.totalAmount)} readOnly /></label>
+      <label>Outstanding<input value={money(selected.outstandingAmount ?? selected.totalAmount)} readOnly /></label>
       <label>Payment Date<input name="paymentDate" type="date" required /></label>
-      <label>Amount<input name="amount" type="number" min="0.01" max={Number(selected.totalAmount || 0)} step="0.01" defaultValue={Number(selected.totalAmount || 0)} required /></label>
+      <label>Amount<input name="amount" type="number" min="0.01" max={Number(selected.outstandingAmount ?? selected.totalAmount ?? 0)} step="0.01" defaultValue={Number(selected.outstandingAmount ?? selected.totalAmount ?? 0)} required /></label>
       <label>Payment Method<select name="paymentMethod" defaultValue="" required><option value="">Select payment method</option><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
       <label>Cash / Bank Account<input name="cashBankAccountId" placeholder="Select / enter cash or bank account" required /></label>
       <label className="form-wide">Reference<input name="reference" placeholder="Bank reference / supplier payment reference" /></label>
