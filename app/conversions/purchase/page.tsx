@@ -5,76 +5,20 @@ import { useRouter } from "next/navigation";
 
 type SupplierQuote={poId:string;poNumber:string;supplierId:string;projectId?:string;totalAmount?:number|string;status?:string};
 type PurchaseOrder={poId:string;poNumber:string;supplierId:string;projectId?:string;totalAmount?:number|string;status?:string};
+type Preview={record:any;lines:any[];number:string}|null;
 type TxData={ok:boolean;supplierQuotes?:SupplierQuote[];purchaseOrders?:PurchaseOrder[];error?:string};
-
 function localDate(){const d=new Date();const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(d);const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`;}
+const money=(v:unknown)=>`K${Number(v||0).toFixed(2)}`;
+function SourcePreview({data}:{data:Preview}){if(!data)return null;const r=data.record;return <section className="panel"><div className="form-title-row"><h3>{data.number}</h3><span className="auto-badge">{r.status||"APPROVED"}</span></div><div className="document-meta"><div><span>Supplier</span><strong>{r.supplierId||"—"}</strong></div><div><span>Project</span><strong>{r.projectId||"—"}</strong></div><div><span>Date</span><strong>{r.poDate||"—"}</strong></div><div><span>Total</span><strong>{money(r.totalAmount)}</strong></div></div>{data.lines.length>0&&<div className="table-wrap"><table className="data-table"><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Total</th></tr></thead><tbody>{data.lines.map((line:any,i:number)=><tr key={line.poLineId||i}><td>{line.lineNo||i+1}</td><td>{line.description||line.itemId||"—"}</td><td>{line.qty||0}</td><td>{line.uom||"—"}</td><td>{money(line.rate)}</td><td>{money(line.totalAmount||line.netAmount)}</td></tr>)}</tbody></table></div>}</section>}
 
 export default function PurchaseConversionsPage(){
-  const router=useRouter();
-  const [supplierQuotes,setSupplierQuotes]=useState<SupplierQuote[]>([]);
-  const [purchaseOrders,setPurchaseOrders]=useState<PurchaseOrder[]>([]);
-  const [selectedPoId,setSelectedPoId]=useState("");
-  const [message,setMessage]=useState("");
-  const [busy,setBusy]=useState(false);
-
-  async function load(){
-    try{
-      const response=await fetch("/api/erp/transactions");
-      const body=await response.json() as TxData;
-      if(!response.ok||!body.ok) throw new Error(body.error||"Transaction load failed");
-      setSupplierQuotes((body.supplierQuotes||[]).filter(row=>["APPROVED","CONVERTED"].includes(String(row.status||"").toUpperCase())));
-      setPurchaseOrders((body.purchaseOrders||[]).filter(row=>!["CANCELLED","CANCELED"].includes(String(row.status||"").toUpperCase())));
-    }catch(error){setMessage(error instanceof Error?error.message:"Load failed");}
-  }
-
-  useEffect(()=>{void load();},[]);
-  const selectedPo=useMemo(()=>purchaseOrders.find(row=>row.poId===selectedPoId),[purchaseOrders,selectedPoId]);
-
-  async function supplierQuoteToPo(event:FormEvent<HTMLFormElement>){
-    event.preventDefault();setBusy(true);setMessage("");
-    try{
-      const form=new FormData(event.currentTarget);
-      const response=await fetch("/api/erp/purchase-conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({supplierQuoteId:form.get("supplierQuoteId")})});
-      const body=await response.json();
-      if(!response.ok||!body.ok) throw new Error(body.error||"Conversion failed");
-      router.push(`/transactions/purchaseOrder/${body.createdId}`);router.refresh();
-    }catch(error){setMessage(error instanceof Error?error.message:"Conversion failed");}finally{setBusy(false);}
-  }
-
-  async function poToPayment(event:FormEvent<HTMLFormElement>){
-    event.preventDefault();setBusy(true);setMessage("");
-    try{
-      const f=new FormData(event.currentTarget);
-      const po=purchaseOrders.find(row=>row.poId===String(f.get("poId")||""));
-      if(!po) throw new Error("Select a Purchase Order");
-      const amount=Number(f.get("amount")||0);
-      if(!(amount>0)) throw new Error("Payment amount must be greater than zero");
-      const response=await fetch("/api/erp/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"createPayment",payload:{paymentNumber:"",paymentType:"PAY",partyType:"Supplier",partyId:po.supplierId,projectId:po.projectId||"",paymentDate:f.get("paymentDate"),amount,paymentMethod:f.get("paymentMethod"),cashBankAccountId:f.get("cashBankAccountId"),againstDocumentType:"Purchase Order",againstDocumentId:po.poId,reference:f.get("reference")||""}})});
-      const body=await response.json();
-      if(!response.ok||!body.ok) throw new Error(body.error||"Purchase payment creation failed");
-      router.push(`/transactions/payment/${body.result.recordId}`);router.refresh();
-    }catch(error){setMessage(error instanceof Error?error.message:"Purchase payment creation failed");}finally{setBusy(false);}
-  }
-
-  return <>
-    <div className="page-heading"><div><h2>Purchase Document Conversions</h2><p className="small">Supplier Quotation → Purchase Order → Purchase Payment / Receipt.</p></div></div>
-    {message&&<section className="panel"><strong>Status:</strong> {message}</section>}
-
-    <form className="panel form-grid" onSubmit={supplierQuoteToPo}>
-      <h3 className="form-title">Supplier Quotation → Purchase Order</h3>
-      <label>Approved Supplier Quotation<select name="supplierQuoteId" required defaultValue=""><option value="" disabled>Select Supplier Quotation</option>{supplierQuotes.map(q=><option key={q.poId} value={q.poId}>{q.poNumber} · {q.supplierId} · K{Number(q.totalAmount||0).toFixed(2)}</option>)}</select></label>
-      <div className="form-wide"><button type="submit" disabled={busy}>Create Purchase Order</button></div>
-    </form>
-
-    <form className="panel form-grid" onSubmit={poToPayment}>
-      <h3 className="form-title">Purchase Order → Purchase Payment / Receipt</h3>
-      <label>Purchase Order<select name="poId" required value={selectedPoId} onChange={e=>setSelectedPoId(e.target.value)}><option value="" disabled>Select Purchase Order</option>{purchaseOrders.map(po=><option key={po.poId} value={po.poId}>{po.poNumber} · {po.supplierId} · K{Number(po.totalAmount||0).toFixed(2)}</option>)}</select></label>
-      <label>Payment Date<input name="paymentDate" type="date" required defaultValue={localDate()} /></label>
-      <label>Amount<input key={selectedPoId||"none"} name="amount" type="number" min="0.01" step="0.01" required defaultValue={selectedPo?Number(selectedPo.totalAmount||0):undefined} /></label>
-      <label>Method<select name="paymentMethod" defaultValue="Bank Transfer"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
-      <label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label>
-      <label className="form-wide">Reference<input name="reference" placeholder="Bank ref / supplier payment ref" /></label>
-      <div className="form-wide"><button type="submit" disabled={busy}>Create Purchase Payment</button></div>
-    </form>
-  </>;
+ const router=useRouter();const[supplierQuotes,setSupplierQuotes]=useState<SupplierQuote[]>([]);const[purchaseOrders,setPurchaseOrders]=useState<PurchaseOrder[]>([]);const[selectedQuoteId,setSelectedQuoteId]=useState("");const[selectedPoId,setSelectedPoId]=useState("");const[quotePreview,setQuotePreview]=useState<Preview>(null);const[poPreview,setPoPreview]=useState<Preview>(null);const[message,setMessage]=useState("");const[busy,setBusy]=useState(false);
+ async function load(){try{const response=await fetch("/api/erp/transactions");const body=await response.json() as TxData;if(!response.ok||!body.ok)throw new Error(body.error||"Transaction load failed");setSupplierQuotes((body.supplierQuotes||[]).filter(r=>String(r.status||"").toUpperCase()==="APPROVED"));setPurchaseOrders((body.purchaseOrders||[]).filter(r=>String(r.status||"").toUpperCase()==="APPROVED"));}catch(error){setMessage(error instanceof Error?error.message:"Load failed");}}
+ useEffect(()=>{void load();},[]);const selectedPo=useMemo(()=>purchaseOrders.find(r=>r.poId===selectedPoId),[purchaseOrders,selectedPoId]);
+ async function preview(type:"supplierQuote"|"purchaseOrder",id:string,setter:(p:Preview)=>void){if(!id){setter(null);return;}const res=await fetch(`/api/erp/document-preview?type=${type}&id=${encodeURIComponent(id)}`);const body=await res.json();if(!res.ok||!body.ok){setMessage(body.error||"Preview failed");setter(null);return;}setter({record:body.record,lines:body.lines||[],number:body.number});}
+ async function supplierQuoteToPo(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!quotePreview)return;setBusy(true);setMessage("");try{const response=await fetch("/api/erp/purchase-conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({supplierQuoteId:selectedQuoteId})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Conversion failed");router.push(`/transactions/purchaseOrder/${body.createdId}`);router.refresh();}catch(error){setMessage(error instanceof Error?error.message:"Conversion failed");}finally{setBusy(false);}}
+ async function poToPayment(event:FormEvent<HTMLFormElement>){event.preventDefault();if(!poPreview)return;setBusy(true);setMessage("");try{const f=new FormData(event.currentTarget);const po=purchaseOrders.find(r=>r.poId===selectedPoId);if(!po)throw new Error("Select an approved Purchase Order");const amount=Number(f.get("amount")||0);if(!(amount>0))throw new Error("Payment amount must be greater than zero");const response=await fetch("/api/erp/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"createPayment",payload:{paymentNumber:"",paymentType:"PAY",partyType:"Supplier",partyId:po.supplierId,projectId:po.projectId||"",paymentDate:f.get("paymentDate"),amount,paymentMethod:f.get("paymentMethod"),cashBankAccountId:f.get("cashBankAccountId"),againstDocumentType:"Purchase Order",againstDocumentId:po.poId,reference:f.get("reference")||""}})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Purchase payment creation failed");router.push(`/transactions/payment/${body.result.recordId}`);router.refresh();}catch(error){setMessage(error instanceof Error?error.message:"Purchase payment creation failed");}finally{setBusy(false);}}
+ return <><div className="page-heading"><div><h2>Purchase Document Conversions</h2><p className="small">Search/select an approved source document, review the full document, then convert it.</p></div></div>{message&&<section className="panel"><strong>Status:</strong> {message}</section>}
+ <form className="panel form-grid" onSubmit={supplierQuoteToPo}><h3 className="form-title">Supplier Quotation → Purchase Order</h3><label>Approved Supplier Quotation<input list="approved-supplier-quotations" placeholder="Search by quotation no" value={selectedQuoteId} onChange={e=>{const value=e.target.value;const match=supplierQuotes.find(q=>q.poId===value||q.poNumber===value);const id=match?.poId||value;setSelectedQuoteId(id);void preview("supplierQuote",id,setQuotePreview);}} required/><datalist id="approved-supplier-quotations">{supplierQuotes.map(q=><option key={q.poId} value={q.poId}>{q.poNumber} · {q.supplierId} · {money(q.totalAmount)}</option>)}</datalist></label><div className="form-wide"><SourcePreview data={quotePreview}/></div>{quotePreview&&<div className="form-wide"><button type="submit" disabled={busy}>Convert to Purchase Order</button></div>}</form>
+ <form className="panel form-grid" onSubmit={poToPayment}><h3 className="form-title">Purchase Order → Purchase Payment / Receipt</h3><label>Approved Purchase Order<input list="approved-purchase-orders" placeholder="Search by PO no" value={selectedPoId} onChange={e=>{const value=e.target.value;const match=purchaseOrders.find(po=>po.poId===value||po.poNumber===value);const id=match?.poId||value;setSelectedPoId(id);void preview("purchaseOrder",id,setPoPreview);}} required/><datalist id="approved-purchase-orders">{purchaseOrders.map(po=><option key={po.poId} value={po.poId}>{po.poNumber} · {po.supplierId} · {money(po.totalAmount)}</option>)}</datalist></label><div className="form-wide"><SourcePreview data={poPreview}/></div>{poPreview&&<><label>Payment Date<input name="paymentDate" type="date" required defaultValue={localDate()}/></label><label>Amount<input key={selectedPoId} name="amount" type="number" min="0.01" step="0.01" required defaultValue={Number(selectedPo?.totalAmount||0)}/></label><label>Method<select name="paymentMethod" defaultValue="Bank Transfer"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label><label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required/></label><label className="form-wide">Reference<input name="reference" placeholder="Bank ref / supplier payment ref"/></label><div className="form-wide"><button type="submit" disabled={busy}>Convert to Purchase Payment / Receipt</button></div></>}</form></>;
 }
