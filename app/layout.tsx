@@ -7,8 +7,8 @@ export const metadata = { title: "Easynet Finance AI", description: "Finance con
 type NavItem = readonly [label:string,href:string,permission:Permission];type NavGroup={label:string;links:readonly NavItem[]};
 const groups:readonly NavGroup[]=[
 {label:"Dashboard",links:[["Management Dashboard","/dashboard","dashboard.read"],["Control Centre","/controls","dashboard.read"],["Approvals","/approvals","post.approve"]]},
-{label:"Sales",links:[["Sales Transactions","/transactions?module=sales","sales.read"],["Customers","/masters?tab=customers","sales.read"],["Sales Document Conversions","/conversions?module=sales","sales.write"],["Payment Schedules","/payment-schedules","sales.read"]]},
-{label:"Purchase",links:[["Purchase Transactions","/transactions?module=purchase","purchase.read"],["Suppliers","/masters?tab=suppliers","purchase.read"],["Purchase Document Conversions","/conversions?module=purchase","purchase.write"],["Expenses","/transactions?module=expense","purchase.write"]]},
+{label:"Sales",links:[["Sales Transactions","/transactions?module=sales","sales.read"],["Customers","/masters?tab=customers","sales.read"],["Sales Document Conversions","/conversions/sales","sales.write"],["Payment Schedules","/payment-schedules","sales.read"]]},
+{label:"Purchase",links:[["Purchase Transactions","/transactions?module=purchase","purchase.read"],["Suppliers","/masters?tab=suppliers","purchase.read"],["Purchase Document Conversions","/conversions/purchase","purchase.write"],["Expenses","/transactions?module=expense","purchase.write"]]},
 {label:"Stock & Assets",links:[["Items & Stock","/stock","stock.read"],["Fixed Assets","/assets","stock.read"]]},
 {label:"Accounts",links:[["Chart of Accounts","/accounts","accounts.read"],["Posted Journals","/journals","accounts.read"],["Journal Reversal","/journals/reverse","accounts.write"],["Statements","/statements","accounts.read"],["Budgets","/budgets","accounts.read"],["Loan Register","/loans","accounts.read"],["Loan Actions","/loans/actions","accounts.write"]]},
 {label:"Projects",links:[["Projects","/projects","dashboard.read"]]},
