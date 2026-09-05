@@ -7,6 +7,8 @@ const schema = z.object({
   OPENAI_MODEL: z.string().default("gpt-5-mini"),
   APP_SECRET: z.string().optional(),
   ALLOWED_EMAILS: z.string().optional(),
+  SESSION_SECRET: z.string().min(32).optional(),
+  ERP_USERS_JSON: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
