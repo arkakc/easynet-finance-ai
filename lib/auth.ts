@@ -5,10 +5,9 @@ import { env } from "@/lib/env";
 export type Role = "System Manager" | "Finance Controller" | "Accounts User" | "Sales User" | "Purchase User" | "Stock User" | "Management" | "Auditor";
 export type Permission = "dashboard.read" | "sales.read" | "sales.write" | "purchase.read" | "purchase.write" | "stock.read" | "stock.write" | "accounts.read" | "accounts.write" | "reports.read" | "users.manage" | "settings.manage" | "post.approve";
 export type SessionUser = { email: string; name: string; roles: Role[]; permissions: Permission[] };
-
 type ConfigUser = { email: string; name?: string; passwordHash: string; roles: Role[]; disabled?: boolean };
 
-const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
+export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   "System Manager": ["dashboard.read","sales.read","sales.write","purchase.read","purchase.write","stock.read","stock.write","accounts.read","accounts.write","reports.read","users.manage","settings.manage","post.approve"],
   "Finance Controller": ["dashboard.read","sales.read","sales.write","purchase.read","purchase.write","stock.read","accounts.read","accounts.write","reports.read","post.approve"],
   "Accounts User": ["dashboard.read","accounts.read","accounts.write","reports.read","sales.read","purchase.read"],
@@ -25,7 +24,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 12;
 function users(): ConfigUser[] {
   if (!env.ERP_USERS_JSON) return [];
   const parsed = JSON.parse(env.ERP_USERS_JSON) as ConfigUser[];
-  return parsed.filter((u) => !u.disabled && u.email && u.passwordHash && Array.isArray(u.roles));
+  return parsed.filter((u) => u.email && u.passwordHash && Array.isArray(u.roles));
 }
 
 function permissionsFor(roles: Role[]) {
@@ -46,7 +45,7 @@ export function verifyPassword(password: string, stored: string) {
 }
 
 export function authenticate(email: string, password: string): SessionUser | null {
-  const found = users().find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+  const found = users().find((u) => !u.disabled && u.email.toLowerCase() === email.trim().toLowerCase());
   if (!found || !verifyPassword(password, found.passwordHash)) return null;
   return { email: found.email, name: found.name || found.email, roles: found.roles, permissions: permissionsFor(found.roles) };
 }
@@ -61,8 +60,7 @@ export function verifySessionToken(token?: string | null): SessionUser | null {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
   const expected = sign(payload);
-  const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
+  const a = Buffer.from(signature); const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
@@ -76,15 +74,17 @@ export async function getCurrentUser() {
   return verifySessionToken(store.get(COOKIE_NAME)?.value);
 }
 
-export function hasPermission(user: SessionUser | null, permission: Permission) {
-  return Boolean(user?.permissions.includes(permission));
-}
+export function hasPermission(user: SessionUser | null, permission: Permission) { return Boolean(user?.permissions.includes(permission)); }
 
 export async function requirePermission(permission: Permission) {
   const user = await getCurrentUser();
   if (!user) throw new Error("Unauthorized");
   if (!hasPermission(user, permission)) throw new Error("Forbidden");
   return user;
+}
+
+export function listConfiguredUsers() {
+  return users().map((u) => ({ email: u.email, name: u.name || u.email, roles: u.roles, disabled: Boolean(u.disabled) }));
 }
 
 export const sessionCookie = { name: COOKIE_NAME, maxAge: SESSION_TTL_SECONDS };
