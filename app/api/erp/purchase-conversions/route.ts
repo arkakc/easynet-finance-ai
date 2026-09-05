@@ -4,12 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 
 function pngDate() {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Pacific/Port_Moresby",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
@@ -44,6 +39,17 @@ export async function POST(request: Request) {
     const existing = await findRecords<any>("PurchaseOrders", { sourceDocumentId: supplierQuoteId }, 10);
     const existingPo = existing.rows.find((row: any) => !String(row.poNumber || "").startsWith("SUPQ-"));
     if (existingPo) {
+      await updateRecord("PurchaseOrders", "poId", supplierQuoteId, {
+        status: "CONVERTED",
+        convertedDocumentType: "purchaseOrder",
+        convertedDocumentId: existingPo.poId,
+        convertedDocumentNo: existingPo.poNumber || existingPo.poId,
+      }, "supplier-quote-conversion");
+      await updateRecord("PurchaseOrders", "poId", existingPo.poId, {
+        previousDocumentType: "supplierQuote",
+        previousDocumentId: supplierQuoteId,
+        previousDocumentNo: source.poNumber || source.poId,
+      }, "supplier-quote-conversion");
       return NextResponse.json({ ok: true, createdId: existingPo.poId, documentNumber: existingPo.poNumber, status: "already-converted" });
     }
 
@@ -53,6 +59,7 @@ export async function POST(request: Request) {
     const year = new Intl.DateTimeFormat("en", { timeZone: "Pacific/Port_Moresby", year: "numeric" }).format(new Date());
     const poId = `PO-${year}-${randomUUID().slice(0, 8).toUpperCase()}`;
     const poNumber = await nextPoNumber();
+    const sourceNumber = String(source.poNumber || source.poId);
 
     await appendRecord("PurchaseOrders", {
       poId,
@@ -65,6 +72,9 @@ export async function POST(request: Request) {
       totalAmount: source.totalAmount,
       status: "DRAFT",
       sourceDocumentId: supplierQuoteId,
+      previousDocumentType: "supplierQuote",
+      previousDocumentId: supplierQuoteId,
+      previousDocumentNo: sourceNumber,
     }, "supplier-quote-conversion");
 
     await batchAppend("POLines", lines.rows.map((line: any, index: number) => ({
@@ -81,7 +91,12 @@ export async function POST(request: Request) {
       totalAmount: line.totalAmount,
     })), "supplier-quote-conversion");
 
-    await updateRecord("PurchaseOrders", "poId", supplierQuoteId, { status: "CONVERTED" }, "supplier-quote-conversion");
+    await updateRecord("PurchaseOrders", "poId", supplierQuoteId, {
+      status: "CONVERTED",
+      convertedDocumentType: "purchaseOrder",
+      convertedDocumentId: poId,
+      convertedDocumentNo: poNumber,
+    }, "supplier-quote-conversion");
 
     return NextResponse.json({ ok: true, createdId: poId, documentNumber: poNumber, status: "created" });
   } catch (error) {
