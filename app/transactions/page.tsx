@@ -51,6 +51,7 @@ export default function TransactionsPage() {
   const [status, setStatus] = useState("");
   const [selectedParty, setSelectedParty] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ description: "", qty: "1", uom: "Each", rate: "0" }]);
+  const [gstRate, setGstRate] = useState("10");
   const [showExisting, setShowExisting] = useState(false);
   const [existingLoaded, setExistingLoaded] = useState(false);
   const [existingLoading, setExistingLoading] = useState(false);
@@ -105,6 +106,9 @@ export default function TransactionsPage() {
     const linked = masters.projects.filter((p) => String(p.customerId || "") === selectedParty);
     return linked.length ? linked : masters.projects;
   }, [salesSide, selectedParty, masters.projects]);
+  const subtotal = useMemo(() => lines.reduce((sum, line) => sum + (Number(line.qty) || 0) * (Number(line.rate) || 0), 0), [lines]);
+  const gstAmount = useMemo(() => subtotal * ((Number(gstRate) || 0) / 100), [subtotal, gstRate]);
+  const netTotal = subtotal + gstAmount;
 
   function setLine(index: number, field: keyof DraftLine, value: string) {
     setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line));
@@ -238,17 +242,47 @@ export default function TransactionsPage() {
         <label>Date<input name="documentDate" type="date" required defaultValue={localDate()} /></label>
         {tab === "salesInvoice" && <label>Due Date<input name="dueDate" type="date" defaultValue={localDate(30)} /></label>}
         {(tab === "salesQuote" || tab === "supplierQuote") && <label>Valid Till<input name="expiryDate" type="date" defaultValue={localDate(7)} /></label>}
-        <label>GST %<input name="gstRate" type="number" min="0" max="100" step="0.01" defaultValue="0" /></label>
+        <label>GST %<input name="gstRate" type="number" min="0" max="100" step="0.01" value={gstRate} onChange={(e) => setGstRate(e.target.value)} /></label>
         {tab === "salesInvoice" && <label>Revenue Account<input name="accountId" placeholder="ACC-4100" /></label>}
       </div>
+
       <h4>Lines</h4>
-      {lines.map((line, index) => <div className="line-grid" key={index}>
-        <input placeholder="Description" value={line.description} onChange={(e) => setLine(index, "description", e.target.value)} required />
-        <input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(e) => setLine(index, "qty", e.target.value)} />
-        <input placeholder="UOM" value={line.uom} onChange={(e) => setLine(index, "uom", e.target.value)} />
-        <input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setLine(index, "rate", e.target.value)} />
-        <button type="button" className="secondary" onClick={() => removeLine(index)}>Remove</button>
-      </div>)}
+      <div className="table-wrap">
+        <table className="data-table" style={{ minWidth: 920 }}>
+          <thead>
+            <tr>
+              <th style={{ width: "42%" }}>Item Description</th>
+              <th style={{ width: "10%" }}>QTY</th>
+              <th style={{ width: "12%" }}>UOM</th>
+              <th style={{ width: "14%" }}>Unit Price</th>
+              <th style={{ width: "14%" }}>Total Price</th>
+              <th style={{ width: "8%" }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line, index) => {
+              const lineTotal = (Number(line.qty) || 0) * (Number(line.rate) || 0);
+              return <tr key={index}>
+                <td><input placeholder="Item description" value={line.description} onChange={(e) => setLine(index, "description", e.target.value)} required /></td>
+                <td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(e) => setLine(index, "qty", e.target.value)} /></td>
+                <td><input placeholder="UOM" value={line.uom} onChange={(e) => setLine(index, "uom", e.target.value)} /></td>
+                <td><input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setLine(index, "rate", e.target.value)} /></td>
+                <td><strong>{money(lineTotal)}</strong></td>
+                <td><button type="button" className="secondary" onClick={() => removeLine(index)}>Remove</button></td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
+        <div style={{ width: "min(420px, 100%)", border: "1px solid #e5ebf2", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid #e5ebf2" }}><span>Sub Total</span><strong>{money(subtotal)}</strong></div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px", borderBottom: "1px solid #e5ebf2" }}><span>GST {Number(gstRate || 0).toFixed(2)}%</span><strong>{money(gstAmount)}</strong></div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "14px", background: "#f8fafc", fontSize: 18 }}><strong>Net Total</strong><strong>{money(netTotal)}</strong></div>
+        </div>
+      </div>
+
       <div className="button-row"><button type="button" className="secondary" onClick={addLine}>Add Line</button><button type="submit">Save Draft</button></div>
     </form>}
 
