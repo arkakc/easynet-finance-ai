@@ -64,7 +64,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <body>
         <div className="shell">
           <aside className="sidebar">
-            <Link className="brand" href="/dashboard">
+            <Link prefetch={false} className="brand" href="/dashboard">
               <strong>EASYNET FINANCE AI</strong>
               <span>Finance Control MVP</span>
             </Link>
@@ -73,7 +73,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 <div className="nav-section" key={group.label}>
                   <div className="nav-label">{group.label}</div>
                   {group.links.map(([label, href]) => (
-                    <Link href={href} key={href}>{label}</Link>
+                    <Link prefetch={false} href={href} key={href}>{label}</Link>
                   ))}
                 </div>
               ))}

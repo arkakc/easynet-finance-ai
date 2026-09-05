@@ -124,7 +124,7 @@ export default async function DashboardPage() {
           <p>AR subledger total: <strong>{backendError ? "Unavailable" : money(arSubledger)}</strong></p>
           <p>AP subledger total: <strong>{backendError ? "Unavailable" : money(apSubledger)}</strong></p>
           <p>AI auto-posting: <strong>Disabled</strong></p>
-          <div className="button-row"><Link className="link-button" href="/controls">Open Control Centre</Link><Link className="link-button secondary-link" href="/reports">Open Reports</Link></div>
+          <div className="button-row"><Link prefetch={false} className="link-button" href="/controls">Open Control Centre</Link><Link prefetch={false} className="link-button secondary-link" href="/reports">Open Reports</Link></div>
         </section>
 
         <section className="panel">
@@ -137,7 +137,7 @@ export default async function DashboardPage() {
             <p>Accrued interest outstanding: <strong>{money(n(activeLoan.interestOutstanding))}</strong></p>
             <p>Recorded total settlement: <strong>{money(n(activeLoan.expectedSettlement))}</strong></p>
             <p>Next accrual: <strong>{nextLoanAccrual || "—"}</strong></p>
-            <Link className="link-button" href="/loans/actions">Loan Actions</Link>
+            <Link prefetch={false} className="link-button" href="/loans/actions">Loan Actions</Link>
           </> : <p>No active loan loaded.</p>}
         </section>
       </div>

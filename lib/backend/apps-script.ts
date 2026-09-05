@@ -142,16 +142,44 @@ export async function backendHealth() {
   return callBackend<{ version: string }>("health");
 }
 
+const PROTOCOL_RETRY_DELAYS_MS = [0, 180, 450, 900];
+
+async function readRowsWithProtocolRetry<T>(
+  action: "list" | "find",
+  table: string,
+  payload: Record<string, unknown>,
+): Promise<BackendEnvelope<{ rows: T[] }>> {
+  let lastShape = "";
+
+  for (let attempt = 0; attempt < PROTOCOL_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (PROTOCOL_RETRY_DELAYS_MS[attempt]) {
+      await sleep(PROTOCOL_RETRY_DELAYS_MS[attempt]);
+    }
+
+    const result = await callBackend<{ rows?: T[] }>(action, payload);
+    if (Array.isArray(result.rows)) {
+      return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
+    }
+
+    // Google Apps Script ContentService can occasionally return a valid JSON
+    // envelope from the web-app endpoint without the action-specific payload
+    // while the deployment is under bursty read load. Reads are idempotent, so
+    // retry the protocol shape before failing the page/API request. Never apply
+    // this retry policy to write actions because a write may already have run.
+    lastShape = Object.keys(result || {}).sort().join(",") || "empty-object";
+  }
+
+  throw new Error(
+    `Apps Script protocol error: ${action}(${table}) did not return rows[] after ${PROTOCOL_RETRY_DELAYS_MS.length} attempts (response keys: ${lastShape})`,
+  );
+}
+
 export async function listTable<T = Record<string, unknown>>(
   table: string,
   limit = 100,
   offset = 0,
 ) {
-  const result = await callBackend<{ rows?: T[] }>("list", { table, limit, offset });
-  if (!Array.isArray(result.rows)) {
-    throw new Error(`Apps Script protocol error: list(${table}) did not return rows[]`);
-  }
-  return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
+  return readRowsWithProtocolRetry<T>("list", table, { table, limit, offset });
 }
 
 export async function findRecords<T = Record<string, unknown>>(
@@ -159,11 +187,7 @@ export async function findRecords<T = Record<string, unknown>>(
   filters: Record<string, unknown>,
   limit = 100,
 ) {
-  const result = await callBackend<{ rows?: T[] }>("find", { table, filters, limit });
-  if (!Array.isArray(result.rows)) {
-    throw new Error(`Apps Script protocol error: find(${table}) did not return rows[]`);
-  }
-  return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
+  return readRowsWithProtocolRetry<T>("find", table, { table, filters, limit });
 }
 
 export async function appendRecord<T = Record<string, unknown>>(
