@@ -1,68 +1,63 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
+type ApprovalRecordType = "quote" | "invoice" | "purchaseOrder" | "supplierBill" | "payment" | "expense";
+type PendingRow = {
+  module: "Sales" | "Purchase";
+  documentType: string;
+  documentNo: string;
+  recordId: string;
+  status: "DRAFT";
+  party: string;
+  project: string;
+  date: string;
+  amount: number | string;
+  href: string;
+  approvalRecordType: ApprovalRecordType;
+};
+
 export default function ApprovalsPage() {
-  const [quotes, setQuotes] = useState<any[]>([]);
-  const [pos, setPos] = useState<any[]>([]);
-  const [secret, setSecret] = useState("");
+  const [pending, setPending] = useState<PendingRow[]>([]);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
 
   async function load() {
+    setLoading(true);
     try {
       const response = await fetch("/api/approvals", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval queue load failed");
-      setQuotes(body.quotes || []);
-      setPos(body.purchaseOrders || []);
+      setPending((body.pending || []).filter((row: PendingRow) => String(row.status).toUpperCase() === "DRAFT"));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Load failed");
+    } finally {
+      setLoading(false);
     }
   }
 
   useEffect(() => { void load(); }, []);
 
-  async function decide(recordType: "quote" | "purchaseOrder", recordId: string, decision: "APPROVE" | "CANCEL") {
+  async function decide(row: PendingRow, decision: "APPROVE" | "CANCEL") {
     try {
-      const response = await fetch("/api/approvals", {
+      const response = await fetch("/api/erp/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret, payload: { recordType, recordId, decision, note: "Finance Controller UI" } }),
+        body: JSON.stringify({ target: "approvals", body: { payload: { recordType: row.approvalRecordType, recordId: row.recordId, decision, note: "Finance Controller UI" } } }),
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
-      setMessage(`${recordId}: ${body.previousStatus} → ${body.status}`);
+      setMessage(`${row.documentNo}: ${body.previousStatus} → ${body.status}`);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Approval failed");
     }
   }
 
-  const draftQuotes = quotes.filter((row) => String(row.status).toUpperCase() === "DRAFT");
-  const draftPOs = pos.filter((row) => String(row.status).toUpperCase() === "DRAFT");
+  const sales = pending.filter((row) => row.module === "Sales");
+  const purchase = pending.filter((row) => row.module === "Purchase");
+  const table = (title: string, rows: PendingRow[]) => <section className="panel table-wrap"><h3>{title}</h3><table className="data-table"><thead><tr><th>Document</th><th>Type</th><th>Party</th><th>Project</th><th>Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.documentType}-${row.recordId}`}><td><Link href={row.href}><strong>{row.documentNo}</strong></Link></td><td>{row.documentType}</td><td>{row.party || "—"}</td><td>{row.project || "—"}</td><td>{row.date || "—"}</td><td>K{Number(row.amount || 0).toFixed(2)}</td><td><strong>DRAFT</strong></td><td><div className="button-row"><Link className="button-link secondary-link" href={row.href}>Open Document</Link><button type="button" onClick={() => decide(row, "APPROVE")}>Approve</button><button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>Cancel</button></div></td></tr>)}{!rows.length && <tr><td colSpan={8}>No DRAFT documents pending approval.</td></tr>}</tbody></table></section>;
 
-  return (
-    <>
-      <h2>Commercial Approvals</h2>
-      <p className="small">Finance Controller approval for quotations and purchase orders before downstream conversion or fulfillment.</p>
-      <section className="panel"><label>APP_SECRET<input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} autoComplete="off" /></label></section>
-      {message && <section className="panel"><strong>Status:</strong> {message}</section>}
-
-      <section className="panel table-wrap">
-        <h3>Draft Quotations</h3>
-        <table className="data-table"><thead><tr><th>Quotation</th><th>Customer</th><th>Project</th><th>Date</th><th>Total</th><th>Action</th></tr></thead><tbody>
-          {draftQuotes.map((row) => <tr key={row.quoteId}><td>{row.quoteNumber}<br/><span className="small">{row.quoteId}</span></td><td>{row.customerId}</td><td>{row.projectId || "—"}</td><td>{row.quoteDate}</td><td>K{Number(row.totalAmount || 0).toFixed(2)}</td><td><div className="button-row"><button onClick={() => decide("quote", row.quoteId, "APPROVE")}>Approve</button><button className="secondary" onClick={() => decide("quote", row.quoteId, "CANCEL")}>Cancel</button></div></td></tr>)}
-          {!draftQuotes.length && <tr><td colSpan={6}>No draft quotations.</td></tr>}
-        </tbody></table>
-      </section>
-
-      <section className="panel table-wrap">
-        <h3>Draft Purchase Orders</h3>
-        <table className="data-table"><thead><tr><th>PO</th><th>Supplier</th><th>Project</th><th>Date</th><th>Total</th><th>Action</th></tr></thead><tbody>
-          {draftPOs.map((row) => <tr key={row.poId}><td>{row.poNumber}<br/><span className="small">{row.poId}</span></td><td>{row.supplierId}</td><td>{row.projectId || "—"}</td><td>{row.poDate}</td><td>K{Number(row.totalAmount || 0).toFixed(2)}</td><td><div className="button-row"><button onClick={() => decide("purchaseOrder", row.poId, "APPROVE")}>Approve</button><button className="secondary" onClick={() => decide("purchaseOrder", row.poId, "CANCEL")}>Cancel</button></div></td></tr>)}
-          {!draftPOs.length && <tr><td colSpan={6}>No draft purchase orders.</td></tr>}
-        </tbody></table>
-      </section>
-    </>
-  );
+  return <><h2>Pending Approval Queue</h2><p className="small">Workflow: DRAFT → APPROVED → POSTED. Only DRAFT documents are listed here for approval.</p>{message && <section className="panel"><strong>Status:</strong> {message}</section>}{loading ? <section className="panel">Loading pending approvals…</section> : <>{table(`Sales — Pending (${sales.length})`, sales)}{table(`Purchase — Pending (${purchase.length})`, purchase)}</>}</>;
 }

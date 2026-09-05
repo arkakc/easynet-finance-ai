@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { listTable } from "@/lib/backend/apps-script";
 
 export const dynamic = "force-dynamic";
@@ -81,8 +82,11 @@ export default async function DocumentsPage() {
               <span>GST: <strong>{money(doc.gstAmount)}</strong></span>
               <span>Total: <strong>{money(doc.totalAmount)}</strong></span>
             </div>
-            <p className="small">SHA-256: {doc.sha256 || "—"}</p>
-            {doc.driveUrl ? <p><a href={doc.driveUrl} target="_blank" rel="noreferrer">Open retained source document</a></p> : <p className="warning-text">Source binary not yet retained in Drive for this record.</p>}
+            <div className="button-row">
+              <Link className="button-link" href={`/documents/${doc.documentId}`}>View / Print Preview</Link>
+              {doc.driveUrl ? <a className="button-link secondary-link" href={doc.driveUrl} target="_blank" rel="noreferrer">Open Original Source</a> : null}
+            </div>
+            {!doc.driveUrl && <p className="warning-text">Source binary not yet retained in Drive for this record.</p>}
 
             {docLines.length > 0 && (
               <div className="table-wrap">
