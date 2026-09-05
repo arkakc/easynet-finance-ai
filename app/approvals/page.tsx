@@ -1,4 +1,103 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-export default function ApprovalsPage(){const[quotes,setQuotes]=useState<any[]>([]),[pos,setPos]=useState<any[]>([]),[message,setMessage]=useState("");async function load(){try{const r=await fetch("/api/approvals");const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Approval queue load failed");setQuotes(b.quotes||[]);setPos(b.purchaseOrders||[])}catch(e){setMessage(e instanceof Error?e.message:"Load failed")}}useEffect(()=>{void load()},[]);async function decide(recordType:"quote"|"purchaseOrder",recordId:string,decision:"APPROVE"|"CANCEL"){try{const r=await fetch("/api/erp/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target:"approvals",body:{payload:{recordType,recordId,decision,note:"Finance Controller UI"}}})});const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Approval failed");setMessage(`${recordId}: ${b.previousStatus} → ${b.status}`);await load()}catch(e){setMessage(e instanceof Error?e.message:"Approval failed")}}const draftQuotes=quotes.filter(r=>String(r.status).toUpperCase()==="DRAFT"),draftSupplierQuotes=pos.filter(r=>String(r.status).toUpperCase()==="DRAFT"&&String(r.poNumber||"").startsWith("SUPQ-")),draftPOs=pos.filter(r=>String(r.status).toUpperCase()==="DRAFT"&&!String(r.poNumber||"").startsWith("SUPQ-"));const table=(title:string,rows:any[],sales=false)=><section className="panel table-wrap"><h3>{title}</h3><table className="data-table"><thead><tr><th>Document</th><th>{sales?"Customer":"Supplier"}</th><th>Project</th><th>Date</th><th>Total</th><th>Action</th></tr></thead><tbody>{rows.map(row=>{const id=sales?row.quoteId:row.poId;return <tr key={id}><td>{sales?row.quoteNumber:row.poNumber}<br/><span className="small">{id}</span></td><td>{sales?row.customerId:row.supplierId}</td><td>{row.projectId||"—"}</td><td>{sales?row.quoteDate:row.poDate}</td><td>K{Number(row.totalAmount||0).toFixed(2)}</td><td><div className="button-row"><button onClick={()=>decide(sales?"quote":"purchaseOrder",id,"APPROVE")}>Approve</button><button className="secondary" onClick={()=>decide(sales?"quote":"purchaseOrder",id,"CANCEL")}>Cancel</button></div></td></tr>})}{!rows.length&&<tr><td colSpan={6}>No draft documents.</td></tr>}</tbody></table></section>;return <><h2>Commercial Approvals</h2><p className="small">Finance Controller approval permission is required. No shared secret is entered in the browser.</p>{message&&<section className="panel"><strong>Status:</strong> {message}</section>}{table("Draft Sales Quotations",draftQuotes,true)}{table("Draft Supplier Quotations",draftSupplierQuotes)}{table("Draft Purchase Orders",draftPOs)}</>}
+
+type PendingRow = {
+  module: "Sales" | "Purchase";
+  documentType: string;
+  documentNo: string;
+  recordId: string;
+  status: "DRAFT";
+  party: string;
+  project: string;
+  date: string;
+  amount: number | string;
+  href: string;
+  approvalRecordType?: "quote" | "purchaseOrder";
+};
+
+export default function ApprovalsPage() {
+  const [pending, setPending] = useState<PendingRow[]>([]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/approvals", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Approval queue load failed");
+      setPending((body.pending || []).filter((row: PendingRow) => String(row.status).toUpperCase() === "DRAFT"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  async function decide(row: PendingRow, decision: "APPROVE" | "CANCEL") {
+    if (!row.approvalRecordType) return;
+    try {
+      const response = await fetch("/api/erp/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: "approvals",
+          body: { payload: { recordType: row.approvalRecordType, recordId: row.recordId, decision, note: "Finance Controller UI" } },
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
+      setMessage(`${row.documentNo}: ${body.previousStatus} → ${body.status}`);
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Approval failed");
+    }
+  }
+
+  const sales = pending.filter((row) => row.module === "Sales");
+  const purchase = pending.filter((row) => row.module === "Purchase");
+
+  const table = (title: string, rows: PendingRow[]) => (
+    <section className="panel table-wrap">
+      <h3>{title}</h3>
+      <table className="data-table">
+        <thead><tr><th>Document</th><th>Type</th><th>Party</th><th>Project</th><th>Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.documentType}-${row.recordId}`}>
+              <td><Link href={row.href}><strong>{row.documentNo}</strong></Link></td>
+              <td>{row.documentType}</td>
+              <td>{row.party || "—"}</td>
+              <td>{row.project || "—"}</td>
+              <td>{row.date || "—"}</td>
+              <td>K{Number(row.amount || 0).toFixed(2)}</td>
+              <td><strong>DRAFT</strong></td>
+              <td>
+                <div className="button-row">
+                  <Link className="button-link secondary-link" href={row.href}>Open Document</Link>
+                  {row.approvalRecordType && <button type="button" onClick={() => decide(row, "APPROVE")}>Approve</button>}
+                  {row.approvalRecordType && <button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>Cancel</button>}
+                </div>
+              </td>
+            </tr>
+          ))}
+          {!rows.length && <tr><td colSpan={8}>No DRAFT documents pending approval.</td></tr>}
+        </tbody>
+      </table>
+    </section>
+  );
+
+  return <>
+    <h2>Pending Approval Queue</h2>
+    <p className="small">Only documents with DRAFT status are shown. Click a document number or Open Document to review the source document.</p>
+    {message && <section className="panel"><strong>Status:</strong> {message}</section>}
+    {loading ? <section className="panel">Loading pending approvals…</section> : <>
+      {table(`Sales — Pending (${sales.length})`, sales)}
+      {table(`Purchase — Pending (${purchase.length})`, purchase)}
+    </>}
+  </>;
+}
