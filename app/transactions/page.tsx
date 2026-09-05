@@ -22,25 +22,54 @@ function localDate(plusDays = 0) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+const existingLabel: Record<Tab, string> = {
+  salesQuote: "View Existing Quotations",
+  salesInvoice: "View Existing Sales Invoices",
+  salesPayment: "View Existing Sales Payments / Receipts",
+  supplierQuote: "View Existing Supplier Quotations",
+  purchaseOrder: "View Existing Purchase Orders",
+  purchasePayment: "View Existing Purchase Payments / Receipts",
+  expense: "View Existing Expenses",
+};
+
+const existingTitle: Record<Tab, string> = {
+  salesQuote: "Existing Sales Quotations",
+  salesInvoice: "Existing Sales Invoices",
+  salesPayment: "Existing Sales Payments / Receipts",
+  supplierQuote: "Existing Supplier Quotations",
+  purchaseOrder: "Existing Purchase Orders",
+  purchasePayment: "Existing Purchase Payments / Receipts",
+  expense: "Existing Expenses",
+};
+
 export default function TransactionsPage() {
   const router = useRouter();
   const [module, setModule] = useState<Module>("sales");
-  const [tab, setTab] = useState<Tab>("salesInvoice");
+  const [tab, setTab] = useState<Tab>("salesQuote");
   const [masters, setMasters] = useState<Master>(emptyMaster);
   const [tx, setTx] = useState<TxData>(emptyTx);
   const [status, setStatus] = useState("");
   const [selectedParty, setSelectedParty] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ description: "", qty: "1", uom: "Each", rate: "0" }]);
+  const [showExisting, setShowExisting] = useState(false);
+  const [existingLoaded, setExistingLoaded] = useState(false);
+  const [existingLoading, setExistingLoading] = useState(false);
 
-  async function load() {
+  async function loadMasters() {
     try {
-      const [m, t] = await Promise.all([
-        fetch("/api/masters").then((r) => r.json()),
-        fetch("/api/erp/transactions").then((r) => r.json()),
-      ]);
+      const m = await fetch("/api/masters").then((r) => r.json());
       if (!m.ok) throw new Error(m.error || "Master-data load failed");
-      if (!t.ok) throw new Error(t.error || "Transaction load failed");
       setMasters({ customers: m.customers || [], suppliers: m.suppliers || [], projects: m.projects || [] });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Master-data load failed");
+    }
+  }
+
+  async function loadTransactions() {
+    setExistingLoading(true);
+    try {
+      const t = await fetch("/api/erp/transactions").then((r) => r.json());
+      if (!t.ok) throw new Error(t.error || "Transaction load failed");
       setTx({
         quotes: t.quotes || [],
         supplierQuotes: t.supplierQuotes || [],
@@ -50,8 +79,11 @@ export default function TransactionsPage() {
         payments: t.payments || [],
         expenses: t.expenses || [],
       });
+      setExistingLoaded(true);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Load failed");
+      setStatus(error instanceof Error ? error.message : "Transaction load failed");
+    } finally {
+      setExistingLoading(false);
     }
   }
 
@@ -59,8 +91,10 @@ export default function TransactionsPage() {
     const requested = new URLSearchParams(window.location.search).get("module") as Module | null;
     const resolved: Module = requested === "purchase" || requested === "expense" ? requested : "sales";
     setModule(resolved);
-    setTab(resolved === "purchase" ? "purchaseOrder" : resolved === "expense" ? "expense" : "salesInvoice");
-    void load();
+    setTab(resolved === "purchase" ? "supplierQuote" : resolved === "expense" ? "expense" : "salesQuote");
+    setShowExisting(false);
+    setExistingLoaded(false);
+    void loadMasters();
   }, []);
 
   const salesSide = module === "sales";
@@ -78,6 +112,21 @@ export default function TransactionsPage() {
   function addLine() { setLines((current) => [...current, { description: "", qty: "1", uom: "Each", rate: "0" }]); }
   function removeLine(index: number) { setLines((current) => current.length === 1 ? current : current.filter((_, i) => i !== index)); }
 
+  function changeTab(value: Tab) {
+    setTab(value);
+    setSelectedParty("");
+    setShowExisting(false);
+  }
+
+  async function toggleExisting() {
+    if (showExisting) {
+      setShowExisting(false);
+      return;
+    }
+    setShowExisting(true);
+    if (!existingLoaded) await loadTransactions();
+  }
+
   async function call(action: string, payload: unknown) {
     setStatus("Saving…");
     const response = await fetch("/api/erp/transactions", {
@@ -88,7 +137,7 @@ export default function TransactionsPage() {
     const body = await response.json();
     if (!response.ok || !body.ok) throw new Error(body.error || "Transaction failed");
     setStatus(`${body.result?.documentNumber || body.result?.recordId || "Document"} saved successfully.`);
-    await load();
+    if (existingLoaded) await loadTransactions();
     return body.result;
   }
 
@@ -159,14 +208,13 @@ export default function TransactionsPage() {
   }
 
   const tabButton = (value: Tab, label: string) => (
-    <button type="button" key={value} className={tab === value ? "tab active" : "tab"} onClick={() => { setTab(value); setSelectedParty(""); }}>{label}</button>
+    <button type="button" key={value} className={tab === value ? "tab active" : "tab"} onClick={() => changeTab(value)}>{label}</button>
   );
   const view = (type: string, id: string) => <Link className="button-link secondary-link" href={`/transactions/${type}/${id}`}>View / Print</Link>;
-
   const title = module === "sales" ? "Sales Transactions" : module === "purchase" ? "Purchase Transactions" : "Expenses";
 
   return <>
-    <div className="page-heading"><div><h2>{title}</h2><p className="small">User login and role permission control every write action. No shared APP_SECRET is required in the UI.</p></div></div>
+    <div className="page-heading"><div><h2>{title}</h2><p className="small">Create a new document first. Existing document registers load only when requested.</p></div></div>
 
     {module === "sales" && <div className="tabs wrap-tabs">
       {tabButton("salesQuote", "Sales Quotation")}
@@ -232,7 +280,13 @@ export default function TransactionsPage() {
       <div className="form-wide"><button type="submit">Save Draft</button></div>
     </form>}
 
-    <section className="panel table-wrap"><h3>Current Documents</h3><table className="data-table"><thead><tr><th>ID / Number</th><th>Party / Project</th><th>Total / Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
+    <div className="button-row existing-documents-cta">
+      <button type="button" className="secondary" onClick={() => void toggleExisting()} disabled={existingLoading}>
+        {existingLoading ? "Loading…" : showExisting ? "Hide Existing Documents" : existingLabel[tab]}
+      </button>
+    </div>
+
+    {showExisting && <section className="panel table-wrap"><h3>{existingTitle[tab]}</h3><table className="data-table"><thead><tr><th>ID / Number</th><th>Party / Project</th><th>Total / Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
       {tab === "salesQuote" && tx.quotes.map((r) => <tr key={r.quoteId}><td>{r.quoteNumber}</td><td>{r.customerId}<br/>{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td>{view("quote", r.quoteId)}</td></tr>)}
       {tab === "salesInvoice" && tx.invoices.map((r) => <tr key={r.invoiceId}><td>{r.invoiceNumber}</td><td>{r.customerId}<br/>{r.projectId}</td><td>{money(r.totalAmount)}<br/><span className="small">Outstanding {money(r.outstandingAmount)}</span></td><td>{r.status}</td><td><div className="row-actions">{view("invoice", r.invoiceId)}{r.status === "DRAFT" && <button onClick={() => post("invoice", r.invoiceId)}>Post</button>}</div></td></tr>)}
       {tab === "supplierQuote" && tx.supplierQuotes.map((r) => <tr key={r.poId}><td>{r.poNumber}</td><td>{r.supplierId}<br/>{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td>{view("purchaseOrder", r.poId)}</td></tr>)}
@@ -240,6 +294,6 @@ export default function TransactionsPage() {
       {tab === "salesPayment" && tx.payments.filter((r) => r.partyType === "Customer").map((r) => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Customer: {r.partyId}<br/>{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}</td><td><div className="row-actions">{view("payment", r.paymentId)}{r.status === "DRAFT" && <button onClick={() => post("payment", r.paymentId)}>Post</button>}</div></td></tr>)}
       {tab === "purchasePayment" && tx.payments.filter((r) => r.partyType === "Supplier").map((r) => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Supplier: {r.partyId}<br/>{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}</td><td><div className="row-actions">{view("payment", r.paymentId)}{r.status === "DRAFT" && <button onClick={() => post("payment", r.paymentId)}>Post</button>}</div></td></tr>)}
       {tab === "expense" && tx.expenses.map((r) => <tr key={r.expenseId}><td>{r.expenseNumber}</td><td>{r.supplierId}<br/>{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("expense", r.expenseId)}{r.status === "DRAFT" && <button onClick={() => post("expense", r.expenseId)}>Post</button>}</div></td></tr>)}
-    </tbody></table></section>
+    </tbody></table></section>}
   </>;
 }
