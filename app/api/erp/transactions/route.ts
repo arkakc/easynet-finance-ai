@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
-import { listTable } from "@/lib/backend/apps-script";
+import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
@@ -106,6 +106,36 @@ export async function POST(request: Request) {
     const response = await legacyPost(internal);
     const result = await response.json();
     if (body.action === "createSupplierQuote" && result?.ok && result?.result) result.result.type = "supplierQuote";
+
+    if (response.ok && result?.ok && body.action === "createPayment" && result?.result?.recordId) {
+      const sourceId = String(payload.againstDocumentId || "").trim();
+      const sourceTypeText = String(payload.againstDocumentType || "").trim().toLowerCase();
+      if (sourceId) {
+        const isSalesInvoice = sourceTypeText.includes("sales invoice") || String(payload.partyType || "") === "Customer";
+        const sourceConfig = isSalesInvoice
+          ? { table: "Invoices", idField: "invoiceId", numberField: "invoiceNumber", type: "invoice" }
+          : { table: "PurchaseOrders", idField: "poId", numberField: "poNumber", type: "purchaseOrder" };
+        const sourceResult = await findRecords<any>(sourceConfig.table, { [sourceConfig.idField]: sourceId }, 1);
+        const source = sourceResult.rows[0];
+        if (source) {
+          const paymentId = String(result.result.recordId);
+          const paymentNo = String(result.result.documentNumber || payload.paymentNumber || paymentId);
+          const sourceNo = String(source[sourceConfig.numberField] || sourceId);
+          await updateRecord("Payments", "paymentId", paymentId, {
+            previousDocumentType: sourceConfig.type,
+            previousDocumentId: sourceId,
+            previousDocumentNo: sourceNo,
+          }, "conversion-tracking");
+          await updateRecord(sourceConfig.table, sourceConfig.idField, sourceId, {
+            status: "CONVERTED",
+            convertedDocumentType: "payment",
+            convertedDocumentId: paymentId,
+            convertedDocumentNo: paymentNo,
+          }, "conversion-tracking");
+        }
+      }
+    }
+
     return NextResponse.json(result, { status: response.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction failed";
