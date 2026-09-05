@@ -1,5 +1,7 @@
 import "./globals.css";
 import Link from "next/link";
+import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
+import LogoutButton from "@/app/components/logout-button";
 
 export const metadata = {
   title: "Easynet Finance AI",
@@ -7,80 +9,118 @@ export const metadata = {
   robots: { index: false, follow: false, noarchive: true },
 };
 
-const groups = [
+type NavItem = readonly [label: string, href: string, permission: Permission];
+type NavGroup = { label: string; links: readonly NavItem[] };
+
+const groups: readonly NavGroup[] = [
   {
-    label: "Overview",
+    label: "Dashboard",
     links: [
-      ["Dashboard", "/dashboard"],
-      ["Control Centre", "/controls"],
-      ["Commercial Approvals", "/approvals"],
+      ["Management Dashboard", "/dashboard", "dashboard.read"],
+      ["Control Centre", "/controls", "dashboard.read"],
+      ["Approvals", "/approvals", "post.approve"],
     ],
   },
   {
-    label: "Operations",
+    label: "Sales",
     links: [
-      ["Transactions", "/transactions"],
-      ["Document Conversions", "/conversions"],
-      ["Payment Schedules", "/payment-schedules"],
-      ["Business Masters", "/masters"],
-      ["Projects", "/projects"],
-      ["Items & Stock", "/stock"],
-      ["Fixed Assets", "/assets"],
+      ["Sales Transactions", "/transactions?module=sales", "sales.read"],
+      ["Customers", "/masters?tab=customers", "sales.read"],
+      ["Document Conversions", "/conversions", "sales.write"],
+      ["Payment Schedules", "/payment-schedules", "sales.read"],
     ],
   },
   {
-    label: "Accounting",
+    label: "Purchase",
     links: [
-      ["Chart of Accounts", "/accounts"],
-      ["Loan Register", "/loans"],
-      ["Loan Actions", "/loans/actions"],
-      ["Posted Journals", "/journals"],
-      ["Journal Reversal", "/journals/reverse"],
-      ["Statements", "/statements"],
-      ["Budgets", "/budgets"],
+      ["Purchase Transactions", "/transactions?module=purchase", "purchase.read"],
+      ["Suppliers", "/masters?tab=suppliers", "purchase.read"],
+      ["Expenses", "/transactions?module=expense", "purchase.write"],
     ],
+  },
+  {
+    label: "Stock & Assets",
+    links: [
+      ["Items & Stock", "/stock", "stock.read"],
+      ["Fixed Assets", "/assets", "stock.read"],
+    ],
+  },
+  {
+    label: "Accounts",
+    links: [
+      ["Chart of Accounts", "/accounts", "accounts.read"],
+      ["Payments & Receipts", "/transactions?module=payment", "accounts.write"],
+      ["Posted Journals", "/journals", "accounts.read"],
+      ["Journal Reversal", "/journals/reverse", "accounts.write"],
+      ["Statements", "/statements", "accounts.read"],
+      ["Budgets", "/budgets", "accounts.read"],
+      ["Loan Register", "/loans", "accounts.read"],
+      ["Loan Actions", "/loans/actions", "accounts.write"],
+    ],
+  },
+  {
+    label: "Projects",
+    links: [["Projects", "/projects", "dashboard.read"]],
   },
   {
     label: "Reports",
     links: [
-      ["Financial Reports", "/reports"],
-      ["Cash Flow", "/reports/cashflow"],
-      ["GST Report", "/reports/gst"],
+      ["Financial Reports", "/reports", "reports.read"],
+      ["Cash Flow", "/reports/cashflow", "reports.read"],
+      ["GST Report", "/reports/gst", "reports.read"],
     ],
   },
   {
-    label: "AI & Evidence",
+    label: "Documents & AI",
     links: [
-      ["AI Document Upload", "/ai-finance/upload"],
-      ["Source Documents", "/documents"],
-      ["Finance Settings", "/settings"],
+      ["Source Documents", "/documents", "accounts.read"],
+      ["AI Document Upload", "/ai-finance/upload", "accounts.write"],
+    ],
+  },
+  {
+    label: "Administration",
+    links: [
+      ["Business Masters", "/masters", "settings.manage"],
+      ["Finance Settings", "/settings", "settings.manage"],
+      ["Users & Permissions", "/users", "users.manage"],
     ],
   },
 ] as const;
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const user = await getCurrentUser();
+
   return (
     <html lang="en">
       <body>
-        <div className="shell">
-          <aside className="sidebar">
-            <Link prefetch={false} className="brand" href="/dashboard">
-              <strong>EASYNET FINANCE AI</strong>
-              <span>Finance Control MVP</span>
-            </Link>
-            <nav>
-              {groups.map((group) => (
-                <div className="nav-section" key={group.label}>
-                  <div className="nav-label">{group.label}</div>
-                  {group.links.map(([label, href]) => (
-                    <Link prefetch={false} href={href} key={href}>{label}</Link>
-                  ))}
-                </div>
-              ))}
-            </nav>
-          </aside>
-          <main className="main">{children}</main>
-        </div>
+        {!user ? children : (
+          <div className="shell">
+            <aside className="sidebar">
+              <Link className="brand" href="/dashboard">
+                <strong>EASYNET FINANCE AI</strong>
+                <span>Finance ERP</span>
+              </Link>
+              <nav>
+                {groups.map((group) => {
+                  const visible = group.links.filter(([, , permission]) => hasPermission(user, permission));
+                  if (!visible.length) return null;
+                  return (
+                    <div className="nav-section" key={group.label}>
+                      <div className="nav-label">{group.label}</div>
+                      {visible.map(([label, href]) => <Link href={href} key={href}>{label}</Link>)}
+                    </div>
+                  );
+                })}
+              </nav>
+              <div className="sidebar-user">
+                <strong>{user.name}</strong>
+                <span>{user.roles.join(", ")}</span>
+                <LogoutButton />
+              </div>
+            </aside>
+            <main className="main">{children}</main>
+          </div>
+        )}
       </body>
     </html>
   );
