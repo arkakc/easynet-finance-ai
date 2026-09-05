@@ -7,19 +7,20 @@ import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/rou
 const ACTION_PERMISSION: Record<string, Permission> = {
   createQuote: "sales.write",
   createInvoice: "sales.write",
+  createSupplierQuote: "purchase.write",
   createPurchaseOrder: "purchase.write",
   createSupplierBill: "purchase.write",
   createExpense: "purchase.write",
-  createPayment: "accounts.write",
   post: "post.approve",
 };
 
 const SERIES: Record<string, { table: string; field: string; prefix: string; payloadField: string }> = {
-  createQuote: { table: "Quotes", field: "quoteNumber", prefix: "QT", payloadField: "documentNumber" },
-  createInvoice: { table: "Invoices", field: "invoiceNumber", prefix: "INV", payloadField: "documentNumber" },
+  createQuote: { table: "Quotes", field: "quoteNumber", prefix: "SQ", payloadField: "documentNumber" },
+  createInvoice: { table: "Invoices", field: "invoiceNumber", prefix: "SI", payloadField: "documentNumber" },
+  createSupplierQuote: { table: "PurchaseOrders", field: "poNumber", prefix: "SUPQ", payloadField: "documentNumber" },
   createPurchaseOrder: { table: "PurchaseOrders", field: "poNumber", prefix: "PO", payloadField: "documentNumber" },
-  createSupplierBill: { table: "SupplierBills", field: "billNumber", prefix: "BILL", payloadField: "documentNumber" },
-  createPayment: { table: "Payments", field: "paymentNumber", prefix: "PAY", payloadField: "paymentNumber" },
+  createSupplierBill: { table: "SupplierBills", field: "billNumber", prefix: "PB", payloadField: "documentNumber" },
+  createPayment: { table: "Payments", field: "paymentNumber", prefix: "PE", payloadField: "paymentNumber" },
   createExpense: { table: "Expenses", field: "expenseNumber", prefix: "EXP", payloadField: "expenseNumber" },
 };
 
@@ -45,7 +46,15 @@ async function nextNumber(action: string) {
 export async function GET() {
   try {
     await requirePermission("dashboard.read");
-    return legacyGet();
+    const response = await legacyGet();
+    const body = await response.json();
+    if (!body.ok) return NextResponse.json(body, { status: response.status });
+
+    const allPurchaseOrders = Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [];
+    const supplierQuotes = allPurchaseOrders.filter((row: any) => String(row.poNumber || "").startsWith("SUPQ-"));
+    const purchaseOrders = allPurchaseOrders.filter((row: any) => !String(row.poNumber || "").startsWith("SUPQ-"));
+
+    return NextResponse.json({ ...body, supplierQuotes, purchaseOrders });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : 401 });
@@ -55,10 +64,13 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { action?: string; payload?: Record<string, unknown> };
-    const permission = body.action ? ACTION_PERMISSION[body.action] : undefined;
+    let permission = body.action ? ACTION_PERMISSION[body.action] : undefined;
+    if (body.action === "createPayment") {
+      permission = String(body.payload?.partyType || "") === "Supplier" ? "purchase.write" : "sales.write";
+    }
     if (!permission) return NextResponse.json({ ok: false, error: "Unsupported transaction action" }, { status: 400 });
     await requirePermission(permission);
-    if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
+    if (!env.APP_SECRET) throw new Error("Server compatibility credential is not configured");
 
     let payload = body.payload || {};
     const series = body.action ? SERIES[body.action] : undefined;
@@ -66,12 +78,18 @@ export async function POST(request: Request) {
       payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
     }
 
+    const legacyAction = body.action === "createSupplierQuote" ? "createPurchaseOrder" : body.action;
     const internal = new Request(request.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, payload, secret: env.APP_SECRET }),
+      body: JSON.stringify({ action: legacyAction, payload, secret: env.APP_SECRET }),
     });
-    return legacyPost(internal);
+    const response = await legacyPost(internal);
+    const result = await response.json();
+    if (body.action === "createSupplierQuote" && result?.ok && result?.result) {
+      result.result.type = "supplierQuote";
+    }
+    return NextResponse.json(result, { status: response.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction failed";
     const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
