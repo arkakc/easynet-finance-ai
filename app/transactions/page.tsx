@@ -14,6 +14,7 @@ type DraftLine = { description: string; qty: string; uom: string; rate: string }
 const emptyMaster: Master = { customers: [], suppliers: [], projects: [] };
 const emptyTx: TxData = { quotes: [], supplierQuotes: [], purchaseOrders: [], invoices: [], supplierBills: [], payments: [], expenses: [] };
 const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
+const normalizeDocNo = (value: unknown) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 function localDate(plusDays = 0) {
   const d = new Date();
@@ -81,6 +82,10 @@ export default function TransactionsPage() {
   const [showExisting, setShowExisting] = useState(false);
   const [existingLoaded, setExistingLoaded] = useState(false);
   const [existingLoading, setExistingLoading] = useState(false);
+  const [showApprovedInvoices, setShowApprovedInvoices] = useState(false);
+  const [salesInvoiceSearch, setSalesInvoiceSearch] = useState("");
+  const [searchedSalesInvoice, setSearchedSalesInvoice] = useState<any | null>(null);
+  const [conversionBusy, setConversionBusy] = useState("");
 
   async function loadMasters() {
     try {
@@ -99,8 +104,10 @@ export default function TransactionsPage() {
       if (!body.ok) throw new Error(body.error || "Transaction load failed");
       setTx({ quotes: body.quotes || [], supplierQuotes: body.supplierQuotes || [], purchaseOrders: body.purchaseOrders || [], invoices: body.invoices || [], supplierBills: body.supplierBills || [], payments: body.payments || [], expenses: body.expenses || [] });
       setExistingLoaded(true);
+      return body;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Transaction load failed");
+      return null;
     } finally {
       setExistingLoading(false);
     }
@@ -147,6 +154,7 @@ export default function TransactionsPage() {
   const subtotal = useMemo(() => lines.reduce((sum, line) => sum + (Number(line.qty) || 0) * (Number(line.rate) || 0), 0), [lines]);
   const gstAmount = useMemo(() => subtotal * ((Number(gstRate) || 0) / 100), [subtotal, gstRate]);
   const netTotal = subtotal + gstAmount;
+  const approvedInvoices = useMemo(() => tx.invoices.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0), [tx.invoices]);
 
   function handlePartyInput(value: string, options = partyOptions) {
     setPartyInput(value);
@@ -170,7 +178,16 @@ export default function TransactionsPage() {
   function setLine(index: number, field: keyof DraftLine, value: string) { setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line)); }
   function addLine() { setLines((current) => [...current, { description: "", qty: "1", uom: "Each", rate: "0" }]); }
   function removeLine(index: number) { setLines((current) => current.length === 1 ? current : current.filter((_, i) => i !== index)); }
-  function changeTab(value: Tab) { setTab(value); setSelectedParty(""); setPartyInput(""); setShowExisting(false); }
+  function changeTab(value: Tab) {
+    setTab(value);
+    setSelectedParty("");
+    setPartyInput("");
+    setShowExisting(false);
+    setShowApprovedInvoices(false);
+    setSalesInvoiceSearch("");
+    setSearchedSalesInvoice(null);
+    if (value === "salesPayment") void loadTransactions();
+  }
 
   async function toggleExisting() {
     if (showExisting) { setShowExisting(false); return; }
@@ -240,13 +257,11 @@ export default function TransactionsPage() {
     event.preventDefault();
     try {
       const form = new FormData(event.currentTarget);
-      const sales = tab === "salesPayment";
-      const options = sales ? masters.customers : masters.suppliers;
-      const resolvedParty = validateParty(options, partyInput, selectedParty, sales ? "Customer" : "Supplier");
+      const resolvedParty = validateParty(masters.suppliers, partyInput, selectedParty, "Supplier");
       const result = await call("createPayment", {
         paymentNumber: "",
-        paymentType: sales ? "RECEIVE" : "PAY",
-        partyType: sales ? "Customer" : "Supplier",
+        paymentType: "PAY",
+        partyType: "Supplier",
         partyId: resolvedParty,
         projectId: form.get("projectId") ?? "",
         paymentDate: form.get("paymentDate"),
@@ -261,6 +276,67 @@ export default function TransactionsPage() {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Save failed");
     }
+  }
+
+  async function convertInvoiceToPayment(invoice: any) {
+    const invoiceId = String(invoice.invoiceId || "");
+    if (!invoiceId) return;
+    setConversionBusy(invoiceId);
+    setStatus("Creating Sales Payment Entry / Receipt…");
+    try {
+      const amount = Number(invoice.outstandingAmount ?? invoice.totalAmount ?? 0);
+      if (!(amount > 0)) throw new Error("Sales Invoice has no outstanding amount");
+      const result = await call("createPayment", {
+        paymentNumber: "",
+        paymentType: "RECEIVE",
+        partyType: "Customer",
+        partyId: invoice.customerId,
+        projectId: invoice.projectId || "",
+        paymentDate: localDate(),
+        amount,
+        paymentMethod: "Bank Transfer",
+        cashBankAccountId: "ACC-1110",
+        reference: `Converted from ${invoice.invoiceNumber || invoice.invoiceId}`,
+        againstDocumentType: "Sales Invoice",
+        againstDocumentId: invoice.invoiceId,
+      });
+      router.push(`/transactions/payment/${result.recordId}`);
+      router.refresh();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Payment conversion failed");
+    } finally {
+      setConversionBusy("");
+    }
+  }
+
+  async function toggleApprovedSalesInvoices() {
+    if (showApprovedInvoices) { setShowApprovedInvoices(false); return; }
+    if (!existingLoaded) await loadTransactions();
+    setShowApprovedInvoices(true);
+  }
+
+  async function searchApprovedSalesInvoice() {
+    let invoices = tx.invoices;
+    if (!existingLoaded) {
+      const body = await loadTransactions();
+      invoices = body?.invoices || [];
+    }
+    const query = normalizeDocNo(salesInvoiceSearch);
+    if (!query) {
+      setSearchedSalesInvoice(null);
+      setStatus("Enter a Sales Invoice number");
+      return;
+    }
+    const approved = invoices.filter((row: any) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0);
+    const match = approved.find((row: any) => normalizeDocNo(row.invoiceNumber) === query || normalizeDocNo(row.invoiceId) === query)
+      || approved.find((row: any) => normalizeDocNo(row.invoiceNumber).includes(query) || normalizeDocNo(row.invoiceId).includes(query));
+    if (!match) {
+      setSearchedSalesInvoice(null);
+      setStatus(`Approved Sales Invoice with outstanding amount not found: ${salesInvoiceSearch}`);
+      return;
+    }
+    setStatus("");
+    setSearchedSalesInvoice(match);
   }
 
   async function submitExpense(event: FormEvent<HTMLFormElement>) {
@@ -305,9 +381,43 @@ export default function TransactionsPage() {
       <div className="button-row"><button type="button" className="secondary" onClick={addLine}>Add Line</button><button type="submit">Save Draft</button></div>
     </form>}
 
-    {(tab === "salesPayment" || tab === "purchasePayment") && <form className="panel form-grid" onSubmit={submitPayment}>
-      <h3 className="form-title">{tab === "salesPayment" ? "New Sales Payment Entry / Receipt" : "New Purchase Payment / Receipt"}</h3>
-      <label>{tab === "salesPayment" ? "Customer" : "Supplier"}<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value, tab === "salesPayment" ? masters.customers : masters.suppliers)} required /><datalist id={partyListId}>{(tab === "salesPayment" ? masters.customers : masters.suppliers).map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
+    {tab === "salesPayment" && <>
+      <section className="panel">
+        <div className="form-title-row"><div><h3>Sales Invoice → Sales Payment Entry / Receipt</h3><p className="small">Create the payment document directly from an approved Sales Invoice with an outstanding balance.</p></div><span className="auto-badge">Next Payment No: {nextDocumentNo || "AUTO"}</span></div>
+        <div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => void toggleApprovedSalesInvoices()} disabled={existingLoading}>{existingLoading ? "Loading…" : showApprovedInvoices ? "Hide Approved Sales Invoices" : "View Approved Sales Invoice to Payment Entry"}</button></div>
+      </section>
+
+      {showApprovedInvoices && <section className="panel table-wrap">
+        <div className="form-title-row"><h3>Approved Sales Invoices Pending Payment Entry</h3><span className="auto-badge">{approvedInvoices.length} Pending</span></div>
+        <table className="data-table"><thead><tr><th>Sales Invoice</th><th>Customer</th><th>Project</th><th>Invoice Total</th><th>Outstanding</th><th>Action</th></tr></thead><tbody>
+          {approvedInvoices.length === 0 && <tr><td colSpan={6}>No approved Sales Invoices with outstanding balance.</td></tr>}
+          {approvedInvoices.map((invoice) => <tr key={invoice.invoiceId}><td><Link href={`/transactions/invoice/${invoice.invoiceId}`}><strong>{invoice.invoiceNumber || invoice.invoiceId}</strong></Link></td><td>{invoice.customerId || "—"}</td><td>{invoice.projectId || "—"}</td><td>{money(invoice.totalAmount)}</td><td><strong>{money(invoice.outstandingAmount ?? invoice.totalAmount)}</strong></td><td><button type="button" onClick={() => void convertInvoiceToPayment(invoice)} disabled={Boolean(conversionBusy)}>{conversionBusy === invoice.invoiceId ? "Converting…" : "Convert Now"}</button></td></tr>)}
+        </tbody></table>
+      </section>}
+
+      <section className="panel">
+        <h3>Manual Search by Sales Invoice No</h3>
+        <div className="form-grid" style={{ marginTop: 16 }}>
+          <label>Sales Invoice No<input value={salesInvoiceSearch} onChange={(e) => setSalesInvoiceSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchApprovedSalesInvoice(); } }} placeholder="e.g. SI-2026-00001" autoComplete="off" /></label>
+          <div style={{ display: "flex", alignItems: "end" }}><button type="button" style={{ width: "100%", height: 52 }} onClick={() => void searchApprovedSalesInvoice()} disabled={existingLoading}>{existingLoading ? "Searching…" : "Search"}</button></div>
+        </div>
+        {searchedSalesInvoice && <div style={{ marginTop: 20 }}>
+          <div className="document-meta">
+            <div><span>Sales Invoice</span><strong><Link href={`/transactions/invoice/${searchedSalesInvoice.invoiceId}`}>{searchedSalesInvoice.invoiceNumber || searchedSalesInvoice.invoiceId}</Link></strong></div>
+            <div><span>Customer</span><strong>{searchedSalesInvoice.customerId || "—"}</strong></div>
+            <div><span>Project</span><strong>{searchedSalesInvoice.projectId || "—"}</strong></div>
+            <div><span>Invoice Total</span><strong>{money(searchedSalesInvoice.totalAmount)}</strong></div>
+            <div><span>Outstanding</span><strong>{money(searchedSalesInvoice.outstandingAmount ?? searchedSalesInvoice.totalAmount)}</strong></div>
+            <div><span>Status</span><strong>{searchedSalesInvoice.status}</strong></div>
+          </div>
+          <div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => void convertInvoiceToPayment(searchedSalesInvoice)} disabled={Boolean(conversionBusy)}>{conversionBusy === searchedSalesInvoice.invoiceId ? "Converting…" : "Convert to Payment Entry"}</button></div>
+        </div>}
+      </section>
+    </>}
+
+    {tab === "purchasePayment" && <form className="panel form-grid" onSubmit={submitPayment}>
+      <h3 className="form-title">New Purchase Payment / Receipt</h3>
+      <label>Supplier<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value, masters.suppliers)} required /><datalist id={partyListId}>{masters.suppliers.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
       <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
       <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly /></label><div></div>
       <label>Date<input name="paymentDate" type="date" defaultValue={localDate()} required /></label>
