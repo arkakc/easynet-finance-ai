@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       const invoice = existing.rows[0];
       const invoiceId = invoice?.invoiceId || id("INV");
       const invoiceNumber = invoice?.invoiceNumber || input.invoiceNumber || invoiceId;
+      const quoteNumber = String(quote.quoteNumber || quote.quoteId);
 
       if (!invoice) {
         await appendRecord("Invoices", {
@@ -75,7 +76,16 @@ export async function POST(request: Request) {
           outstandingAmount: quote.totalAmount,
           status: "DRAFT",
           sourceDocumentId: input.quoteId,
+          previousDocumentType: "quote",
+          previousDocumentId: input.quoteId,
+          previousDocumentNo: quoteNumber,
           journalId: "",
+        }, "conversion-ui");
+      } else {
+        await updateRecord("Invoices", "invoiceId", invoiceId, {
+          previousDocumentType: "quote",
+          previousDocumentId: input.quoteId,
+          previousDocumentNo: quoteNumber,
         }, "conversion-ui");
       }
 
@@ -98,19 +108,14 @@ export async function POST(request: Request) {
       const missingLines = desiredLines.filter((line) => !existingLineIds.has(line.invoiceLineId));
       if (missingLines.length) await batchAppend("InvoiceLines", missingLines, "conversion-ui");
 
-      if (quoteStatus !== "CONVERTED") {
-        await updateRecord("Quotes", "quoteId", input.quoteId, { status: "CONVERTED" }, "conversion-ui");
-      }
+      await updateRecord("Quotes", "quoteId", input.quoteId, {
+        status: "CONVERTED",
+        convertedDocumentType: "invoice",
+        convertedDocumentId: invoiceId,
+        convertedDocumentNo: invoiceNumber,
+      }, "conversion-ui");
 
-      return NextResponse.json({
-        ok: true,
-        action: body.action,
-        sourceId: input.quoteId,
-        createdId: invoiceId,
-        documentNumber: invoiceNumber,
-        status: invoice ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created",
-        linesCreated: missingLines.length,
-      });
+      return NextResponse.json({ ok: true, action: body.action, sourceId: input.quoteId, createdId: invoiceId, documentNumber: invoiceNumber, status: invoice ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created", linesCreated: missingLines.length });
     }
 
     if (body.action === "poToBill") {
@@ -121,7 +126,7 @@ export async function POST(request: Request) {
       const po = poResult.rows[0];
       if (!po) throw new Error("Purchase order not found");
       const poStatus = String(po.status || "").toUpperCase();
-      if (!["APPROVED", "BILL_CREATED", "BILLED"].includes(poStatus)) throw new Error("Purchase order must be APPROVED before conversion");
+      if (!["APPROVED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(poStatus)) throw new Error("Purchase order must be APPROVED before conversion");
 
       const sourceLines = await findRecords<any>("POLines", { poId: input.poId }, 500);
       if (!sourceLines.rows.length) throw new Error("Purchase order has no lines");
@@ -131,6 +136,7 @@ export async function POST(request: Request) {
       const bill = existing.rows[0];
       const billId = bill?.billId || id("BILL");
       const billNumber = bill?.billNumber || input.billNumber || billId;
+      const poNumber = String(po.poNumber || po.poId);
 
       if (!bill) {
         await appendRecord("SupplierBills", {
@@ -148,7 +154,16 @@ export async function POST(request: Request) {
           outstandingAmount: po.totalAmount,
           status: "DRAFT",
           sourceDocumentId: input.poId,
+          previousDocumentType: "purchaseOrder",
+          previousDocumentId: input.poId,
+          previousDocumentNo: poNumber,
           journalId: "",
+        }, "conversion-ui");
+      } else {
+        await updateRecord("SupplierBills", "billId", billId, {
+          previousDocumentType: "purchaseOrder",
+          previousDocumentId: input.poId,
+          previousDocumentNo: poNumber,
         }, "conversion-ui");
       }
 
@@ -171,26 +186,19 @@ export async function POST(request: Request) {
       const missingLines = desiredLines.filter((line) => !existingLineIds.has(line.billLineId));
       if (missingLines.length) await batchAppend("SupplierBillLines", missingLines, "conversion-ui");
 
-      if (poStatus === "APPROVED") {
-        await updateRecord("PurchaseOrders", "poId", input.poId, { status: "BILL_CREATED" }, "conversion-ui");
-      }
+      await updateRecord("PurchaseOrders", "poId", input.poId, {
+        status: "CONVERTED",
+        convertedDocumentType: "supplierBill",
+        convertedDocumentId: billId,
+        convertedDocumentNo: billNumber,
+      }, "conversion-ui");
 
-      return NextResponse.json({
-        ok: true,
-        action: body.action,
-        sourceId: input.poId,
-        createdId: billId,
-        documentNumber: billNumber,
-        status: bill ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created",
-        linesCreated: missingLines.length,
-      });
+      return NextResponse.json({ ok: true, action: body.action, sourceId: input.poId, createdId: billId, documentNumber: billNumber, status: bill ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created", linesCreated: missingLines.length });
     }
 
     throw new Error("Unsupported conversion action");
   } catch (error) {
-    const message = error instanceof z.ZodError
-      ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ")
-      : error instanceof Error ? error.message : "Conversion failed";
+    const message = error instanceof z.ZodError ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ") : error instanceof Error ? error.message : "Conversion failed";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : 400 });
   }
 }
