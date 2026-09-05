@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
+import { postJournal, supplierPaymentPosting } from "@/lib/accounting/posting";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
@@ -81,29 +82,57 @@ async function finalizePayment(payload:Record<string,unknown>){
 
   const sourceId=String(row.againstDocumentId||"").trim();
   const customerPayment=partyType==="Customer";
+  const againstType=String(row.againstDocumentType||"").toLowerCase();
   let sourceTable="",sourceIdField="",sourcePreviousStatus="";
+  let sourceRow:any=null;
   if(sourceId){
     if(customerPayment){
       sourceTable="Invoices";sourceIdField="invoiceId";
-      const source=(await findRecords<any>(sourceTable,{[sourceIdField]:sourceId},1)).rows[0];
-      if(!source)throw new Error("Referenced Sales Invoice not found");
-      sourcePreviousStatus=String(source.status||"");
+      sourceRow=(await findRecords<any>(sourceTable,{[sourceIdField]:sourceId},1)).rows[0];
+      if(!sourceRow)throw new Error("Referenced Sales Invoice not found");
+      sourcePreviousStatus=String(sourceRow.status||"");
       await updateRecord(sourceTable,sourceIdField,sourceId,{status:"POSTED"},"payment-final-save:temporary-posting-state");
     }else{
-      sourceTable=String(row.againstDocumentType||"").toLowerCase().includes("bill")?"SupplierBills":"PurchaseOrders";
+      sourceTable=againstType.includes("bill")?"SupplierBills":"PurchaseOrders";
       sourceIdField=sourceTable==="SupplierBills"?"billId":"poId";
-      const source=(await findRecords<any>(sourceTable,{[sourceIdField]:sourceId},1)).rows[0];
-      if(source){sourcePreviousStatus=String(source.status||"");await updateRecord(sourceTable,sourceIdField,sourceId,{status:"POSTED"},"payment-final-save:temporary-posting-state");}
+      sourceRow=(await findRecords<any>(sourceTable,{[sourceIdField]:sourceId},1)).rows[0];
+      if(!sourceRow)throw new Error(sourceTable==="PurchaseOrders"?"Referenced Purchase Order not found":"Referenced Supplier Bill not found");
+      if(String(sourceRow.supplierId||"")!==String(row.partyId||""))throw new Error("Payment supplier does not match the source purchase document");
+      const sourceTotal=Number(sourceRow.outstandingAmount??sourceRow.totalAmount??0);
+      if(amount>sourceTotal+0.001)throw new Error("Supplier payment exceeds the source purchase document amount");
+      sourcePreviousStatus=String(sourceRow.status||"");
+      await updateRecord(sourceTable,sourceIdField,sourceId,{status:"POSTED"},"payment-final-save:temporary-posting-state");
     }
   }
 
   try{
-    const internal=new Request("http://internal/api/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"post",payload:{recordType:"payment",recordId:paymentId},secret:env.APP_SECRET})});
-    const response=await legacyPost(internal);
-    const body=await response.json();
-    if(!response.ok||!body.ok)throw new Error(body.error||"Payment accounting failed");
-    const posted=(await findRecords<any>("Payments",{paymentId},1)).rows[0];
-    await updateRecord("Payments","paymentId",paymentId,{status:"APPROVED"},"payment-final-save:approved-final-state");
+    let journalId="";
+    if(!customerPayment&&sourceTable==="PurchaseOrders"){
+      const journal=await postJournal({
+        postingDate:patch.paymentDate,
+        documentType:"SUPPLIER_PAYMENT",
+        documentId:row.paymentId,
+        documentNumber:row.paymentNumber,
+        reference:patch.reference||row.paymentNumber,
+        projectId:row.projectId,
+        lines:supplierPaymentPosting({
+          amount,
+          supplierId:row.partyId,
+          projectId:row.projectId,
+          cashBankAccountId:patch.cashBankAccountId,
+        }),
+      });
+      journalId=journal.journalId;
+      await updateRecord("Payments","paymentId",paymentId,{status:"APPROVED",journalId},"payment-final-save:purchase-order-payment");
+    }else{
+      const internal=new Request("http://internal/api/transactions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"post",payload:{recordType:"payment",recordId:paymentId},secret:env.APP_SECRET})});
+      const response=await legacyPost(internal);
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Payment accounting failed");
+      const posted=(await findRecords<any>("Payments",{paymentId},1)).rows[0];
+      journalId=posted?.journalId||body?.result?.journalId||"";
+      await updateRecord("Payments","paymentId",paymentId,{status:"APPROVED"},"payment-final-save:approved-final-state");
+    }
 
     if(sourceId&&sourceTable){
       if(customerPayment){
@@ -112,10 +141,10 @@ async function finalizePayment(payload:Record<string,unknown>){
         const invoice=(await findRecords<any>("Invoices",{invoiceId:sourceId},1)).rows[0];
         if(invoice){const total=Number(invoice.totalAmount||0);await updateRecord("Invoices","invoiceId",sourceId,{paidAmount:Math.min(total,allocated),outstandingAmount:Math.max(0,total-allocated),status:"CONVERTED"},"payment-final-save:allocation");}
       }else{
-        await updateRecord(sourceTable,sourceIdField,sourceId,{status:sourcePreviousStatus||"CONVERTED"},"payment-final-save:restore-source-state");
+        await updateRecord(sourceTable,sourceIdField,sourceId,{status:"CONVERTED"},"payment-final-save:restore-source-state");
       }
     }
-    return {recordId:paymentId,status:"APPROVED",journalId:posted?.journalId||body?.result?.journalId||"",finalized:true};
+    return {recordId:paymentId,status:"APPROVED",journalId,finalized:true};
   }catch(error){
     if(sourceId&&sourceTable&&sourcePreviousStatus)await updateRecord(sourceTable,sourceIdField,sourceId,{status:sourcePreviousStatus},"payment-final-save:rollback-source-state");
     await updateRecord("Payments","paymentId",paymentId,{status:"APPROVED"},"payment-final-save:rollback-payment-state");
@@ -150,6 +179,9 @@ export async function POST(request:Request){
         if(sourceType.includes("sales invoice")||String(payload.partyType||"")==="Customer"){
           const source=(await findRecords<any>("Invoices",{invoiceId:sourceId},1)).rows[0];
           if(source)await updateRecord("Invoices","invoiceId",sourceId,{status:"CONVERTED"},"conversion-tracking");
+        }else if(sourceType.includes("supplier bill")){
+          const source=(await findRecords<any>("SupplierBills",{billId:sourceId},1)).rows[0];
+          if(source)await updateRecord("SupplierBills","billId",sourceId,{status:"CONVERTED"},"conversion-tracking");
         }else{
           const source=(await findRecords<any>("PurchaseOrders",{poId:sourceId},1)).rows[0];
           if(source)await updateRecord("PurchaseOrders","poId",sourceId,{status:"CONVERTED"},"conversion-tracking");
