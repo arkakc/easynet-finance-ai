@@ -21,10 +21,26 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 const COOKIE_NAME = "easynet_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
+const TEST_ADMIN: ConfigUser = {
+  email: "admin@easynet.local",
+  name: "Test System Administrator",
+  passwordHash: "scrypt$easynet-test-admin$cbcc6442f9b6a5b35f8ab0b0c92e161760c0a56deee87e21f92dd1b8027d778c89ebad5a2de05ebb87d8a80cbfcfb209d3dcf56e73c61dd8e92d4eb1f8997f9d",
+  roles: ["System Manager"],
+};
+
 function users(): ConfigUser[] {
-  if (!env.ERP_USERS_JSON) return [];
-  const parsed = JSON.parse(env.ERP_USERS_JSON) as ConfigUser[];
-  return parsed.filter((u) => u.email && u.passwordHash && Array.isArray(u.roles));
+  if (env.ERP_USERS_JSON) {
+    const parsed = JSON.parse(env.ERP_USERS_JSON) as ConfigUser[];
+    return parsed.filter((u) => u.email && u.passwordHash && Array.isArray(u.roles));
+  }
+
+  // Preview/test fallback only. Vercel exposes VERCEL_ENV=preview for preview deployments.
+  // Never enable this account in production.
+  if (process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV === "development") {
+    return [TEST_ADMIN];
+  }
+
+  return [];
 }
 
 function permissionsFor(roles: Role[]) {
@@ -32,8 +48,9 @@ function permissionsFor(roles: Role[]) {
 }
 
 function sign(value: string) {
-  if (!env.SESSION_SECRET) throw new Error("SESSION_SECRET is not configured");
-  return createHmac("sha256", env.SESSION_SECRET).update(value).digest("base64url");
+  const secret = env.SESSION_SECRET || (process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV === "development" ? "easynet-preview-session-secret-change-before-production" : "");
+  if (!secret) throw new Error("SESSION_SECRET is not configured");
+  return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
 export function verifyPassword(password: string, stored: string) {
