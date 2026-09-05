@@ -29,18 +29,9 @@ const TEST_ADMIN: ConfigUser = {
 };
 
 function users(): ConfigUser[] {
-  if (env.ERP_USERS_JSON) {
-    const parsed = JSON.parse(env.ERP_USERS_JSON) as ConfigUser[];
-    return parsed.filter((u) => u.email && u.passwordHash && Array.isArray(u.roles));
-  }
-
-  // Preview/test fallback only. Vercel exposes VERCEL_ENV=preview for preview deployments.
-  // Never enable this account in production.
-  if (process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV === "development") {
-    return [TEST_ADMIN];
-  }
-
-  return [];
+  // Temporary simple-login mode: ignore ERP_USERS_JSON and use the built-in
+  // administrator account in all environments until persistent user management is enabled.
+  return [TEST_ADMIN];
 }
 
 function permissionsFor(roles: Role[]) {
