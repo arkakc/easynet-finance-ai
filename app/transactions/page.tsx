@@ -17,443 +17,102 @@ const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
 const normalizeDocNo = (value: unknown) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 function localDate(plusDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + plusDays);
+  const d = new Date(); d.setDate(d.getDate() + plusDays);
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
   const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
 
 const existingLabel: Record<Tab, string> = {
-  salesQuote: "View Existing Quotations",
-  salesInvoice: "View Existing Sales Invoices",
-  salesPayment: "View Existing Sales Payments / Receipts",
-  supplierQuote: "View Existing Supplier Quotations",
-  purchaseOrder: "View Existing Purchase Orders",
-  purchasePayment: "View Existing Purchase Payments / Receipts",
-  expense: "View Existing Expenses",
+  salesQuote: "View Existing Quotations", salesInvoice: "View Existing Sales Invoices", salesPayment: "View Existing Sales Payments / Receipts",
+  supplierQuote: "View Existing Supplier Quotations", purchaseOrder: "View Existing Purchase Orders", purchasePayment: "View Existing Purchase Payments / Receipts", expense: "View Existing Expenses",
 };
-
 const existingTitle: Record<Tab, string> = {
-  salesQuote: "Existing Sales Quotations",
-  salesInvoice: "Existing Sales Invoices",
-  salesPayment: "Existing Sales Payments / Receipts",
-  supplierQuote: "Existing Supplier Quotations",
-  purchaseOrder: "Existing Purchase Orders",
-  purchasePayment: "Existing Purchase Payments / Receipts",
-  expense: "Existing Expenses",
+  salesQuote: "Existing Sales Quotations", salesInvoice: "Existing Sales Invoices", salesPayment: "Existing Sales Payments / Receipts",
+  supplierQuote: "Existing Supplier Quotations", purchaseOrder: "Existing Purchase Orders", purchasePayment: "Existing Purchase Payments / Receipts", expense: "Existing Expenses",
 };
-
 const numberMeta: Partial<Record<Tab, { label: string; action: string; partyType?: string }>> = {
-  salesQuote: { label: "Auto Quotation No", action: "createQuote" },
-  salesInvoice: { label: "Auto Sales Invoice No", action: "createInvoice" },
-  salesPayment: { label: "Auto Sales Payment / Receipt No", action: "createPayment", partyType: "Customer" },
-  supplierQuote: { label: "Auto Supplier Quotation No", action: "createSupplierQuote" },
-  purchaseOrder: { label: "Auto Purchase Order No", action: "createPurchaseOrder" },
-  purchasePayment: { label: "Auto Purchase Payment / Receipt No", action: "createPayment", partyType: "Supplier" },
+  salesQuote: { label: "Auto Quotation No", action: "createQuote" }, salesInvoice: { label: "Auto Sales Invoice No", action: "createInvoice" },
+  salesPayment: { label: "Auto Sales Payment / Receipt No", action: "createPayment", partyType: "Customer" }, supplierQuote: { label: "Auto Supplier Quotation No", action: "createSupplierQuote" },
+  purchaseOrder: { label: "Auto Purchase Order No", action: "createPurchaseOrder" }, purchasePayment: { label: "Auto Purchase Payment / Receipt No", action: "createPayment", partyType: "Supplier" },
 };
 
 function partyId(row: any) { return String(row.customerId || row.supplierId || ""); }
 function partyName(row: any) { return String(row.customerName || row.supplierName || partyId(row)); }
-function partyDisplay(row: any) { const id = partyId(row); const name = partyName(row); return id && name !== id ? `${name} (${id})` : name; }
+function partyDisplay(row: any) { const id = partyId(row), name = partyName(row); return id && name !== id ? `${name} (${id})` : name; }
 function resolveParty(options: any[], input: string) {
-  const q = input.trim().toLowerCase();
-  if (!q) return null;
-  return options.find((row) => partyDisplay(row).toLowerCase() === q)
-    || options.find((row) => partyId(row).toLowerCase() === q)
-    || options.find((row) => partyName(row).toLowerCase() === q)
-    || null;
+  const q = input.trim().toLowerCase(); if (!q) return null;
+  return options.find((r) => partyDisplay(r).toLowerCase() === q) || options.find((r) => partyId(r).toLowerCase() === q) || options.find((r) => partyName(r).toLowerCase() === q) || null;
 }
 
 export default function TransactionsPage() {
   const router = useRouter();
-  const [module, setModule] = useState<Module>("sales");
-  const [tab, setTab] = useState<Tab>("salesQuote");
-  const [masters, setMasters] = useState<Master>(emptyMaster);
-  const [tx, setTx] = useState<TxData>(emptyTx);
-  const [status, setStatus] = useState("");
-  const [selectedParty, setSelectedParty] = useState("");
-  const [partyInput, setPartyInput] = useState("");
-  const [expenseSupplier, setExpenseSupplier] = useState("");
-  const [expenseSupplierInput, setExpenseSupplierInput] = useState("");
-  const [lines, setLines] = useState<DraftLine[]>([{ description: "", qty: "1", uom: "Each", rate: "0" }]);
-  const [gstRate, setGstRate] = useState("10");
-  const [nextDocumentNo, setNextDocumentNo] = useState("Loading…");
-  const [showExisting, setShowExisting] = useState(false);
-  const [existingLoaded, setExistingLoaded] = useState(false);
-  const [existingLoading, setExistingLoading] = useState(false);
-  const [showApprovedInvoices, setShowApprovedInvoices] = useState(false);
-  const [salesInvoiceSearch, setSalesInvoiceSearch] = useState("");
-  const [searchedSalesInvoice, setSearchedSalesInvoice] = useState<any | null>(null);
-  const [conversionBusy, setConversionBusy] = useState("");
+  const [module, setModule] = useState<Module>("sales"), [tab, setTab] = useState<Tab>("salesQuote"), [masters, setMasters] = useState<Master>(emptyMaster), [tx, setTx] = useState<TxData>(emptyTx);
+  const [status, setStatus] = useState(""), [selectedParty, setSelectedParty] = useState(""), [partyInput, setPartyInput] = useState(""), [expenseSupplier, setExpenseSupplier] = useState(""), [expenseSupplierInput, setExpenseSupplierInput] = useState("");
+  const [lines, setLines] = useState<DraftLine[]>([{ description: "", qty: "1", uom: "Each", rate: "0" }]), [gstRate, setGstRate] = useState("10"), [nextDocumentNo, setNextDocumentNo] = useState("Loading…");
+  const [showExisting, setShowExisting] = useState(false), [existingLoaded, setExistingLoaded] = useState(false), [existingLoading, setExistingLoading] = useState(false);
+  const [showApprovedInvoices, setShowApprovedInvoices] = useState(false), [salesInvoiceSearch, setSalesInvoiceSearch] = useState(""), [searchedSalesInvoice, setSearchedSalesInvoice] = useState<any | null>(null), [selectedSalesInvoice, setSelectedSalesInvoice] = useState<any | null>(null), [conversionBusy, setConversionBusy] = useState(false);
 
-  async function loadMasters() {
-    try {
-      const body = await fetch("/api/masters").then((r) => r.json());
-      if (!body.ok) throw new Error(body.error || "Master-data load failed");
-      setMasters({ customers: body.customers || [], suppliers: body.suppliers || [], projects: body.projects || [] });
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Master-data load failed");
-    }
-  }
+  async function loadMasters() { try { const b = await fetch("/api/masters").then(r => r.json()); if (!b.ok) throw new Error(b.error || "Master-data load failed"); setMasters({ customers: b.customers || [], suppliers: b.suppliers || [], projects: b.projects || [] }); } catch (e) { setStatus(e instanceof Error ? e.message : "Master-data load failed"); } }
+  async function loadTransactions() { setExistingLoading(true); try { const b = await fetch("/api/erp/transactions", { cache: "no-store" }).then(r => r.json()); if (!b.ok) throw new Error(b.error || "Transaction load failed"); setTx({ quotes: b.quotes || [], supplierQuotes: b.supplierQuotes || [], purchaseOrders: b.purchaseOrders || [], invoices: b.invoices || [], supplierBills: b.supplierBills || [], payments: b.payments || [], expenses: b.expenses || [] }); setExistingLoaded(true); return b; } catch (e) { setStatus(e instanceof Error ? e.message : "Transaction load failed"); return null; } finally { setExistingLoading(false); } }
+  async function loadNextDocumentNo(currentTab: Tab) { const meta = numberMeta[currentTab]; if (!meta) { setNextDocumentNo(""); return; } setNextDocumentNo("Loading…"); try { const p = new URLSearchParams({ nextNumberFor: meta.action }); if (meta.partyType) p.set("partyType", meta.partyType); const r = await fetch(`/api/erp/transactions?${p}`, { cache: "no-store" }); const b = await r.json(); if (!r.ok || !b.ok) throw new Error(); setNextDocumentNo(b.nextNumber || "AUTO"); } catch { setNextDocumentNo("AUTO"); } }
 
-  async function loadTransactions() {
-    setExistingLoading(true);
-    try {
-      const body = await fetch("/api/erp/transactions", { cache: "no-store" }).then((r) => r.json());
-      if (!body.ok) throw new Error(body.error || "Transaction load failed");
-      setTx({ quotes: body.quotes || [], supplierQuotes: body.supplierQuotes || [], purchaseOrders: body.purchaseOrders || [], invoices: body.invoices || [], supplierBills: body.supplierBills || [], payments: body.payments || [], expenses: body.expenses || [] });
-      setExistingLoaded(true);
-      return body;
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Transaction load failed");
-      return null;
-    } finally {
-      setExistingLoading(false);
-    }
-  }
-
-  async function loadNextDocumentNo(currentTab: Tab) {
-    const meta = numberMeta[currentTab];
-    if (!meta) { setNextDocumentNo(""); return; }
-    setNextDocumentNo("Loading…");
-    try {
-      const params = new URLSearchParams({ nextNumberFor: meta.action });
-      if (meta.partyType) params.set("partyType", meta.partyType);
-      const response = await fetch(`/api/erp/transactions?${params.toString()}`, { cache: "no-store" });
-      const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error();
-      setNextDocumentNo(body.nextNumber || "AUTO");
-    } catch {
-      setNextDocumentNo("AUTO");
-    }
-  }
-
-  useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("module") as Module | null;
-    const resolved: Module = requested === "purchase" || requested === "expense" ? requested : "sales";
-    const initial: Tab = resolved === "purchase" ? "supplierQuote" : resolved === "expense" ? "expense" : "salesQuote";
-    setModule(resolved);
-    setTab(initial);
-    setShowExisting(false);
-    setExistingLoaded(false);
-    void loadMasters();
-    void loadNextDocumentNo(initial);
-  }, []);
-
+  useEffect(() => { const requested = new URLSearchParams(window.location.search).get("module") as Module | null; const resolved: Module = requested === "purchase" || requested === "expense" ? requested : "sales"; const initial: Tab = resolved === "purchase" ? "supplierQuote" : resolved === "expense" ? "expense" : "salesQuote"; setModule(resolved); setTab(initial); void loadMasters(); void loadNextDocumentNo(initial); }, []);
   useEffect(() => { void loadNextDocumentNo(tab); }, [tab]);
 
-  const salesSide = module === "sales";
-  const commercial = ["salesQuote", "salesInvoice", "supplierQuote", "purchaseOrder"].includes(tab);
-  const partyOptions = salesSide ? masters.customers : masters.suppliers;
-  const projectOptions = useMemo(() => {
-    if (!salesSide || !selectedParty) return masters.projects;
-    const linked = masters.projects.filter((p) => String(p.customerId || "") === selectedParty);
-    return linked.length ? linked : masters.projects;
-  }, [salesSide, selectedParty, masters.projects]);
-  const subtotal = useMemo(() => lines.reduce((sum, line) => sum + (Number(line.qty) || 0) * (Number(line.rate) || 0), 0), [lines]);
-  const gstAmount = useMemo(() => subtotal * ((Number(gstRate) || 0) / 100), [subtotal, gstRate]);
-  const netTotal = subtotal + gstAmount;
-  const approvedInvoices = useMemo(() => tx.invoices.filter((row) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0), [tx.invoices]);
+  const salesSide = module === "sales", commercial = ["salesQuote", "salesInvoice", "supplierQuote", "purchaseOrder"].includes(tab), partyOptions = salesSide ? masters.customers : masters.suppliers;
+  const projectOptions = useMemo(() => { if (!salesSide || !selectedParty) return masters.projects; const linked = masters.projects.filter(p => String(p.customerId || "") === selectedParty); return linked.length ? linked : masters.projects; }, [salesSide, selectedParty, masters.projects]);
+  const subtotal = useMemo(() => lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.rate) || 0), 0), [lines]), gstAmount = useMemo(() => subtotal * ((Number(gstRate) || 0) / 100), [subtotal, gstRate]), netTotal = subtotal + gstAmount;
+  const approvedInvoices = useMemo(() => tx.invoices.filter(r => String(r.status || "").toUpperCase() === "APPROVED" && Number(r.outstandingAmount ?? r.totalAmount ?? 0) > 0), [tx.invoices]);
 
-  function handlePartyInput(value: string, options = partyOptions) {
-    setPartyInput(value);
-    const match = resolveParty(options, value);
-    setSelectedParty(match ? partyId(match) : "");
-  }
+  function handlePartyInput(value: string, options = partyOptions) { setPartyInput(value); const m = resolveParty(options, value); setSelectedParty(m ? partyId(m) : ""); }
+  function handleExpenseSupplierInput(value: string) { setExpenseSupplierInput(value); const m = resolveParty(masters.suppliers, value); setExpenseSupplier(m ? partyId(m) : ""); }
+  function validateParty(options: any[], input: string, selected: string, label: string) { if (selected) return selected; const m = resolveParty(options, input); if (!m) throw new Error(`Select a valid ${label} from the suggestions`); return partyId(m); }
+  function setLine(i: number, f: keyof DraftLine, v: string) { setLines(c => c.map((l, x) => x === i ? { ...l, [f]: v } : l)); }
+  function addLine() { setLines(c => [...c, { description: "", qty: "1", uom: "Each", rate: "0" }]); }
+  function removeLine(i: number) { setLines(c => c.length === 1 ? c : c.filter((_, x) => x !== i)); }
+  function changeTab(v: Tab) { setTab(v); setSelectedParty(""); setPartyInput(""); setShowExisting(false); setShowApprovedInvoices(false); setSalesInvoiceSearch(""); setSearchedSalesInvoice(null); setSelectedSalesInvoice(null); if (v === "salesPayment") void loadTransactions(); }
+  async function toggleExisting() { if (showExisting) { setShowExisting(false); return; } setShowExisting(true); if (!existingLoaded) await loadTransactions(); }
+  async function call(action: string, payload: unknown) { setStatus("Saving…"); const r = await fetch("/api/erp/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload }) }); const b = await r.json(); if (!r.ok || !b.ok) throw new Error(b.error || "Transaction failed"); if (existingLoaded) await loadTransactions(); await loadNextDocumentNo(tab); return b.result; }
 
-  function handleExpenseSupplierInput(value: string) {
-    setExpenseSupplierInput(value);
-    const match = resolveParty(masters.suppliers, value);
-    setExpenseSupplier(match ? partyId(match) : "");
-  }
+  async function approve(recordType: RecordType, recordId: string) { try { setStatus("Approving…"); const r = await fetch("/api/erp/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target: "approvals", body: { payload: { recordType, recordId, decision: "APPROVE", note: "Transaction list" } } }) }); const b = await r.json(); if (!r.ok || !b.ok) throw new Error(b.error || "Approval failed"); setStatus("Document approved."); await loadTransactions(); } catch (e) { setStatus(e instanceof Error ? e.message : "Approval failed"); } }
+  function workflowActions(recordType: RecordType, id: string, rowStatus: string) { const s = String(rowStatus || "DRAFT").toUpperCase(); return <div className="row-actions">{s === "DRAFT" && <button type="button" onClick={() => approve(recordType, id)}>Approve</button>}</div>; }
 
-  function validateParty(options: any[], input: string, selected: string, label: string) {
-    if (selected) return selected;
-    const match = resolveParty(options, input);
-    if (!match) throw new Error(`Select a valid ${label} from the suggestions`);
-    return partyId(match);
-  }
+  async function submitCommercial(e: FormEvent<HTMLFormElement>) { e.preventDefault(); try { const f = new FormData(e.currentTarget), resolved = validateParty(partyOptions, partyInput, selectedParty, salesSide ? "Customer" : "Supplier"), payload = { documentNumber: "", partyId: resolved, projectId: f.get("projectId") ?? "", documentDate: f.get("documentDate"), dueDate: f.get("dueDate") ?? "", expiryDate: f.get("expiryDate") ?? "", gstRate: Number(f.get("gstRate") || 0) / 100, accountId: f.get("accountId") ?? "", poId: "", lines: lines.map(l => ({ ...l, qty: Number(l.qty), rate: Number(l.rate) })) }, action = tab === "salesQuote" ? "createQuote" : tab === "salesInvoice" ? "createInvoice" : tab === "supplierQuote" ? "createSupplierQuote" : "createPurchaseOrder", result = await call(action, payload), detail = tab === "salesQuote" ? "quote" : tab === "salesInvoice" ? "invoice" : "purchaseOrder"; router.push(`/transactions/${detail}/${result.recordId}`); } catch (e) { setStatus(e instanceof Error ? e.message : "Save failed"); } }
 
-  function setLine(index: number, field: keyof DraftLine, value: string) { setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line)); }
-  function addLine() { setLines((current) => [...current, { description: "", qty: "1", uom: "Each", rate: "0" }]); }
-  function removeLine(index: number) { setLines((current) => current.length === 1 ? current : current.filter((_, i) => i !== index)); }
-  function changeTab(value: Tab) {
-    setTab(value);
-    setSelectedParty("");
-    setPartyInput("");
-    setShowExisting(false);
-    setShowApprovedInvoices(false);
-    setSalesInvoiceSearch("");
-    setSearchedSalesInvoice(null);
-    if (value === "salesPayment") void loadTransactions();
-  }
+  async function submitPurchasePayment(e: FormEvent<HTMLFormElement>) { e.preventDefault(); try { const f = new FormData(e.currentTarget), resolved = validateParty(masters.suppliers, partyInput, selectedParty, "Supplier"), result = await call("createPayment", { paymentNumber: "", paymentType: "PAY", partyType: "Supplier", partyId: resolved, projectId: f.get("projectId") ?? "", paymentDate: f.get("paymentDate"), amount: f.get("amount"), paymentMethod: f.get("paymentMethod"), cashBankAccountId: f.get("cashBankAccountId"), reference: f.get("reference") ?? "", againstDocumentType: f.get("againstDocumentType") ?? "", againstDocumentId: f.get("againstDocumentId") ?? "" }); router.push(`/transactions/payment/${result.recordId}`); } catch (e) { setStatus(e instanceof Error ? e.message : "Save failed"); } }
 
-  async function toggleExisting() {
-    if (showExisting) { setShowExisting(false); return; }
-    setShowExisting(true);
-    if (!existingLoaded) await loadTransactions();
-  }
+  async function saveSalesPaymentDraft(e: FormEvent<HTMLFormElement>) { e.preventDefault(); if (!selectedSalesInvoice) return; setConversionBusy(true); try { const f = new FormData(e.currentTarget), amount = Number(f.get("amount") || 0); if (!(amount > 0)) throw new Error("Payment amount must be greater than zero"); const result = await call("createPayment", { paymentNumber: "", paymentType: "RECEIVE", partyType: "Customer", partyId: selectedSalesInvoice.customerId, projectId: selectedSalesInvoice.projectId || "", paymentDate: f.get("paymentDate"), amount, paymentMethod: f.get("paymentMethod"), cashBankAccountId: f.get("cashBankAccountId"), reference: f.get("reference") || "", againstDocumentType: "Sales Invoice", againstDocumentId: selectedSalesInvoice.invoiceId }); router.push(`/transactions/payment/${result.recordId}`); router.refresh(); } catch (e) { setStatus(e instanceof Error ? e.message : "Payment draft save failed"); } finally { setConversionBusy(false); } }
 
-  async function call(action: string, payload: unknown) {
-    setStatus("Saving…");
-    const response = await fetch("/api/erp/transactions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload }) });
-    const body = await response.json();
-    if (!response.ok || !body.ok) throw new Error(body.error || "Transaction failed");
-    if (existingLoaded) await loadTransactions();
-    await loadNextDocumentNo(tab);
-    return body.result;
-  }
+  function selectInvoiceForPayment(invoice: any) { setSelectedSalesInvoice(invoice); setSearchedSalesInvoice(invoice); setStatus(""); setShowApprovedInvoices(false); window.setTimeout(() => document.getElementById("sales-payment-draft-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0); }
+  async function toggleApprovedSalesInvoices() { if (showApprovedInvoices) { setShowApprovedInvoices(false); return; } if (!existingLoaded) await loadTransactions(); setShowApprovedInvoices(true); }
+  async function searchApprovedSalesInvoice() { let invoices = tx.invoices; if (!existingLoaded) { const b = await loadTransactions(); invoices = b?.invoices || []; } const q = normalizeDocNo(salesInvoiceSearch); if (!q) { setSearchedSalesInvoice(null); setStatus("Enter a Sales Invoice number"); return; } const approved = invoices.filter((r: any) => String(r.status || "").toUpperCase() === "APPROVED" && Number(r.outstandingAmount ?? r.totalAmount ?? 0) > 0); const m = approved.find((r: any) => normalizeDocNo(r.invoiceNumber) === q || normalizeDocNo(r.invoiceId) === q) || approved.find((r: any) => normalizeDocNo(r.invoiceNumber).includes(q) || normalizeDocNo(r.invoiceId).includes(q)); if (!m) { setSearchedSalesInvoice(null); setStatus(`Approved Sales Invoice with outstanding amount not found: ${salesInvoiceSearch}`); return; } setStatus(""); setSearchedSalesInvoice(m); }
+  async function submitExpense(e: FormEvent<HTMLFormElement>) { e.preventDefault(); try { const f = new FormData(e.currentTarget), supplierId = expenseSupplierInput.trim() ? validateParty(masters.suppliers, expenseSupplierInput, expenseSupplier, "Supplier") : "", result = await call("createExpense", { ...Object.fromEntries(f.entries()), supplierId, expenseNumber: "" }); router.push(`/transactions/expense/${result.recordId}`); } catch (e) { setStatus(e instanceof Error ? e.message : "Save failed"); } }
 
-  async function approve(recordType: RecordType, recordId: string) {
-    try {
-      setStatus("Approving…");
-      const response = await fetch("/api/erp/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: "approvals", body: { payload: { recordType, recordId, decision: "APPROVE", note: "Transaction list" } } }),
-      });
-      const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
-      setStatus("Document approved.");
-      await loadTransactions();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Approval failed");
-    }
-  }
-
-  function workflowActions(recordType: RecordType, id: string, rowStatus: string) {
-    const current = String(rowStatus || "DRAFT").toUpperCase();
-    return <div className="row-actions">{current === "DRAFT" && <button type="button" onClick={() => approve(recordType, id)}>Approve</button>}</div>;
-  }
-
-  async function submitCommercial(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      const form = new FormData(event.currentTarget);
-      const resolvedParty = validateParty(partyOptions, partyInput, selectedParty, salesSide ? "Customer" : "Supplier");
-      const payload = {
-        documentNumber: "",
-        partyId: resolvedParty,
-        projectId: form.get("projectId") ?? "",
-        documentDate: form.get("documentDate"),
-        dueDate: form.get("dueDate") ?? "",
-        expiryDate: form.get("expiryDate") ?? "",
-        gstRate: Number(form.get("gstRate") || 0) / 100,
-        accountId: form.get("accountId") ?? "",
-        poId: "",
-        lines: lines.map((line) => ({ ...line, qty: Number(line.qty), rate: Number(line.rate) })),
-      };
-      const action = tab === "salesQuote" ? "createQuote" : tab === "salesInvoice" ? "createInvoice" : tab === "supplierQuote" ? "createSupplierQuote" : "createPurchaseOrder";
-      const result = await call(action, payload);
-      const detail = tab === "salesQuote" ? "quote" : tab === "salesInvoice" ? "invoice" : "purchaseOrder";
-      router.push(`/transactions/${detail}/${result.recordId}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed");
-    }
-  }
-
-  async function submitPayment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      const form = new FormData(event.currentTarget);
-      const resolvedParty = validateParty(masters.suppliers, partyInput, selectedParty, "Supplier");
-      const result = await call("createPayment", {
-        paymentNumber: "",
-        paymentType: "PAY",
-        partyType: "Supplier",
-        partyId: resolvedParty,
-        projectId: form.get("projectId") ?? "",
-        paymentDate: form.get("paymentDate"),
-        amount: form.get("amount"),
-        paymentMethod: form.get("paymentMethod"),
-        cashBankAccountId: form.get("cashBankAccountId"),
-        reference: form.get("reference") ?? "",
-        againstDocumentType: form.get("againstDocumentType") ?? "",
-        againstDocumentId: form.get("againstDocumentId") ?? "",
-      });
-      router.push(`/transactions/payment/${result.recordId}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed");
-    }
-  }
-
-  async function convertInvoiceToPayment(invoice: any) {
-    const invoiceId = String(invoice.invoiceId || "");
-    if (!invoiceId) return;
-    setConversionBusy(invoiceId);
-    setStatus("Creating Sales Payment Entry / Receipt…");
-    try {
-      const amount = Number(invoice.outstandingAmount ?? invoice.totalAmount ?? 0);
-      if (!(amount > 0)) throw new Error("Sales Invoice has no outstanding amount");
-      const result = await call("createPayment", {
-        paymentNumber: "",
-        paymentType: "RECEIVE",
-        partyType: "Customer",
-        partyId: invoice.customerId,
-        projectId: invoice.projectId || "",
-        paymentDate: localDate(),
-        amount,
-        paymentMethod: "Bank Transfer",
-        cashBankAccountId: "ACC-1110",
-        reference: `Converted from ${invoice.invoiceNumber || invoice.invoiceId}`,
-        againstDocumentType: "Sales Invoice",
-        againstDocumentId: invoice.invoiceId,
-      });
-      router.push(`/transactions/payment/${result.recordId}`);
-      router.refresh();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Payment conversion failed");
-    } finally {
-      setConversionBusy("");
-    }
-  }
-
-  async function toggleApprovedSalesInvoices() {
-    if (showApprovedInvoices) { setShowApprovedInvoices(false); return; }
-    if (!existingLoaded) await loadTransactions();
-    setShowApprovedInvoices(true);
-  }
-
-  async function searchApprovedSalesInvoice() {
-    let invoices = tx.invoices;
-    if (!existingLoaded) {
-      const body = await loadTransactions();
-      invoices = body?.invoices || [];
-    }
-    const query = normalizeDocNo(salesInvoiceSearch);
-    if (!query) {
-      setSearchedSalesInvoice(null);
-      setStatus("Enter a Sales Invoice number");
-      return;
-    }
-    const approved = invoices.filter((row: any) => String(row.status || "").toUpperCase() === "APPROVED" && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0);
-    const match = approved.find((row: any) => normalizeDocNo(row.invoiceNumber) === query || normalizeDocNo(row.invoiceId) === query)
-      || approved.find((row: any) => normalizeDocNo(row.invoiceNumber).includes(query) || normalizeDocNo(row.invoiceId).includes(query));
-    if (!match) {
-      setSearchedSalesInvoice(null);
-      setStatus(`Approved Sales Invoice with outstanding amount not found: ${salesInvoiceSearch}`);
-      return;
-    }
-    setStatus("");
-    setSearchedSalesInvoice(match);
-  }
-
-  async function submitExpense(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      const form = new FormData(event.currentTarget);
-      const supplierId = expenseSupplierInput.trim() ? validateParty(masters.suppliers, expenseSupplierInput, expenseSupplier, "Supplier") : "";
-      const result = await call("createExpense", { ...Object.fromEntries(form.entries()), supplierId, expenseNumber: "" });
-      router.push(`/transactions/expense/${result.recordId}`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed");
-    }
-  }
-
-  const tabButton = (value: Tab, label: string) => <button type="button" key={value} className={tab === value ? "tab active" : "tab"} onClick={() => changeTab(value)}>{label}</button>;
+  const tabButton = (v: Tab, l: string) => <button type="button" key={v} className={tab === v ? "tab active" : "tab"} onClick={() => changeTab(v)}>{l}</button>;
   const view = (type: string, id: string) => <Link className="button-link secondary-link" href={`/transactions/${type}/${id}`}>View / Print</Link>;
-  const title = module === "sales" ? "Sales Transactions" : module === "purchase" ? "Purchase Transactions" : "Expenses";
-  const numberLabel = numberMeta[tab]?.label || "Auto Document No";
-  const partyListId = salesSide ? "customer-suggestions" : "supplier-suggestions";
+  const title = module === "sales" ? "Sales Transactions" : module === "purchase" ? "Purchase Transactions" : "Expenses", numberLabel = numberMeta[tab]?.label || "Auto Document No", partyListId = salesSide ? "customer-suggestions" : "supplier-suggestions";
 
   return <>
-    <div className="page-heading"><div><h2>{title}</h2><p className="small">Workflow: Draft → Approved. Approved is the final document status.</p></div></div>
+    <div className="page-heading"><div><h2>{title}</h2><p className="small">Workflow: Draft → Approved. Payment accounting is finalized only after Final Save confirmation.</p></div></div>
     {module === "sales" && <div className="tabs wrap-tabs">{tabButton("salesQuote", "Sales Quotation")}{tabButton("salesInvoice", "Sales Invoice")}{tabButton("salesPayment", "Sales Payment Entry / Receipt")}</div>}
     {module === "purchase" && <div className="tabs wrap-tabs">{tabButton("supplierQuote", "Supplier Quotation")}{tabButton("purchaseOrder", "Purchase Order")}{tabButton("purchasePayment", "Purchase Payment / Receipt")}</div>}
     {status && <section className="panel status-banner">{status}</section>}
 
-    {commercial && <form className="panel" onSubmit={submitCommercial}>
-      <div className="form-title-row"><h3>{tab === "salesQuote" ? "New Sales Quotation" : tab === "salesInvoice" ? "New Sales Invoice" : tab === "supplierQuote" ? "New Supplier Quotation" : "New Purchase Order"}</h3><span className="auto-badge">Document No: {nextDocumentNo || "AUTO"}</span></div>
-      <div className="form-grid">
-        <label>{salesSide ? "Customer" : "Supplier"}<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value)} placeholder={`Type ${salesSide ? "customer" : "supplier"} name or ID`} autoComplete="off" required /><datalist id={partyListId}>{partyOptions.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
-        <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{projectOptions.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName} ({p.projectId})</option>)}</select></label>
-        <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly /></label><div></div>
-        <label>Date<input name="documentDate" type="date" required defaultValue={localDate()} /></label>
-        {tab === "salesInvoice" && <label>Due Date<input name="dueDate" type="date" defaultValue={localDate(30)} /></label>}
-        {(tab === "salesQuote" || tab === "supplierQuote") && <label>Valid Till<input name="expiryDate" type="date" defaultValue={localDate(7)} /></label>}
-        <label>GST %<input name="gstRate" type="number" min="0" max="100" step="0.01" value={gstRate} onChange={(e) => setGstRate(e.target.value)} /></label>
-        {tab === "salesInvoice" && <label>Revenue Account<input name="accountId" placeholder="ACC-4100" /></label>}
-      </div>
-      <h4>Lines</h4>
-      <div className="table-wrap"><table className="data-table" style={{ minWidth: 920 }}><thead><tr><th style={{ width: "42%" }}>Item Description</th><th>QTY</th><th>UOM</th><th>Unit Price</th><th>Total Price</th><th></th></tr></thead><tbody>{lines.map((line, index) => <tr key={index}><td><input value={line.description} onChange={(e) => setLine(index, "description", e.target.value)} required /></td><td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(e) => setLine(index, "qty", e.target.value)} /></td><td><input value={line.uom} onChange={(e) => setLine(index, "uom", e.target.value)} /></td><td><input type="number" min="0" step="0.01" value={line.rate} onChange={(e) => setLine(index, "rate", e.target.value)} /></td><td><strong>{money((Number(line.qty) || 0) * (Number(line.rate) || 0))}</strong></td><td><button type="button" className="secondary" onClick={() => removeLine(index)}>Remove</button></td></tr>)}</tbody></table></div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}><div style={{ width: "min(420px,100%)", border: "1px solid #e5ebf2", borderRadius: 10, overflow: "hidden", background: "#fff" }}><div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px" }}><span>Sub Total</span><strong>{money(subtotal)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px" }}><span>GST {Number(gstRate || 0).toFixed(2)}%</span><strong>{money(gstAmount)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: 14, background: "#f8fafc", fontSize: 18 }}><strong>Net Total</strong><strong>{money(netTotal)}</strong></div></div></div>
-      <div className="button-row"><button type="button" className="secondary" onClick={addLine}>Add Line</button><button type="submit">Save Draft</button></div>
-    </form>}
+    {commercial && <form className="panel" onSubmit={submitCommercial}><div className="form-title-row"><h3>{tab === "salesQuote" ? "New Sales Quotation" : tab === "salesInvoice" ? "New Sales Invoice" : tab === "supplierQuote" ? "New Supplier Quotation" : "New Purchase Order"}</h3><span className="auto-badge">Document No: {nextDocumentNo || "AUTO"}</span></div><div className="form-grid"><label>{salesSide ? "Customer" : "Supplier"}<input list={partyListId} value={partyInput} onChange={e => handlePartyInput(e.target.value)} placeholder={`Type ${salesSide ? "customer" : "supplier"} name or ID`} autoComplete="off" required /><datalist id={partyListId}>{partyOptions.map(p => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label><label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{projectOptions.map(p => <option key={p.projectId} value={p.projectId}>{p.projectName} ({p.projectId})</option>)}</select></label><label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly /></label><div></div><label>Date<input name="documentDate" type="date" required defaultValue={localDate()} /></label>{tab === "salesInvoice" && <label>Due Date<input name="dueDate" type="date" defaultValue={localDate(30)} /></label>}{(tab === "salesQuote" || tab === "supplierQuote") && <label>Valid Till<input name="expiryDate" type="date" defaultValue={localDate(7)} /></label>}<label>GST %<input name="gstRate" type="number" min="0" max="100" step="0.01" value={gstRate} onChange={e => setGstRate(e.target.value)} /></label>{tab === "salesInvoice" && <label>Revenue Account<input name="accountId" placeholder="ACC-4100" /></label>}</div><h4>Lines</h4><div className="table-wrap"><table className="data-table" style={{ minWidth: 920 }}><thead><tr><th style={{ width: "42%" }}>Item Description</th><th>QTY</th><th>UOM</th><th>Unit Price</th><th>Total Price</th><th></th></tr></thead><tbody>{lines.map((l, i) => <tr key={i}><td><input value={l.description} onChange={e => setLine(i, "description", e.target.value)} required /></td><td><input type="number" min="0.0001" step="0.0001" value={l.qty} onChange={e => setLine(i, "qty", e.target.value)} /></td><td><input value={l.uom} onChange={e => setLine(i, "uom", e.target.value)} /></td><td><input type="number" min="0" step="0.01" value={l.rate} onChange={e => setLine(i, "rate", e.target.value)} /></td><td><strong>{money((Number(l.qty) || 0) * (Number(l.rate) || 0))}</strong></td><td><button type="button" className="secondary" onClick={() => removeLine(i)}>Remove</button></td></tr>)}</tbody></table></div><div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}><div style={{ width: "min(420px,100%)", border: "1px solid #e5ebf2", borderRadius: 10, overflow: "hidden", background: "#fff" }}><div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px" }}><span>Sub Total</span><strong>{money(subtotal)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: "12px 14px" }}><span>GST {Number(gstRate || 0).toFixed(2)}%</span><strong>{money(gstAmount)}</strong></div><div style={{ display: "flex", justifyContent: "space-between", padding: 14, background: "#f8fafc", fontSize: 18 }}><strong>Net Total</strong><strong>{money(netTotal)}</strong></div></div></div><div className="button-row"><button type="button" className="secondary" onClick={addLine}>Add Line</button><button type="submit">Save Draft</button></div></form>}
 
     {tab === "salesPayment" && <>
-      <section className="panel">
-        <div className="form-title-row"><div><h3>Sales Invoice → Sales Payment Entry / Receipt</h3><p className="small">Create the payment document directly from an approved Sales Invoice with an outstanding balance.</p></div><span className="auto-badge">Next Payment No: {nextDocumentNo || "AUTO"}</span></div>
-        <div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => void toggleApprovedSalesInvoices()} disabled={existingLoading}>{existingLoading ? "Loading…" : showApprovedInvoices ? "Hide Approved Sales Invoices" : "View Approved Sales Invoice to Payment Entry"}</button></div>
-      </section>
-
-      {showApprovedInvoices && <section className="panel table-wrap">
-        <div className="form-title-row"><h3>Approved Sales Invoices Pending Payment Entry</h3><span className="auto-badge">{approvedInvoices.length} Pending</span></div>
-        <table className="data-table"><thead><tr><th>Sales Invoice</th><th>Customer</th><th>Project</th><th>Invoice Total</th><th>Outstanding</th><th>Action</th></tr></thead><tbody>
-          {approvedInvoices.length === 0 && <tr><td colSpan={6}>No approved Sales Invoices with outstanding balance.</td></tr>}
-          {approvedInvoices.map((invoice) => <tr key={invoice.invoiceId}><td><Link href={`/transactions/invoice/${invoice.invoiceId}`}><strong>{invoice.invoiceNumber || invoice.invoiceId}</strong></Link></td><td>{invoice.customerId || "—"}</td><td>{invoice.projectId || "—"}</td><td>{money(invoice.totalAmount)}</td><td><strong>{money(invoice.outstandingAmount ?? invoice.totalAmount)}</strong></td><td><button type="button" onClick={() => void convertInvoiceToPayment(invoice)} disabled={Boolean(conversionBusy)}>{conversionBusy === invoice.invoiceId ? "Converting…" : "Convert Now"}</button></td></tr>)}
-        </tbody></table>
-      </section>}
-
-      <section className="panel">
-        <h3>Manual Search by Sales Invoice No</h3>
-        <div className="form-grid" style={{ marginTop: 16 }}>
-          <label>Sales Invoice No<input value={salesInvoiceSearch} onChange={(e) => setSalesInvoiceSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchApprovedSalesInvoice(); } }} placeholder="e.g. SI-2026-00001" autoComplete="off" /></label>
-          <div style={{ display: "flex", alignItems: "end" }}><button type="button" style={{ width: "100%", height: 52 }} onClick={() => void searchApprovedSalesInvoice()} disabled={existingLoading}>{existingLoading ? "Searching…" : "Search"}</button></div>
-        </div>
-        {searchedSalesInvoice && <div style={{ marginTop: 20 }}>
-          <div className="document-meta">
-            <div><span>Sales Invoice</span><strong><Link href={`/transactions/invoice/${searchedSalesInvoice.invoiceId}`}>{searchedSalesInvoice.invoiceNumber || searchedSalesInvoice.invoiceId}</Link></strong></div>
-            <div><span>Customer</span><strong>{searchedSalesInvoice.customerId || "—"}</strong></div>
-            <div><span>Project</span><strong>{searchedSalesInvoice.projectId || "—"}</strong></div>
-            <div><span>Invoice Total</span><strong>{money(searchedSalesInvoice.totalAmount)}</strong></div>
-            <div><span>Outstanding</span><strong>{money(searchedSalesInvoice.outstandingAmount ?? searchedSalesInvoice.totalAmount)}</strong></div>
-            <div><span>Status</span><strong>{searchedSalesInvoice.status}</strong></div>
-          </div>
-          <div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => void convertInvoiceToPayment(searchedSalesInvoice)} disabled={Boolean(conversionBusy)}>{conversionBusy === searchedSalesInvoice.invoiceId ? "Converting…" : "Convert to Payment Entry"}</button></div>
-        </div>}
-      </section>
+      <section className="panel"><div className="form-title-row"><div><h3>Sales Invoice → Sales Payment Entry / Receipt</h3><p className="small">Choose an approved Sales Invoice first. Convert Now only opens the Payment Entry form; no draft is created until you press Save Draft.</p></div><span className="auto-badge">Next Payment No: {nextDocumentNo || "AUTO"}</span></div><div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => void toggleApprovedSalesInvoices()} disabled={existingLoading}>{existingLoading ? "Loading…" : showApprovedInvoices ? "Hide Approved Sales Invoices" : "View Approved Sales Invoice to Payment Entry"}</button></div></section>
+      {showApprovedInvoices && <section className="panel table-wrap"><div className="form-title-row"><h3>Approved Sales Invoices Pending Payment Entry</h3><span className="auto-badge">{approvedInvoices.length} Pending</span></div><table className="data-table"><thead><tr><th>Sales Invoice</th><th>Customer</th><th>Project</th><th>Invoice Total</th><th>Outstanding</th><th>Action</th></tr></thead><tbody>{approvedInvoices.length === 0 && <tr><td colSpan={6}>No approved Sales Invoices with outstanding balance.</td></tr>}{approvedInvoices.map(inv => <tr key={inv.invoiceId}><td><Link href={`/transactions/invoice/${inv.invoiceId}`}><strong>{inv.invoiceNumber || inv.invoiceId}</strong></Link></td><td>{inv.customerId || "—"}</td><td>{inv.projectId || "—"}</td><td>{money(inv.totalAmount)}</td><td><strong>{money(inv.outstandingAmount ?? inv.totalAmount)}</strong></td><td><button type="button" onClick={() => selectInvoiceForPayment(inv)}>Convert Now</button></td></tr>)}</tbody></table></section>}
+      <section className="panel"><h3>Manual Search by Sales Invoice No</h3><div className="form-grid" style={{ marginTop: 16 }}><label>Sales Invoice No<input value={salesInvoiceSearch} onChange={e => setSalesInvoiceSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); void searchApprovedSalesInvoice(); } }} placeholder="e.g. SI-2026-00001" autoComplete="off" /></label><div style={{ display: "flex", alignItems: "end" }}><button type="button" style={{ width: "100%", height: 52 }} onClick={() => void searchApprovedSalesInvoice()} disabled={existingLoading}>{existingLoading ? "Searching…" : "Search"}</button></div></div>{searchedSalesInvoice && <div style={{ marginTop: 20 }}><div className="document-meta"><div><span>Sales Invoice</span><strong><Link href={`/transactions/invoice/${searchedSalesInvoice.invoiceId}`}>{searchedSalesInvoice.invoiceNumber || searchedSalesInvoice.invoiceId}</Link></strong></div><div><span>Customer</span><strong>{searchedSalesInvoice.customerId || "—"}</strong></div><div><span>Project</span><strong>{searchedSalesInvoice.projectId || "—"}</strong></div><div><span>Invoice Total</span><strong>{money(searchedSalesInvoice.totalAmount)}</strong></div><div><span>Outstanding</span><strong>{money(searchedSalesInvoice.outstandingAmount ?? searchedSalesInvoice.totalAmount)}</strong></div><div><span>Status</span><strong>{searchedSalesInvoice.status}</strong></div></div><div className="button-row" style={{ marginTop: 18 }}><button type="button" onClick={() => selectInvoiceForPayment(searchedSalesInvoice)}>Convert to Payment Entry</button></div></div>}</section>
+      {selectedSalesInvoice && <form id="sales-payment-draft-form" className="panel form-grid" onSubmit={saveSalesPaymentDraft}><h3 className="form-title">New Sales Payment Entry / Receipt</h3><label>Sales Invoice<input value={selectedSalesInvoice.invoiceNumber || selectedSalesInvoice.invoiceId} readOnly /></label><label>Customer<input value={selectedSalesInvoice.customerId || ""} readOnly /></label><label>Project<input value={selectedSalesInvoice.projectId || "No project"} readOnly /></label><label>Auto Sales Payment / Receipt No<input value={nextDocumentNo || "AUTO"} readOnly /></label><label>Invoice Total<input value={money(selectedSalesInvoice.totalAmount)} readOnly /></label><label>Outstanding<input value={money(selectedSalesInvoice.outstandingAmount ?? selectedSalesInvoice.totalAmount)} readOnly /></label><label>Payment Date<input name="paymentDate" type="date" required /></label><label>Amount<input name="amount" type="number" min="0.01" max={Number(selectedSalesInvoice.outstandingAmount ?? selectedSalesInvoice.totalAmount ?? 0)} step="0.01" defaultValue={Number(selectedSalesInvoice.outstandingAmount ?? selectedSalesInvoice.totalAmount ?? 0)} required /></label><label>Payment Method<select name="paymentMethod" defaultValue="" required><option value="">Select payment method</option><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label><label>Cash / Bank Account<input name="cashBankAccountId" placeholder="Select / enter cash or bank account" required /></label><label className="form-wide">Reference<input name="reference" placeholder="Bank reference / receipt reference" /></label><div className="form-wide button-row"><button type="button" className="secondary" onClick={() => setSelectedSalesInvoice(null)}>Cancel</button><button type="submit" disabled={conversionBusy}>{conversionBusy ? "Saving Draft…" : "Save Draft"}</button></div></form>}
     </>}
 
-    {tab === "purchasePayment" && <form className="panel form-grid" onSubmit={submitPayment}>
-      <h3 className="form-title">New Purchase Payment / Receipt</h3>
-      <label>Supplier<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value, masters.suppliers)} required /><datalist id={partyListId}>{masters.suppliers.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
-      <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
-      <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly /></label><div></div>
-      <label>Date<input name="paymentDate" type="date" defaultValue={localDate()} required /></label>
-      <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label>
-      <label>Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
-      <label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label>
-      <label>Against Document Type<input name="againstDocumentType" /></label>
-      <label>Against Document ID<input name="againstDocumentId" /></label>
-      <label className="form-wide">Reference<input name="reference" /></label>
-      <div className="form-wide"><button type="submit">Save Draft</button></div>
-    </form>}
+    {tab === "purchasePayment" && <form className="panel form-grid" onSubmit={submitPurchasePayment}><h3 className="form-title">New Purchase Payment / Receipt</h3><label>Supplier<input list={partyListId} value={partyInput} onChange={e => handlePartyInput(e.target.value, masters.suppliers)} required /><datalist id={partyListId}>{masters.suppliers.map(p => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label><label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map(p => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label><label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly /></label><div></div><label>Date<input name="paymentDate" type="date" defaultValue={localDate()} required /></label><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label><label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label><label>Against Document Type<input name="againstDocumentType" /></label><label>Against Document ID<input name="againstDocumentId" /></label><label className="form-wide">Reference<input name="reference" /></label><div className="form-wide"><button type="submit">Save Draft</button></div></form>}
 
-    {tab === "expense" && <form className="panel form-grid" onSubmit={submitExpense}>
-      <h3 className="form-title">New Expense</h3>
-      <label>Date<input name="expenseDate" type="date" required defaultValue={localDate()} /></label>
-      <label>Supplier<input list="expense-supplier-suggestions" value={expenseSupplierInput} onChange={(e) => handleExpenseSupplierInput(e.target.value)} /><datalist id="expense-supplier-suggestions">{masters.suppliers.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
-      <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
-      <label>Expense Account<input name="expenseAccountId" defaultValue="ACC-6600" required /></label>
-      <label>Net Amount<input name="netAmount" type="number" min="0" step="0.01" required /></label>
-      <label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue="0" /></label>
-      <label>Payment Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option></select></label>
-      <label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label>
-      <label className="form-wide">Description<input name="description" required /></label>
-      <div className="form-wide"><button type="submit">Save Draft</button></div>
-    </form>}
+    {tab === "expense" && <form className="panel form-grid" onSubmit={submitExpense}><h3 className="form-title">New Expense</h3><label>Date<input name="expenseDate" type="date" required defaultValue={localDate()} /></label><label>Supplier<input list="expense-supplier-suggestions" value={expenseSupplierInput} onChange={e => handleExpenseSupplierInput(e.target.value)} /><datalist id="expense-supplier-suggestions">{masters.suppliers.map(p => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label><label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map(p => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label><label>Expense Account<input name="expenseAccountId" defaultValue="ACC-6600" required /></label><label>Net Amount<input name="netAmount" type="number" min="0" step="0.01" required /></label><label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue="0" /></label><label>Payment Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option></select></label><label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label><label className="form-wide">Description<input name="description" required /></label><div className="form-wide"><button type="submit">Save Draft</button></div></form>}
 
     <div className="button-row existing-documents-cta"><button type="button" className="secondary" onClick={() => void toggleExisting()} disabled={existingLoading}>{existingLoading ? "Loading…" : showExisting ? "Hide Existing Documents" : existingLabel[tab]}</button></div>
-
-    {showExisting && <section className="panel table-wrap"><h3>{existingTitle[tab]}</h3><table className="data-table"><thead><tr><th>ID / Number</th><th>Party / Project</th><th>Total / Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
-      {tab === "salesQuote" && tx.quotes.map((r) => <tr key={r.quoteId}><td>{r.quoteNumber}</td><td>{r.customerId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("quote", r.quoteId)}{workflowActions("quote", r.quoteId, r.status)}</div></td></tr>)}
-      {tab === "salesInvoice" && tx.invoices.map((r) => <tr key={r.invoiceId}><td>{r.invoiceNumber}</td><td>{r.customerId}<br />{r.projectId}</td><td>{money(r.totalAmount)}<br /><span className="small">Outstanding {money(r.outstandingAmount)}</span></td><td>{r.status}</td><td><div className="row-actions">{view("invoice", r.invoiceId)}{workflowActions("invoice", r.invoiceId, r.status)}</div></td></tr>)}
-      {tab === "supplierQuote" && tx.supplierQuotes.map((r) => <tr key={r.poId}><td>{r.poNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("purchaseOrder", r.poId)}{workflowActions("purchaseOrder", r.poId, r.status)}</div></td></tr>)}
-      {tab === "purchaseOrder" && tx.purchaseOrders.map((r) => <tr key={r.poId}><td>{r.poNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("purchaseOrder", r.poId)}{workflowActions("purchaseOrder", r.poId, r.status)}</div></td></tr>)}
-      {tab === "salesPayment" && tx.payments.filter((r) => r.partyType === "Customer").map((r) => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Customer: {r.partyId}<br />{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}</td><td><div className="row-actions">{view("payment", r.paymentId)}{workflowActions("payment", r.paymentId, r.status)}</div></td></tr>)}
-      {tab === "purchasePayment" && tx.payments.filter((r) => r.partyType === "Supplier").map((r) => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Supplier: {r.partyId}<br />{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}</td><td><div className="row-actions">{view("payment", r.paymentId)}{workflowActions("payment", r.paymentId, r.status)}</div></td></tr>)}
-      {tab === "expense" && tx.expenses.map((r) => <tr key={r.expenseId}><td>{r.expenseNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("expense", r.expenseId)}{workflowActions("expense", r.expenseId, r.status)}</div></td></tr>)}
-    </tbody></table></section>}
+    {showExisting && <section className="panel table-wrap"><h3>{existingTitle[tab]}</h3><table className="data-table"><thead><tr><th>ID / Number</th><th>Party / Project</th><th>Total / Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>{tab === "salesQuote" && tx.quotes.map(r => <tr key={r.quoteId}><td>{r.quoteNumber}</td><td>{r.customerId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("quote", r.quoteId)}{workflowActions("quote", r.quoteId, r.status)}</div></td></tr>)}{tab === "salesInvoice" && tx.invoices.map(r => <tr key={r.invoiceId}><td>{r.invoiceNumber}</td><td>{r.customerId}<br />{r.projectId}</td><td>{money(r.totalAmount)}<br /><span className="small">Outstanding {money(r.outstandingAmount)}</span></td><td>{r.status}</td><td><div className="row-actions">{view("invoice", r.invoiceId)}{workflowActions("invoice", r.invoiceId, r.status)}</div></td></tr>)}{tab === "supplierQuote" && tx.supplierQuotes.map(r => <tr key={r.poId}><td>{r.poNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("purchaseOrder", r.poId)}{workflowActions("purchaseOrder", r.poId, r.status)}</div></td></tr>)}{tab === "purchaseOrder" && tx.purchaseOrders.map(r => <tr key={r.poId}><td>{r.poNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("purchaseOrder", r.poId)}{workflowActions("purchaseOrder", r.poId, r.status)}</div></td></tr>)}{tab === "salesPayment" && tx.payments.filter(r => r.partyType === "Customer").map(r => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Customer: {r.partyId}<br />{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}{r.journalId ? <><br /><span className="small">Finalized</span></> : null}</td><td><div className="row-actions">{view("payment", r.paymentId)}{workflowActions("payment", r.paymentId, r.status)}</div></td></tr>)}{tab === "purchasePayment" && tx.payments.filter(r => r.partyType === "Supplier").map(r => <tr key={r.paymentId}><td>{r.paymentNumber}</td><td>Supplier: {r.partyId}<br />{r.projectId}</td><td>{money(r.amount)}</td><td>{r.status}</td><td><div className="row-actions">{view("payment", r.paymentId)}{workflowActions("payment", r.paymentId, r.status)}</div></td></tr>)}{tab === "expense" && tx.expenses.map(r => <tr key={r.expenseId}><td>{r.expenseNumber}</td><td>{r.supplierId}<br />{r.projectId}</td><td>{money(r.totalAmount)}</td><td>{r.status}</td><td><div className="row-actions">{view("expense", r.expenseId)}{workflowActions("expense", r.expenseId, r.status)}</div></td></tr>)}</tbody></table></section>}
   </>;
 }
