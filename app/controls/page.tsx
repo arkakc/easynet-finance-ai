@@ -7,6 +7,8 @@ type Invoice = { invoiceId: string; invoiceNumber: string; status: string; gstAm
 type Bill = { billId: string; billNumber: string; supplierId: string; projectId: string; poId: string; status: string; totalAmount: number | string };
 type PO = { poId: string; poNumber: string; supplierId: string; projectId: string; status: string; totalAmount: number | string };
 type Movement = { movementId: string; movementType: string; sourceDocumentId: string; itemId: string; qtyIn: number | string; projectId: string };
+type POLine = { poLineId: string; poId: string; itemId: string; qty: number | string };
+type Item = { itemId: string; itemType: string };
 type Doc = { documentId: string; documentNumber: string; documentType: string; driveFileId: string; status: string };
 type Audit = { auditId: string; timestamp: string; actor: string; action: string; tableName: string; recordId: string; details: string };
 type ExceptionRow = { exceptionId: string; severity: string; module: string; recordType: string; recordId: string; message: string; status: string };
@@ -21,18 +23,22 @@ export default async function ControlsPage() {
   let pos: PO[] = [];
   let movements: Movement[] = [];
   let docs: Doc[] = [];
+  let poLines: POLine[] = [];
+  let items: Item[] = [];
   let audit: Audit[] = [];
   let savedExceptions: ExceptionRow[] = [];
   let error = "";
 
   try {
-    const [s, i, b, p, m, d, a, e] = await Promise.all([
+    const [s, i, b, p, m, d, pl, it, a, e] = await Promise.all([
       listTable<Setting>("Settings", 500, 0),
       listTable<Invoice>("Invoices", 500, 0),
       listTable<Bill>("SupplierBills", 500, 0),
       listTable<PO>("PurchaseOrders", 500, 0),
       listTable<Movement>("StockMovements", 500, 0),
       listTable<Doc>("Documents", 500, 0),
+      listTable<POLine>("POLines", 500, 0),
+      listTable<Item>("Items", 500, 0),
       listTable<Audit>("AuditLog", 500, 0),
       listTable<ExceptionRow>("Exceptions", 500, 0),
     ]);
@@ -42,10 +48,22 @@ export default async function ControlsPage() {
     pos = p.rows;
     movements = m.rows;
     docs = d.rows;
+    poLines = pl.rows;
+    items = it.rows;
     audit = a.rows.sort((x, y) => String(y.timestamp).localeCompare(String(x.timestamp))).slice(0, 100);
     savedExceptions = e.rows;
   } catch (err) {
     error = err instanceof Error ? err.message : "Control-centre load failed";
+  }
+
+  if (error) {
+    return (
+      <>
+        <h2>Finance Control Centre</h2>
+        <p className="small">Live finance data is unavailable until the backend connection succeeds.</p>
+        <section className="panel warning-panel"><strong>Control-centre data unavailable.</strong> {error}. Do not rely on zero or blank figures while this warning is active.</section>
+      </>
+    );
   }
 
   const setting = (key: string) => settings.find((row) => row.key === key)?.value || "";
@@ -57,6 +75,8 @@ export default async function ControlsPage() {
     purchaseReceiptsByPo.set(movement.sourceDocumentId, current);
   }
 
+  const itemType = new Map(items.map((item) => [String(item.itemId), String(item.itemType || "").toUpperCase()]));
+
   const matchChecks = bills.filter((bill) => bill.poId).map((bill) => {
     const po = poMap.get(bill.poId);
     const receipts = purchaseReceiptsByPo.get(bill.poId) || [];
@@ -65,8 +85,18 @@ export default async function ControlsPage() {
     if (po && po.supplierId !== bill.supplierId) problems.push("Supplier mismatch");
     if (po && po.projectId !== bill.projectId) problems.push("Project mismatch");
     if (po && Math.abs(n(po.totalAmount) - n(bill.totalAmount)) > 0.01) problems.push(`Amount mismatch: PO ${money(po.totalAmount)} vs Bill ${money(bill.totalAmount)}`);
-    if (!receipts.length) problems.push("No purchase receipt recorded against PO");
     if (receipts.some((receipt) => po && receipt.projectId && receipt.projectId !== po.projectId)) problems.push("Receipt project mismatch");
+
+    const stockLines = poLines.filter((line) => line.poId === bill.poId && itemType.get(String(line.itemId)) === "STOCK");
+    for (const line of stockLines) {
+      const ordered = n(line.qty);
+      const received = receipts
+        .filter((receipt) => receipt.itemId === line.itemId && receipt.movementType === "PURCHASE_RECEIPT")
+        .reduce((sum, receipt) => sum + n(receipt.qtyIn), 0);
+      if (received + 0.0001 < ordered) problems.push(`Item ${line.itemId} received ${received} of ${ordered}`);
+    }
+    if (stockLines.length > 0 && !receipts.length) problems.push("No purchase receipt recorded for stock items");
+
     return { bill, po, receipts, problems, passed: problems.length === 0 };
   });
 
@@ -99,7 +129,7 @@ export default async function ControlsPage() {
 
       <section className="panel table-wrap">
         <h3>PO ↔ Supplier Bill ↔ Goods Receipt Match</h3>
-        <p className="small">Checks PO reference, supplier, project, PO-vs-bill total and at least one PURCHASE_RECEIPT movement linked to the PO. Service-only purchases still require manual service-completion evidence.</p>
+        <p className="small">Checks PO reference, supplier, project, PO-vs-bill total and ordered-vs-received quantities for STOCK items. Service-only purchases remain subject to Finance Controller evidence review.</p>
         <table className="data-table"><thead><tr><th>Bill</th><th>PO</th><th>Supplier</th><th>Project</th><th>Bill Total</th><th>Receipts</th><th>Result</th></tr></thead><tbody>
           {matchChecks.map(({ bill, po, receipts, problems, passed }) => <tr key={bill.billId}><td>{bill.billNumber}</td><td>{po?.poNumber || bill.poId}</td><td>{bill.supplierId}</td><td>{bill.projectId || "—"}</td><td>{money(bill.totalAmount)}</td><td>{receipts.length}</td><td>{passed ? <strong>PASS</strong> : <span className="warning-text">{problems.join("; ")}</span>}</td></tr>)}
           {!matchChecks.length && <tr><td colSpan={7}>No supplier bills linked to purchase orders yet.</td></tr>}

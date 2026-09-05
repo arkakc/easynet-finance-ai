@@ -13,8 +13,8 @@ import {
   expensePosting,
   postJournal,
   receiptPosting,
-  salesInvoicePosting,
-  supplierBillPosting,
+  salesInvoicePostingByLines,
+  supplierBillPostingByLines,
   supplierPaymentPosting,
 } from "@/lib/accounting/posting";
 
@@ -579,6 +579,55 @@ async function createExpense(raw: unknown) {
  * -------------------------------------------
  */
 
+async function synchronizePaymentAllocation(row: any) {
+  const againstId = String(row.againstDocumentId || "");
+  if (!againstId) return;
+  const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
+
+  const postedPayments = await findRecords<any>(
+    "Payments",
+    { againstDocumentId: againstId, status: "POSTED" },
+    500,
+  );
+  const allocated = round2(
+    postedPayments.rows
+      .filter((payment: any) => receive
+        ? String(payment.paymentType || "").toUpperCase() === "RECEIVE"
+        : String(payment.paymentType || "").toUpperCase() === "PAY")
+      .reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0),
+  );
+
+  if (receive) {
+    const inv = await findRecords<any>("Invoices", { invoiceId: againstId }, 1);
+    const invoice = inv.rows[0];
+    if (!invoice) return;
+    const total = Number(invoice.totalAmount || 0);
+    if (allocated > total + 0.001) throw new Error("Posted customer receipts exceed invoice total; allocation review required");
+    const outstandingAmount = Math.max(0, round2(total - allocated));
+    await updateRecord(
+      "Invoices",
+      "invoiceId",
+      againstId,
+      { paidAmount: allocated, outstandingAmount, status: outstandingAmount === 0 ? "PAID" : "POSTED" },
+      "finance-controller",
+    );
+  } else {
+    const billResult = await findRecords<any>("SupplierBills", { billId: againstId }, 1);
+    const bill = billResult.rows[0];
+    if (!bill) return;
+    const total = Number(bill.totalAmount || 0);
+    if (allocated > total + 0.001) throw new Error("Posted supplier payments exceed bill total; allocation review required");
+    const outstandingAmount = Math.max(0, round2(total - allocated));
+    await updateRecord(
+      "SupplierBills",
+      "billId",
+      againstId,
+      { paidAmount: allocated, outstandingAmount, status: outstandingAmount === 0 ? "PAID" : "POSTED" },
+      "finance-controller",
+    );
+  }
+}
+
 async function postRecord(
   raw: unknown,
 ) {
@@ -649,10 +698,9 @@ async function postRecord(
         500,
       );
 
-    const revenueAccountId =
-      lineResult.rows[0]
-        ?.revenueAccountId ||
-      "ACC-4100";
+    if (!lineResult.rows.length) {
+      throw new Error("Invoice has no lines");
+    }
 
     const journal =
       await postJournal({
@@ -670,21 +718,16 @@ async function postRecord(
           row.projectId,
 
         lines:
-          salesInvoicePosting({
-            total: Number(
-              row.totalAmount,
-            ),
-            net: Number(
-              row.netAmount,
-            ),
-            gst: Number(
-              row.gstAmount,
-            ),
-            customerId:
-              row.customerId,
-            projectId:
-              row.projectId,
-            revenueAccountId,
+          salesInvoicePostingByLines({
+            total: Number(row.totalAmount),
+            gst: Number(row.gstAmount),
+            customerId: row.customerId,
+            projectId: row.projectId,
+            revenueLines: lineResult.rows.map((line: any) => ({
+              accountId: String(line.revenueAccountId || "ACC-4100"),
+              amount: Number(line.netAmount || 0),
+              description: String(line.description || "Sales revenue"),
+            })),
           }),
       });
 
@@ -741,6 +784,12 @@ async function postRecord(
     if (
       row.status === "POSTED"
     ) {
+      if (row.poId) {
+        const po = await findRecords<any>("PurchaseOrders", { poId: row.poId }, 1);
+        if (po.rows[0] && String(po.rows[0].status || "").toUpperCase() !== "BILLED") {
+          await updateRecord("PurchaseOrders", "poId", row.poId, { status: "BILLED" }, "finance-controller");
+        }
+      }
       return {
         recordType:
           parsed.recordType,
@@ -775,10 +824,37 @@ async function postRecord(
         500,
       );
 
-    const costAccountId =
-      lineResult.rows[0]
-        ?.costAccountId ||
-      "ACC-5100";
+    if (!lineResult.rows.length) {
+      throw new Error("Supplier bill has no lines");
+    }
+
+    if (row.poId) {
+      const poResult = await findRecords<any>("PurchaseOrders", { poId: row.poId }, 1);
+      const po = poResult.rows[0];
+      if (!po) throw new Error("Referenced purchase order not found");
+      if (String(po.supplierId || "") !== String(row.supplierId || "")) throw new Error("Supplier bill supplier does not match the purchase order");
+      if (String(po.projectId || "") !== String(row.projectId || "")) throw new Error("Supplier bill project does not match the purchase order");
+      if (Math.abs(Number(po.totalAmount || 0) - Number(row.totalAmount || 0)) > 0.01) {
+        throw new Error("Supplier bill total does not match the purchase order total");
+      }
+
+      const poLines = await findRecords<any>("POLines", { poId: row.poId }, 500);
+      const items = await listTable<any>("Items", 500, 0);
+      const itemType = new Map(items.rows.map((item: any) => [String(item.itemId || ""), String(item.itemType || "").toUpperCase()]));
+      const receipts = await findRecords<any>("StockMovements", { sourceDocumentId: row.poId }, 500);
+
+      for (const poLine of poLines.rows) {
+        const itemId = String(poLine.itemId || "");
+        if (!itemId || itemType.get(itemId) !== "STOCK") continue;
+        const ordered = Number(poLine.qty || 0);
+        const received = receipts.rows
+          .filter((movement: any) => String(movement.itemId || "") === itemId && String(movement.movementType || "") === "PURCHASE_RECEIPT")
+          .reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0), 0);
+        if (received + 0.0001 < ordered) {
+          throw new Error(`Three-way match failed for ${itemId}: ordered ${ordered}, received ${received}`);
+        }
+      }
+    }
 
     const journal =
       await postJournal({
@@ -796,21 +872,16 @@ async function postRecord(
           row.projectId,
 
         lines:
-          supplierBillPosting({
-            total: Number(
-              row.totalAmount,
-            ),
-            net: Number(
-              row.netAmount,
-            ),
-            gst: Number(
-              row.gstAmount,
-            ),
-            supplierId:
-              row.supplierId,
-            projectId:
-              row.projectId,
-            costAccountId,
+          supplierBillPostingByLines({
+            total: Number(row.totalAmount),
+            gst: Number(row.gstAmount),
+            supplierId: row.supplierId,
+            projectId: row.projectId,
+            costLines: lineResult.rows.map((line: any) => ({
+              accountId: String(line.costAccountId || "ACC-5100"),
+              amount: Number(line.netAmount || 0),
+              description: String(line.description || "Supplier cost"),
+            })),
           }),
       });
 
@@ -825,6 +896,9 @@ async function postRecord(
       },
       "finance-controller",
     );
+    if (row.poId) {
+      await updateRecord("PurchaseOrders", "poId", row.poId, { status: "BILLED" }, "finance-controller");
+    }
 
     return {
       recordType:
@@ -867,6 +941,7 @@ async function postRecord(
     if (
       row.status === "POSTED"
     ) {
+      await synchronizePaymentAllocation(row);
       return {
         recordType:
           parsed.recordType,
@@ -882,6 +957,24 @@ async function postRecord(
     const receive =
       row.paymentType ===
       "RECEIVE";
+
+    if (row.againstDocumentId) {
+      if (receive) {
+        const inv = await findRecords<any>("Invoices", { invoiceId: row.againstDocumentId }, 1);
+        const invoice = inv.rows[0];
+        if (!invoice) throw new Error("Against invoice not found");
+        if (String(invoice.customerId) !== String(row.partyId)) throw new Error("Payment customer does not match the against invoice");
+        if (!["POSTED", "PAID"].includes(String(invoice.status).toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted invoice");
+        if (Number(row.amount) > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds invoice outstanding amount");
+      } else {
+        const billResult = await findRecords<any>("SupplierBills", { billId: row.againstDocumentId }, 1);
+        const bill = billResult.rows[0];
+        if (!bill) throw new Error("Against supplier bill not found");
+        if (String(bill.supplierId) !== String(row.partyId)) throw new Error("Payment supplier does not match the against supplier bill");
+        if (!["POSTED", "PAID"].includes(String(bill.status).toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted supplier bill");
+        if (Number(row.amount) > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds bill outstanding amount");
+      }
+    }
 
     const lines = receive
       ? receiptPosting({
@@ -948,123 +1041,7 @@ async function postRecord(
       "finance-controller",
     );
 
-    /*
-     * -----------------------------------------
-     * UPDATE AGAINST INVOICE / SUPPLIER BILL
-     * -----------------------------------------
-     */
-
-    if (
-      row.againstDocumentId
-    ) {
-      if (receive) {
-        const inv =
-          await findRecords<any>(
-            "Invoices",
-            {
-              invoiceId:
-                row.againstDocumentId,
-            },
-            1,
-          );
-
-        if (inv.rows[0]) {
-          const paid =
-            round2(
-              Number(
-                inv.rows[0]
-                  .paidAmount || 0,
-              ) +
-                Number(
-                  row.amount,
-                ),
-            );
-
-          const outstanding =
-            Math.max(
-              0,
-              round2(
-                Number(
-                  inv.rows[0]
-                    .totalAmount ||
-                    0,
-                ) - paid,
-              ),
-            );
-
-          await updateRecord(
-            "Invoices",
-            "invoiceId",
-            row.againstDocumentId,
-            {
-              paidAmount:
-                paid,
-              outstandingAmount:
-                outstanding,
-              status:
-                outstanding ===
-                0
-                  ? "PAID"
-                  : "POSTED",
-            },
-            "finance-controller",
-          );
-        }
-      } else {
-        const bill =
-          await findRecords<any>(
-            "SupplierBills",
-            {
-              billId:
-                row.againstDocumentId,
-            },
-            1,
-          );
-
-        if (bill.rows[0]) {
-          const paid =
-            round2(
-              Number(
-                bill.rows[0]
-                  .paidAmount || 0,
-              ) +
-                Number(
-                  row.amount,
-                ),
-            );
-
-          const outstanding =
-            Math.max(
-              0,
-              round2(
-                Number(
-                  bill.rows[0]
-                    .totalAmount ||
-                    0,
-                ) - paid,
-              ),
-            );
-
-          await updateRecord(
-            "SupplierBills",
-            "billId",
-            row.againstDocumentId,
-            {
-              paidAmount:
-                paid,
-              outstandingAmount:
-                outstanding,
-              status:
-                outstanding ===
-                0
-                  ? "PAID"
-                  : "POSTED",
-            },
-            "finance-controller",
-          );
-        }
-      }
-    }
+    await synchronizePaymentAllocation({ ...row, status: "POSTED" });
 
     return {
       recordType:

@@ -88,6 +88,11 @@ function addMonthsUtc(date: Date, months: number) {
   return result;
 }
 
+export function monthlyAnniversaryDate(loanDate: string, months: number) {
+  if (!Number.isInteger(months) || months < 0) throw new Error("Anniversary month count must be a non-negative integer");
+  return addMonthsUtc(toUtcDate(loanDate), months).toISOString().slice(0, 10);
+}
+
 export function completedMonthlyPeriods(loanDate: string, asOf: string) {
   const start = toUtcDate(loanDate);
   const end = toUtcDate(asOf);

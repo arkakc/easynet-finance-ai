@@ -2,6 +2,8 @@ import {
   appendRecord,
   batchAppend,
   listTable,
+  postJournalRecord,
+  updateRecord,
 } from "@/lib/backend/apps-script";
 import {
   INITIAL_ACCOUNT_IDS,
@@ -12,9 +14,10 @@ const LOAN_ID = "LOAN-2026-0001";
 const OPENING_JOURNAL_ID = "JRN-2026-OPEN-0001";
 
 async function loadExistingState() {
-  const [accounts, loans, journalHeaders, journalLines] = await Promise.all([
+  const [accounts, loans, loanEvents, journalHeaders, journalLines] = await Promise.all([
     listTable<{ accountId: string }>("Accounts", 500, 0),
-    listTable<{ loanId: string }>("Loans", 500, 0),
+    listTable<any>("Loans", 500, 0),
+    listTable<{ loanEventId: string; loanId: string }>("LoanEvents", 500, 0),
     listTable<{ journalId: string }>("JournalHeaders", 500, 0),
     listTable<{ journalLineId: string; journalId: string }>("JournalLines", 500, 0),
   ]);
@@ -22,6 +25,7 @@ async function loadExistingState() {
   return {
     accounts: accounts.rows,
     loans: loans.rows,
+    loanEvents: loanEvents.rows,
     journalHeaders: journalHeaders.rows,
     journalLines: journalLines.rows,
   };
@@ -40,8 +44,23 @@ async function ensureAccounts(existingAccounts: { accountId: string }[]) {
   return missing.map((account) => account.accountId);
 }
 
-async function ensureOpeningLoan(existingLoans: { loanId: string }[]) {
-  if (existingLoans.some((row) => row.loanId === LOAN_ID)) return false;
+async function ensureOpeningLoan(existingLoans: any[]) {
+  const existing = existingLoans.find((row) => row.loanId === LOAN_ID);
+  if (existing) {
+    await updateRecord(
+      "Loans",
+      "loanId",
+      LOAN_ID,
+      {
+        interestMethod: existing.interestMethod || "COMPOUND",
+        interestFrequency: existing.interestFrequency || "MONTHLY_ANNIVERSARY",
+        firstAccrualDate: existing.firstAccrualDate || "2026-10-04",
+        lastAccruedThrough: existing.lastAccruedThrough || "2026-09-04",
+      },
+      "finance-bootstrap",
+    );
+    return false;
+  }
 
   await appendRecord(
     "Loans",
@@ -61,10 +80,36 @@ async function ensureOpeningLoan(existingLoans: { loanId: string }[]) {
         "25% monthly compound interest. Interest compounds on each monthly anniversary from 04-09-2026. Repayment when company cash position permits; controller approval required.",
       sourceDocumentId: "",
       status: "ACTIVE",
+      interestMethod: "COMPOUND",
+      interestFrequency: "MONTHLY_ANNIVERSARY",
+      firstAccrualDate: "2026-10-04",
+      lastAccruedThrough: "2026-09-04",
     },
     "finance-bootstrap",
   );
 
+  return true;
+}
+
+async function ensureOpeningLoanEvent(existingEvents: { loanEventId: string; loanId: string }[]) {
+  const eventId = `${LOAN_ID}-DISBURSEMENT`;
+  if (existingEvents.some((row) => row.loanEventId === eventId)) return false;
+
+  await appendRecord(
+    "LoanEvents",
+    {
+      loanEventId: eventId,
+      loanId: LOAN_ID,
+      eventType: "DISBURSEMENT",
+      eventDate: "2026-09-04",
+      principalAmount: 500,
+      interestAmount: 0,
+      cashAmount: 500,
+      journalId: OPENING_JOURNAL_ID,
+      reference: "Opening third-party loan funding",
+    },
+    "finance-bootstrap",
+  );
   return true;
 }
 
@@ -76,28 +121,6 @@ async function ensureOpeningJournal(
   const headerExists = existingHeaders.some(
     (row) => row.journalId === OPENING_JOURNAL_ID,
   );
-
-  if (!headerExists) {
-    await appendRecord(
-      "JournalHeaders",
-      {
-        journalId: OPENING_JOURNAL_ID,
-        postingDate: "2026-09-04",
-        documentType: "FUNDING_LOAN",
-        documentId: LOAN_ID,
-        documentNumber: LOAN_ID,
-        reference: "Opening business funding received from Willie Batia",
-        projectId: "",
-        status: "POSTED",
-        reversalOfJournalId: "",
-        createdBy: "finance-bootstrap",
-        approvedBy: "Finance Controller",
-        createdAt: now,
-        postedAt: now,
-      },
-      "finance-bootstrap",
-    );
-  }
 
   const requiredLines = [
     {
@@ -130,23 +153,48 @@ async function ensureOpeningJournal(
     },
   ];
 
-  const existingLineIds = new Set(
-    existingLines
-      .filter((row) => row.journalId === OPENING_JOURNAL_ID)
-      .map((row) => row.journalLineId),
-  );
-  const missingLines = requiredLines.filter(
-    (line) => !existingLineIds.has(line.journalLineId),
+  const existingOpeningLines = existingLines.filter(
+    (row) => row.journalId === OPENING_JOURNAL_ID,
   );
 
-  if (missingLines.length) {
-    await batchAppend("JournalLines", missingLines, "finance-bootstrap");
+  if (headerExists) {
+    const lineIds = new Set(existingOpeningLines.map((row) => row.journalLineId));
+    const incomplete = requiredLines.some((line) => !lineIds.has(line.journalLineId));
+    if (incomplete) {
+      throw new Error(
+        `Opening journal ${OPENING_JOURNAL_ID} is incomplete. Do not auto-repair an immutable posted journal; review the sheet before continuing.`,
+      );
+    }
+    return { headerCreated: false, linesCreated: 0 };
   }
 
-  return {
-    headerCreated: !headerExists,
-    linesCreated: missingLines.length,
-  };
+  if (existingOpeningLines.length) {
+    throw new Error(
+      `Orphan journal lines exist for ${OPENING_JOURNAL_ID}. Review them before finance bootstrap.`,
+    );
+  }
+
+  await postJournalRecord({
+    header: {
+      journalId: OPENING_JOURNAL_ID,
+      postingDate: "2026-09-04",
+      documentType: "FUNDING_LOAN",
+      documentId: LOAN_ID,
+      documentNumber: LOAN_ID,
+      reference: "Opening business funding received from Willie Batia",
+      projectId: "",
+      status: "POSTED",
+      reversalOfJournalId: "",
+      createdBy: "finance-bootstrap",
+      approvedBy: "Finance Controller",
+      createdAt: now,
+      postedAt: now,
+    },
+    lines: requiredLines,
+    actor: "finance-bootstrap",
+  });
+
+  return { headerCreated: true, linesCreated: requiredLines.length };
 }
 
 export async function bootstrapFinanceMasterData() {
@@ -158,6 +206,7 @@ export async function bootstrapFinanceMasterData() {
     state.journalHeaders,
     state.journalLines,
   );
+  const loanEventCreated = await ensureOpeningLoanEvent(state.loanEvents);
 
   return {
     ok: true,
@@ -165,6 +214,7 @@ export async function bootstrapFinanceMasterData() {
     openingLoan: loanCreated ? "created" : "already-exists",
     openingJournal: journal.headerCreated ? "created" : "already-exists",
     openingJournalLinesCreated: journal.linesCreated,
+    openingLoanEvent: loanEventCreated ? "created" : "already-exists",
     openingBalance: {
       cash: 500,
       loanPayable: 500,

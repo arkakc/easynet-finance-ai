@@ -77,7 +77,7 @@ export default function AssetsPage() {
         <label>Location<input name="location" /></label>
         <label>Assigned To<input name="assignedTo" /></label>
         <label>Useful Life (months)<input name="usefulLifeMonths" type="number" min="1" defaultValue="36" required /></label>
-        <label>Source Document ID<input name="sourceDocumentId" placeholder="Optional DOC-..." /></label>
+        <label>Source Document ID<input name="sourceDocumentId" placeholder="Required retained DOC-..." required /></label>
         <div className="form-wide"><button type="submit">Save Asset</button></div>
       </form>
 

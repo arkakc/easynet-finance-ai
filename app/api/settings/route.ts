@@ -43,8 +43,18 @@ export async function POST(request: Request) {
       if (!["UNVERIFIED", "VERIFIED", "NOT_REGISTERED"].includes(normalized)) {
         throw new Error("GST status must be UNVERIFIED, VERIFIED or NOT_REGISTERED");
       }
-      if (normalized === "VERIFIED" && setting.notes.length < 5) {
-        throw new Error("GST verification requires an evidence/reference note");
+      if (normalized === "VERIFIED") {
+        if (setting.notes.length < 5) {
+          throw new Error("GST verification requires an evidence/reference note");
+        }
+        const gstNumber = await findRecords<any>("Settings", { key: "gst_number" }, 1);
+        if (!String(gstNumber.rows[0]?.value || "").trim()) {
+          throw new Error("Record the GST number before setting GST status to VERIFIED");
+        }
+        const evidence = await findRecords<any>("Documents", { documentType: "GST_REGISTRATION" }, 20);
+        if (!evidence.rows.some((row: any) => String(row.driveFileId || "").trim())) {
+          throw new Error("Retain a GST registration source document in Google Drive before setting GST status to VERIFIED");
+        }
       }
       setting.value = normalized;
     }

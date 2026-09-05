@@ -7,7 +7,7 @@ import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
 const schema = z.object({
   budgetId: z.string().trim().optional().default(""),
-  financialYear: z.string().trim().min(4),
+  financialYear: z.string().trim().regex(/^\d{4}$/, "Financial year must be YYYY"),
   period: z.string().trim().min(1),
   accountId: z.string().trim().min(1),
   projectId: z.string().trim().optional().default(""),
@@ -74,6 +74,14 @@ export async function POST(request: Request) {
     requireSecret(body.secret);
     const record = schema.parse(body.record || {});
 
+    const normalizedPeriod = record.period.toUpperCase();
+    if (normalizedPeriod !== "ANNUAL" && !/^\d{4}-\d{2}$/.test(normalizedPeriod)) {
+      throw new Error("Budget period must be ANNUAL or YYYY-MM");
+    }
+    if (normalizedPeriod !== "ANNUAL" && !normalizedPeriod.startsWith(`${record.financialYear}-`)) {
+      throw new Error("Budget period must fall within the selected financial year");
+    }
+
     const account = await findRecords("Accounts", { accountId: record.accountId }, 1);
     if (!account.rows.length) throw new Error("Budget account does not exist");
     if (record.projectId) {
@@ -81,12 +89,21 @@ export async function POST(request: Request) {
       if (!project.rows.length) throw new Error("Budget project does not exist");
     }
 
+    const sameYear = await findRecords<any>("Budgets", { financialYear: record.financialYear }, 500);
+    const semanticDuplicate = sameYear.rows.find((row) =>
+      String(row.period || "").toUpperCase() === normalizedPeriod &&
+      String(row.accountId || "") === record.accountId &&
+      String(row.projectId || "") === record.projectId,
+    );
+    if (semanticDuplicate) throw new Error(`A budget already exists for ${record.financialYear} ${normalizedPeriod}, account ${record.accountId}${record.projectId ? `, project ${record.projectId}` : ""}`);
+
     const budgetId = record.budgetId || `BUD-${record.financialYear}-${randomUUID().slice(0, 8).toUpperCase()}`;
     const duplicate = await findRecords("Budgets", { budgetId }, 1);
     if (duplicate.rows.length) throw new Error(`Budget ID already exists: ${budgetId}`);
 
     const result = await appendRecord("Budgets", {
       ...record,
+      period: normalizedPeriod,
       budgetId,
       actualAmount: 0,
       variance: record.budgetAmount,

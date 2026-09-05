@@ -30,6 +30,16 @@ export default async function CashFlowPage() {
     error = err instanceof Error ? err.message : "Cash-flow load failed";
   }
 
+  if (error) {
+    return (
+      <>
+        <h2>Cash Flow</h2>
+        <p className="small">Live finance data is unavailable until the backend connection succeeds.</p>
+        <section className="panel warning-panel"><strong>Cash-flow data unavailable.</strong> {error}. Do not rely on zero or blank figures while this warning is active.</section>
+      </>
+    );
+  }
+
   const cashAccounts = new Set(["ACC-1110", "ACC-1120"]);
   const rows = headers.map((header) => {
     const cashMovement = lines

@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { listTable } from "@/lib/backend/apps-script";
-import { calculateCompoundMonthlyLoan } from "@/lib/accounting/loan";
+import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
 
 export const dynamic = "force-dynamic";
 
 type JournalLine = { accountId: string; debit: number | string; credit: number | string };
 type Account = { accountId: string; accountType: string };
-type Loan = { lenderName: string; loanDate: string; principal: number | string; interestRate: number | string; principalRepaid: number | string; interestPaid: number | string; contractInterest: number | string; status: string };
+type Loan = { lenderName: string; loanDate: string; principal: number | string; interestRate: number | string; principalRepaid: number | string; interestPaid: number | string; contractInterest: number | string; principalOutstanding: number | string; interestOutstanding: number | string; expectedSettlement: number | string; lastAccruedThrough: string; firstAccrualDate: string; status: string };
 type Invoice = { status: string; outstandingAmount: number | string };
 type Bill = { status: string; outstandingAmount: number | string };
 type PO = { status: string; totalAmount: number | string };
@@ -70,13 +70,17 @@ export default async function DashboardPage() {
   }
   const netProfit = revenue - expenses;
   const activeLoan = loans.find((loan) => String(loan.status).toUpperCase() === "ACTIVE");
-  const loanSnapshot = activeLoan ? calculateCompoundMonthlyLoan({
-    principal: n(activeLoan.principal),
-    monthlyRate: n(activeLoan.interestRate),
-    loanDate: activeLoan.loanDate,
-    principalRepaid: n(activeLoan.principalRepaid),
-    interestPaid: n(activeLoan.interestPaid),
-  }) : null;
+  let nextLoanAccrual = "";
+  if (activeLoan) {
+    try {
+      const loanDate = normalizeAccountingDate(activeLoan.loanDate);
+      const lastAccrued = normalizeAccountingDate(activeLoan.lastAccruedThrough || loanDate);
+      const recognizedPeriods = completedMonthlyPeriods(loanDate, lastAccrued);
+      nextLoanAccrual = monthlyAnniversaryDate(loanDate, recognizedPeriods + 1);
+    } catch {
+      nextLoanAccrual = activeLoan.firstAccrualDate || "Review required";
+    }
+  }
 
   const gstStatus = settings.find((row) => row.key === "gst_status")?.value || "UNVERIFIED";
   const draftApprovals = invoices.filter((row) => row.status === "DRAFT").length + bills.filter((row) => row.status === "DRAFT").length;
@@ -86,15 +90,16 @@ export default async function DashboardPage() {
   const activeProjects = projects.filter((row) => ["OPEN", "ACTIVE", "ON HOLD"].includes(String(row.status).toUpperCase())).length;
   const sourcePending = docs.filter((row) => !row.driveFileId).length;
 
+  const unavailable = "Unavailable";
   const kpis = [
-    ["Cash & Bank", money(cashBank)],
-    ["Accounts Receivable", money(accountsReceivable)],
-    ["Accounts Payable", money(accountsPayable)],
-    ["GST Payable", money(gstPayable)],
-    ["Revenue (Posted)", money(revenue)],
-    ["Expenses (Posted)", money(expenses)],
-    ["Net Profit (Posted)", money(netProfit)],
-    ["PO Commitments", money(poCommitments)],
+    ["Cash & Bank", backendError ? unavailable : money(cashBank)],
+    ["Accounts Receivable", backendError ? unavailable : money(accountsReceivable)],
+    ["Accounts Payable", backendError ? unavailable : money(accountsPayable)],
+    ["GST Payable", backendError ? unavailable : money(gstPayable)],
+    ["Revenue (Posted)", backendError ? unavailable : money(revenue)],
+    ["Expenses (Posted)", backendError ? unavailable : money(expenses)],
+    ["Net Profit (Posted)", backendError ? unavailable : money(netProfit)],
+    ["PO Commitments", backendError ? unavailable : money(poCommitments)],
   ];
 
   return (
@@ -104,7 +109,7 @@ export default async function DashboardPage() {
         <div className="badge">GST: {gstStatus}</div>
       </div>
 
-      {backendError && <section className="panel warning-panel"><strong>Backend warning:</strong> {backendError}</section>}
+      {backendError && <section className="panel warning-panel"><strong>Financial data unavailable.</strong> Backend connection failed: {backendError}. Do not rely on dashboard balances until this warning clears.</section>}
 
       <div className="grid dashboard-grid">
         {kpis.map(([label, value]) => <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
@@ -113,25 +118,25 @@ export default async function DashboardPage() {
       <div className="two-col">
         <section className="panel">
           <h3>Control Snapshot</h3>
-          <p>Pending finance approvals: <strong>{draftApprovals}</strong></p>
-          <p>Active projects: <strong>{activeProjects}</strong></p>
-          <p>Source files not retained: <strong>{sourcePending}</strong></p>
-          <p>AR subledger total: <strong>{money(arSubledger)}</strong></p>
-          <p>AP subledger total: <strong>{money(apSubledger)}</strong></p>
+          <p>Pending finance approvals: <strong>{backendError ? "—" : draftApprovals}</strong></p>
+          <p>Active projects: <strong>{backendError ? "—" : activeProjects}</strong></p>
+          <p>Source files not retained: <strong>{backendError ? "—" : sourcePending}</strong></p>
+          <p>AR subledger total: <strong>{backendError ? "Unavailable" : money(arSubledger)}</strong></p>
+          <p>AP subledger total: <strong>{backendError ? "Unavailable" : money(apSubledger)}</strong></p>
           <p>AI auto-posting: <strong>Disabled</strong></p>
           <div className="button-row"><Link className="link-button" href="/controls">Open Control Centre</Link><Link className="link-button secondary-link" href="/reports">Open Reports</Link></div>
         </section>
 
         <section className="panel">
           <h3>Loan Control</h3>
-          {activeLoan && loanSnapshot ? <>
+          {backendError ? <p>Loan data unavailable while the backend warning is active.</p> : activeLoan ? <>
             <p>Lender: <strong>{activeLoan.lenderName}</strong></p>
-            <p>Principal: <strong>{money(n(activeLoan.principal))}</strong></p>
+            <p>Original principal: <strong>{money(n(activeLoan.principal))}</strong></p>
             <p>Interest: <strong>{(n(activeLoan.interestRate) * 100).toFixed(2)}% monthly compound</strong></p>
-            <p>Contract interest recognized: <strong>{money(n(activeLoan.contractInterest))}</strong></p>
-            <p>Calculated interest exposure: <strong>{money(loanSnapshot.accruedInterest)}</strong></p>
-            <p>Calculated total exposure: <strong>{money(loanSnapshot.totalOutstanding)}</strong></p>
-            <p>Next accrual: <strong>{loanSnapshot.nextAccrualDate}</strong></p>
+            <p>Principal outstanding: <strong>{money(n(activeLoan.principalOutstanding))}</strong></p>
+            <p>Accrued interest outstanding: <strong>{money(n(activeLoan.interestOutstanding))}</strong></p>
+            <p>Recorded total settlement: <strong>{money(n(activeLoan.expectedSettlement))}</strong></p>
+            <p>Next accrual: <strong>{nextLoanAccrual || "—"}</strong></p>
             <Link className="link-button" href="/loans/actions">Loan Actions</Link>
           </> : <p>No active loan loaded.</p>}
         </section>

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { appendRecord, batchAppend, findRecords, updateRecord } from "@/lib/backend/apps-script";
+import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
 const quoteSchema = z.object({
   quoteId: z.string().trim().min(1),
@@ -29,42 +30,58 @@ function id(prefix: string) {
   return `${prefix}-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
+async function assertAccount(accountId: string) {
+  const result = await findRecords<any>("Accounts", { accountId }, 1);
+  const account = result.rows[0];
+  if (!account || String(account.active).toLowerCase() === "false") throw new Error(`Account does not exist or is inactive: ${accountId}`);
+}
+
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "quoteToInvoice" | "poToBill"; payload?: unknown };
+    const body = (await request.json()) as { secret?: string; action?: "quoteToInvoice" | "poToBill"; payload?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "quoteToInvoice") {
       const input = quoteSchema.parse(body.payload || {});
+      await assertAccount(input.revenueAccountId);
+
       const quoteResult = await findRecords<any>("Quotes", { quoteId: input.quoteId }, 1);
       const quote = quoteResult.rows[0];
       if (!quote) throw new Error("Quotation not found");
-      if (String(quote.status).toUpperCase() !== "APPROVED") throw new Error("Quotation must be APPROVED before conversion");
-      const existing = await findRecords<any>("Invoices", { sourceDocumentId: input.quoteId }, 10);
-      if (existing.rows.length) throw new Error("This quotation has already been converted to an invoice");
+      const quoteStatus = String(quote.status || "").toUpperCase();
+      if (!["APPROVED", "CONVERTED"].includes(quoteStatus)) throw new Error("Quotation must be APPROVED before conversion");
+
       const sourceLines = await findRecords<any>("QuoteLines", { quoteId: input.quoteId }, 500);
       if (!sourceLines.rows.length) throw new Error("Quotation has no lines");
+      const existing = await findRecords<any>("Invoices", { sourceDocumentId: input.quoteId }, 10);
+      if (existing.rows.length > 1) throw new Error("Multiple invoices are linked to this quotation; manual review required");
 
-      const invoiceId = id("INV");
-      const invoiceNumber = input.invoiceNumber || invoiceId;
-      await appendRecord("Invoices", {
-        invoiceId,
-        invoiceNumber,
-        customerId: quote.customerId,
-        projectId: quote.projectId,
-        invoiceDate: input.invoiceDate,
-        dueDate: input.dueDate,
-        netAmount: quote.netAmount,
-        gstAmount: quote.gstAmount,
-        totalAmount: quote.totalAmount,
-        paidAmount: 0,
-        outstandingAmount: quote.totalAmount,
-        status: "DRAFT",
-        sourceDocumentId: input.quoteId,
-        journalId: "",
-      }, "conversion-ui");
+      const invoice = existing.rows[0];
+      const invoiceId = invoice?.invoiceId || id("INV");
+      const invoiceNumber = invoice?.invoiceNumber || input.invoiceNumber || invoiceId;
 
-      await batchAppend("InvoiceLines", sourceLines.rows.map((line: any, index: number) => ({
+      if (!invoice) {
+        await appendRecord("Invoices", {
+          invoiceId,
+          invoiceNumber,
+          customerId: quote.customerId,
+          projectId: quote.projectId,
+          invoiceDate: normalizeAccountingDate(input.invoiceDate),
+          dueDate: input.dueDate ? normalizeAccountingDate(input.dueDate) : "",
+          netAmount: quote.netAmount,
+          gstAmount: quote.gstAmount,
+          totalAmount: quote.totalAmount,
+          paidAmount: 0,
+          outstandingAmount: quote.totalAmount,
+          status: "DRAFT",
+          sourceDocumentId: input.quoteId,
+          journalId: "",
+        }, "conversion-ui");
+      }
+
+      const currentLines = await findRecords<any>("InvoiceLines", { invoiceId }, 500);
+      const existingLineIds = new Set(currentLines.rows.map((line: any) => String(line.invoiceLineId)));
+      const desiredLines = sourceLines.rows.map((line: any, index: number) => ({
         invoiceLineId: `${invoiceId}-${String(index + 1).padStart(3, "0")}`,
         invoiceId,
         lineNo: index + 1,
@@ -77,44 +94,67 @@ export async function POST(request: Request) {
         gstAmount: line.gstAmount,
         totalAmount: line.totalAmount,
         revenueAccountId: input.revenueAccountId,
-      })), "conversion-ui");
+      }));
+      const missingLines = desiredLines.filter((line) => !existingLineIds.has(line.invoiceLineId));
+      if (missingLines.length) await batchAppend("InvoiceLines", missingLines, "conversion-ui");
 
-      await updateRecord("Quotes", "quoteId", input.quoteId, { status: "CONVERTED" }, "conversion-ui");
-      return NextResponse.json({ ok: true, action: body.action, sourceId: input.quoteId, createdId: invoiceId, documentNumber: invoiceNumber });
+      if (quoteStatus !== "CONVERTED") {
+        await updateRecord("Quotes", "quoteId", input.quoteId, { status: "CONVERTED" }, "conversion-ui");
+      }
+
+      return NextResponse.json({
+        ok: true,
+        action: body.action,
+        sourceId: input.quoteId,
+        createdId: invoiceId,
+        documentNumber: invoiceNumber,
+        status: invoice ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created",
+        linesCreated: missingLines.length,
+      });
     }
 
     if (body.action === "poToBill") {
       const input = poSchema.parse(body.payload || {});
+      await assertAccount(input.costAccountId);
+
       const poResult = await findRecords<any>("PurchaseOrders", { poId: input.poId }, 1);
       const po = poResult.rows[0];
       if (!po) throw new Error("Purchase order not found");
-      if (String(po.status).toUpperCase() !== "APPROVED") throw new Error("Purchase order must be APPROVED before conversion");
-      const existing = await findRecords<any>("SupplierBills", { poId: input.poId }, 10);
-      if (existing.rows.length) throw new Error("This PO already has a supplier bill linked");
+      const poStatus = String(po.status || "").toUpperCase();
+      if (!["APPROVED", "BILL_CREATED", "BILLED"].includes(poStatus)) throw new Error("Purchase order must be APPROVED before conversion");
+
       const sourceLines = await findRecords<any>("POLines", { poId: input.poId }, 500);
       if (!sourceLines.rows.length) throw new Error("Purchase order has no lines");
+      const existing = await findRecords<any>("SupplierBills", { poId: input.poId }, 10);
+      if (existing.rows.length > 1) throw new Error("Multiple supplier bills are linked to this PO; manual review required");
 
-      const billId = id("BILL");
-      const billNumber = input.billNumber || billId;
-      await appendRecord("SupplierBills", {
-        billId,
-        billNumber,
-        supplierId: po.supplierId,
-        projectId: po.projectId,
-        billDate: input.billDate,
-        dueDate: input.dueDate,
-        poId: input.poId,
-        netAmount: po.netAmount,
-        gstAmount: po.gstAmount,
-        totalAmount: po.totalAmount,
-        paidAmount: 0,
-        outstandingAmount: po.totalAmount,
-        status: "DRAFT",
-        sourceDocumentId: input.poId,
-        journalId: "",
-      }, "conversion-ui");
+      const bill = existing.rows[0];
+      const billId = bill?.billId || id("BILL");
+      const billNumber = bill?.billNumber || input.billNumber || billId;
 
-      await batchAppend("SupplierBillLines", sourceLines.rows.map((line: any, index: number) => ({
+      if (!bill) {
+        await appendRecord("SupplierBills", {
+          billId,
+          billNumber,
+          supplierId: po.supplierId,
+          projectId: po.projectId,
+          billDate: normalizeAccountingDate(input.billDate),
+          dueDate: input.dueDate ? normalizeAccountingDate(input.dueDate) : "",
+          poId: input.poId,
+          netAmount: po.netAmount,
+          gstAmount: po.gstAmount,
+          totalAmount: po.totalAmount,
+          paidAmount: 0,
+          outstandingAmount: po.totalAmount,
+          status: "DRAFT",
+          sourceDocumentId: input.poId,
+          journalId: "",
+        }, "conversion-ui");
+      }
+
+      const currentLines = await findRecords<any>("SupplierBillLines", { billId }, 500);
+      const existingLineIds = new Set(currentLines.rows.map((line: any) => String(line.billLineId)));
+      const desiredLines = sourceLines.rows.map((line: any, index: number) => ({
         billLineId: `${billId}-${String(index + 1).padStart(3, "0")}`,
         billId,
         lineNo: index + 1,
@@ -127,10 +167,23 @@ export async function POST(request: Request) {
         gstAmount: line.gstAmount,
         totalAmount: line.totalAmount,
         costAccountId: input.costAccountId,
-      })), "conversion-ui");
+      }));
+      const missingLines = desiredLines.filter((line) => !existingLineIds.has(line.billLineId));
+      if (missingLines.length) await batchAppend("SupplierBillLines", missingLines, "conversion-ui");
 
-      await updateRecord("PurchaseOrders", "poId", input.poId, { status: "BILLED" }, "conversion-ui");
-      return NextResponse.json({ ok: true, action: body.action, sourceId: input.poId, createdId: billId, documentNumber: billNumber });
+      if (poStatus === "APPROVED") {
+        await updateRecord("PurchaseOrders", "poId", input.poId, { status: "BILL_CREATED" }, "conversion-ui");
+      }
+
+      return NextResponse.json({
+        ok: true,
+        action: body.action,
+        sourceId: input.poId,
+        createdId: billId,
+        documentNumber: billNumber,
+        status: bill ? (missingLines.length ? "recovered-partial-conversion" : "already-converted") : "created",
+        linesCreated: missingLines.length,
+      });
     }
 
     throw new Error("Unsupported conversion action");

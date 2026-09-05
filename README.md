@@ -4,7 +4,7 @@ AI-assisted finance-control application for **Easynet IT Solutions Limited**.
 
 ## Current milestone
 
-**v0.2 — Integrated Finance Control MVP**
+**v0.2.1 — Reliability & Accounting-Control Hardening**
 
 The application is designed for a small PNG IT services, hardware and project-delivery business. Google Sheets is the MVP data store, Google Drive retains source evidence, and Google Apps Script provides the private backend bridge used by the Vercel-hosted Next.js application.
 
@@ -108,12 +108,7 @@ Never commit real secrets to GitHub.
 
 ## Google Apps Script backend
 
-The repository contains:
-
-- `apps-script/Code.gs` — original v0.1 backend
-- `apps-script/Code-v2.gs` — current v0.2 backend with Drive source upload and faster batch writes
-
-For the v0.2 test cycle, replace the code in the **existing bound Apps Script project** with `apps-script/Code-v2.gs`, save it, run `bootstrapDatabase()` once, and deploy a new Web App version. Reusing the same Apps Script project preserves Script Properties such as the spreadsheet ID, Drive root ID and API token.
+The repository contains `apps-script/Code.gs` and `apps-script/Code-v2.gs`; in v0.2.1 they are intentionally identical. Replace the code in the **company-owned bound Apps Script project** with `apps-script/Code.gs`, save it, run `bootstrapDatabase()` once to apply additive schema upgrades, and deploy a new Web App version. Reusing the same Apps Script project preserves Script Properties such as the spreadsheet ID, Drive root ID and API token.
 
 If Google gives the new deployment a different `/exec` URL, update `APPS_SCRIPT_WEB_APP_URL` in Vercel. Do not paste the API token into chat or commit it to the repository.
 
@@ -134,7 +129,7 @@ npm run build
 
 ## Planned test sequence
 
-1. Backend health and v0.2 Apps Script deployment
+1. Backend health and v0.2.1 Apps Script deployment
 2. Dashboard / Accounts / Loans
 3. Customer / Supplier / Project masters
 4. Quote → Invoice → Post → Customer Receipt
@@ -148,3 +143,8 @@ npm run build
 ## Production hardening still required after MVP testing
 
 The current write controls use `APP_SECRET`, which is appropriate only for the private MVP. Before broader multi-user use, add proper login, role-based permissions (Admin / Finance Controller / Entry / Management / Auditor), stronger approval workflows, automated backup/recovery checks, and migrate from Google Sheets when concurrency/data volume justifies PostgreSQL/Supabase/ERPNext.
+
+
+## v0.2.1 fix details
+
+See `CHANGELOG-0.2.1.md` for the reliability, accounting-integrity, AI-evidence, loan and purchase-control fixes included in this package.

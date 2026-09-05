@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
 const schema = z.object({
   assetId: z.string().trim().optional().default(""),
@@ -41,15 +42,24 @@ export async function POST(request: Request) {
       const supplier = await findRecords("Suppliers", { supplierId: record.supplierId }, 1);
       if (!supplier.rows.length) throw new Error("Supplier does not exist");
     }
-    if (record.sourceDocumentId) {
-      const source = await findRecords("Documents", { documentId: record.sourceDocumentId }, 1);
-      if (!source.rows.length) throw new Error("Source document does not exist");
+    if (!record.sourceDocumentId) {
+      throw new Error("Fixed asset creation requires a retained source document");
     }
+    const source = await findRecords<any>("Documents", { documentId: record.sourceDocumentId }, 1);
+    if (!source.rows.length) throw new Error("Source document does not exist");
+    if (!String(source.rows[0].driveFileId || "").trim()) throw new Error("Source document binary is not retained in Google Drive");
+
+    if (record.serialNumber) {
+      const serial = await findRecords<any>("FixedAssets", { serialNumber: record.serialNumber }, 10);
+      if (serial.rows.length) throw new Error(`Asset serial number already exists: ${record.serialNumber}`);
+    }
+
     const assetId = record.assetId || `AST-${randomUUID().slice(0, 8).toUpperCase()}`;
     const duplicate = await findRecords("FixedAssets", { assetId }, 1);
     if (duplicate.rows.length) throw new Error(`Asset ID already exists: ${assetId}`);
     const result = await appendRecord("FixedAssets", {
       ...record,
+      purchaseDate: normalizeAccountingDate(record.purchaseDate),
       assetId,
       accumulatedDepreciation: 0,
       netBookValue: record.cost,

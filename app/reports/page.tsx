@@ -56,6 +56,16 @@ export default async function ReportsPage() {
     error = err instanceof Error ? err.message : "Report load failed";
   }
 
+  if (error) {
+    return (
+      <>
+        <h2>Financial Reports</h2>
+        <p className="small">Live finance data is unavailable until the backend connection succeeds.</p>
+        <section className="panel warning-panel"><strong>Financial report data unavailable.</strong> {error}. Do not rely on zero or blank figures while this warning is active.</section>
+      </>
+    );
+  }
+
   const accountMap = new Map(accounts.map((a) => [a.accountId, a]));
   const balances = new Map<string, number>();
   for (const line of lines) {

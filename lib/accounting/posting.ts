@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { batchAppend, findRecords, listTable } from "@/lib/backend/apps-script";
+import { findRecords, listTable, postJournalRecord } from "@/lib/backend/apps-script";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 
 export type PostingLine = {
@@ -50,14 +50,26 @@ export function validateBalancedPosting(lines: PostingLine[]) {
 
 export async function assertAccountsExist(lines: PostingLine[]) {
   const accountIds = [...new Set(lines.map((line) => line.accountId))];
-  const result = await listTable<{ accountId: string; active: boolean | string }>("Accounts", 500, 0);
+  const result = await listTable<{
+    accountId: string;
+    parentAccount: string;
+    active: boolean | string;
+  }>("Accounts", 500, 0);
+
   const active = new Set(
     result.rows
       .filter((row) => String(row.active).toLowerCase() !== "false")
       .map((row) => row.accountId),
   );
+  const parentIds = new Set(
+    result.rows.map((row) => String(row.parentAccount || "")).filter(Boolean),
+  );
+
   const missing = accountIds.filter((id) => !active.has(id));
   if (missing.length) throw new Error(`Missing or inactive accounts: ${missing.join(", ")}`);
+
+  const parents = accountIds.filter((id) => parentIds.has(id));
+  if (parents.length) throw new Error(`Posting to parent/control accounts is blocked: ${parents.join(", ")}`);
 }
 
 export async function postJournal(request: PostingRequest) {
@@ -105,13 +117,11 @@ export async function postJournal(request: PostingRequest) {
     createdAt: now,
   }));
 
-  await batchAppend("JournalHeaders", [header], request.createdBy || "finance-ui");
-  try {
-    await batchAppend("JournalLines", journalLines, request.createdBy || "finance-ui");
-  } catch (error) {
-    // Journal headers are immutable. Surface the incomplete state loudly for manual correction.
-    throw new Error(`Journal header ${journalId} was created but lines failed: ${error instanceof Error ? error.message : "unknown error"}`);
-  }
+  await postJournalRecord({
+    header,
+    lines: journalLines,
+    actor: request.createdBy || "finance-ui",
+  });
 
   return { journalId, header, lines: journalLines };
 }
@@ -187,6 +197,97 @@ export function supplierBillPosting(input: {
     projectId: input.projectId,
     description: "Accounts payable",
   });
+  return lines;
+}
+
+export function salesInvoicePostingByLines(input: {
+  total: number;
+  gst: number;
+  customerId: string;
+  projectId?: string;
+  revenueLines: Array<{ accountId: string; amount: number; description?: string }>;
+}) {
+  const lines: PostingLine[] = [
+    {
+      accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
+      debit: input.total,
+      customerId: input.customerId,
+      projectId: input.projectId,
+      description: "Accounts receivable",
+    },
+  ];
+
+  const grouped = new Map<string, number>();
+  for (const line of input.revenueLines) {
+    grouped.set(line.accountId, round2((grouped.get(line.accountId) || 0) + Number(line.amount || 0)));
+  }
+  for (const [accountId, amount] of grouped.entries()) {
+    if (amount > 0) {
+      lines.push({
+        accountId,
+        credit: amount,
+        customerId: input.customerId,
+        projectId: input.projectId,
+        description: "Sales revenue",
+      });
+    }
+  }
+
+  if (input.gst) {
+    lines.push({
+      accountId: INITIAL_ACCOUNT_IDS.gstPayable,
+      credit: input.gst,
+      customerId: input.customerId,
+      projectId: input.projectId,
+      taxCode: "GST",
+      description: "Output GST",
+    });
+  }
+  validateBalancedPosting(lines);
+  return lines;
+}
+
+export function supplierBillPostingByLines(input: {
+  total: number;
+  gst: number;
+  supplierId: string;
+  projectId?: string;
+  costLines: Array<{ accountId: string; amount: number; description?: string }>;
+}) {
+  const lines: PostingLine[] = [];
+  const grouped = new Map<string, number>();
+  for (const line of input.costLines) {
+    grouped.set(line.accountId, round2((grouped.get(line.accountId) || 0) + Number(line.amount || 0)));
+  }
+  for (const [accountId, amount] of grouped.entries()) {
+    if (amount > 0) {
+      lines.push({
+        accountId,
+        debit: amount,
+        supplierId: input.supplierId,
+        projectId: input.projectId,
+        description: "Supplier cost",
+      });
+    }
+  }
+  if (input.gst) {
+    lines.push({
+      accountId: "ACC-1140",
+      debit: input.gst,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      taxCode: "GST",
+      description: "Input GST",
+    });
+  }
+  lines.push({
+    accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
+    credit: input.total,
+    supplierId: input.supplierId,
+    projectId: input.projectId,
+    description: "Accounts payable",
+  });
+  validateBalancedPosting(lines);
   return lines;
 }
 

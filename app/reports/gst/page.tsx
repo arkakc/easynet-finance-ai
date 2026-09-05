@@ -27,6 +27,16 @@ export default async function GstReportPage() {
     error = err instanceof Error ? err.message : "GST report load failed";
   }
 
+  if (error) {
+    return (
+      <>
+        <h2>GST Control Report</h2>
+        <p className="small">Live finance data is unavailable until the backend connection succeeds.</p>
+        <section className="panel warning-panel"><strong>GST report data unavailable.</strong> {error}. Do not rely on zero or blank figures while this warning is active.</section>
+      </>
+    );
+  }
+
   const status = settings.find((row) => row.key === "gst_status")?.value || "UNVERIFIED";
   const gstNumber = settings.find((row) => row.key === "gst_number")?.value || "";
   const header = new Map(headers.map((row) => [row.journalId, row]));

@@ -7,6 +7,7 @@ import {
   findRecords,
   listTable,
 } from "@/lib/backend/apps-script";
+import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
 const optionalText = z.string().trim().optional().default("");
 const optionalNumber = z.coerce.number().finite().nonnegative().optional().default(0);
@@ -125,10 +126,17 @@ export async function POST(request: Request) {
       const duplicate = await findRecords("Projects", { projectId }, 1);
       if (duplicate.rows.length) throw new Error(`Project ID already exists: ${projectId}`);
 
-      const contractTotal = parsed.contractTotal || parsed.contractNet + parsed.gstAmount;
+      const calculatedTotal = Math.round((parsed.contractNet + parsed.gstAmount + Number.EPSILON) * 100) / 100;
+      if (parsed.contractTotal > 0 && Math.abs(parsed.contractTotal - calculatedTotal) > 0.01) {
+        throw new Error("Project contract total must equal contract net plus GST");
+      }
+      const startDate = parsed.startDate ? normalizeAccountingDate(parsed.startDate) : "";
+      const endDate = parsed.endDate ? normalizeAccountingDate(parsed.endDate) : "";
+      if (startDate && endDate && endDate < startDate) throw new Error("Project end date cannot be before start date");
+      const contractTotal = parsed.contractTotal || calculatedTotal;
       const result = await appendRecord(
         "Projects",
-        { ...parsed, projectId, contractTotal },
+        { ...parsed, projectId, startDate, endDate, contractTotal },
         "master-data-ui",
       );
       return NextResponse.json({ ok: true, type: body.type, row: result.row });

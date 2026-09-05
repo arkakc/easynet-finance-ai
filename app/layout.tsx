@@ -4,6 +4,7 @@ import Link from "next/link";
 export const metadata = {
   title: "Easynet Finance AI",
   description: "Finance control and AI accounting automation for Easynet IT Solutions Limited",
+  robots: { index: false, follow: false, noarchive: true },
 };
 
 const groups = [
