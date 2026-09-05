@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { requirePermission, type Permission } from "@/lib/auth";
+import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
 
@@ -45,16 +45,34 @@ async function nextNumber(action: string) {
 
 export async function GET() {
   try {
-    await requirePermission("dashboard.read");
+    const user = await requirePermission("dashboard.read");
     const response = await legacyGet();
     const body = await response.json();
     if (!body.ok) return NextResponse.json(body, { status: response.status });
 
+    const canSales = hasPermission(user, "sales.read");
+    const canPurchase = hasPermission(user, "purchase.read");
+    const canAccounts = hasPermission(user, "accounts.read");
     const allPurchaseOrders = Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [];
-    const supplierQuotes = allPurchaseOrders.filter((row: any) => String(row.poNumber || "").startsWith("SUPQ-"));
-    const purchaseOrders = allPurchaseOrders.filter((row: any) => !String(row.poNumber || "").startsWith("SUPQ-"));
+    const supplierQuotes = canPurchase ? allPurchaseOrders.filter((row: any) => String(row.poNumber || "").startsWith("SUPQ-")) : [];
+    const purchaseOrders = canPurchase ? allPurchaseOrders.filter((row: any) => !String(row.poNumber || "").startsWith("SUPQ-")) : [];
+    const payments = Array.isArray(body.payments) ? body.payments.filter((row: any) => {
+      if (canAccounts) return true;
+      if (String(row.partyType || "") === "Customer") return canSales;
+      if (String(row.partyType || "") === "Supplier") return canPurchase;
+      return false;
+    }) : [];
 
-    return NextResponse.json({ ...body, supplierQuotes, purchaseOrders });
+    return NextResponse.json({
+      ...body,
+      quotes: canSales ? body.quotes || [] : [],
+      invoices: canSales ? body.invoices || [] : [],
+      supplierQuotes,
+      purchaseOrders,
+      supplierBills: canPurchase ? body.supplierBills || [] : [],
+      expenses: canPurchase ? body.expenses || [] : [],
+      payments,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : 401 });
@@ -65,30 +83,20 @@ export async function POST(request: Request) {
   try {
     const body = await request.json() as { action?: string; payload?: Record<string, unknown> };
     let permission = body.action ? ACTION_PERMISSION[body.action] : undefined;
-    if (body.action === "createPayment") {
-      permission = String(body.payload?.partyType || "") === "Supplier" ? "purchase.write" : "sales.write";
-    }
+    if (body.action === "createPayment") permission = String(body.payload?.partyType || "") === "Supplier" ? "purchase.write" : "sales.write";
     if (!permission) return NextResponse.json({ ok: false, error: "Unsupported transaction action" }, { status: 400 });
     await requirePermission(permission);
     if (!env.APP_SECRET) throw new Error("Server compatibility credential is not configured");
 
     let payload = body.payload || {};
     const series = body.action ? SERIES[body.action] : undefined;
-    if (body.action && series && !String(payload[series.payloadField] || "").trim()) {
-      payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
-    }
+    if (body.action && series && !String(payload[series.payloadField] || "").trim()) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
 
     const legacyAction = body.action === "createSupplierQuote" ? "createPurchaseOrder" : body.action;
-    const internal = new Request(request.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: legacyAction, payload, secret: env.APP_SECRET }),
-    });
+    const internal = new Request(request.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: legacyAction, payload, secret: env.APP_SECRET }) });
     const response = await legacyPost(internal);
     const result = await response.json();
-    if (body.action === "createSupplierQuote" && result?.ok && result?.result) {
-      result.result.type = "supplierQuote";
-    }
+    if (body.action === "createSupplierQuote" && result?.ok && result?.result) result.result.type = "supplierQuote";
     return NextResponse.json(result, { status: response.status });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction failed";
