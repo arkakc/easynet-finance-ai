@@ -1,3 +1,4 @@
+import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { listTable } from "@/lib/backend/apps-script";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export default async function JournalsPage() {
         return (
           <section className="panel" key={header.journalId}>
             <div className="journal-head">
-              <div><strong>{header.journalId}</strong><br/><span className="small">{header.postingDate} · {header.documentType} · {header.documentNumber}</span></div>
+              <div><strong>{header.journalId}</strong><br/><span className="small">{formatAccountingDate(header.postingDate)} · {header.documentType} · {header.documentNumber}</span></div>
               <div><strong>{header.status}</strong><br/><span className="small">Approved by {header.approvedBy || "—"}</span></div>
             </div>
             <p>{header.reference}</p>

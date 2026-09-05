@@ -1,3 +1,4 @@
+import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { listTable } from "@/lib/backend/apps-script";
 import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
 
@@ -55,10 +56,10 @@ export default async function LoansPage() {
           <tbody>
             {loans.map((loan) => (
               <tr key={loan.loanId}>
-                <td>{loan.loanId}</td><td>{loan.lenderName}</td><td>{loan.loanDate}</td><td>{money(n(loan.principal))}</td>
+                <td>{loan.loanId}</td><td>{loan.lenderName}</td><td>{formatAccountingDate(loan.loanDate)}</td><td>{money(n(loan.principal))}</td>
                 <td>{(n(loan.interestRate) * 100).toFixed(2)}% monthly</td>
                 <td>{money(n(loan.principalOutstanding))}</td><td>{money(n(loan.interestOutstanding))}</td>
-                <td>{money(n(loan.expectedSettlement))}</td><td>{nextAccrual(loan)}</td><td>{loan.status}</td>
+                <td>{money(n(loan.expectedSettlement))}</td><td>{formatAccountingDate(nextAccrual(loan))}</td><td>{loan.status}</td>
               </tr>
             ))}
             {!loans.length && !error && <tr><td colSpan={10}>No loans found.</td></tr>}
