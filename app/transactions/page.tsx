@@ -76,15 +76,15 @@ export default function TransactionsPage() {
     try {
       const f = new FormData(formElement);
       const payload = {
-        documentNumber: f.get("documentNumber"),
+        documentNumber: f.get("documentNumber") ?? "",
         partyId: f.get("partyId"),
-        projectId: f.get("projectId"),
+        projectId: f.get("projectId") ?? "",
         documentDate: f.get("documentDate"),
-        dueDate: f.get("dueDate"),
-        expiryDate: f.get("expiryDate"),
+        dueDate: f.get("dueDate") ?? "",
+        expiryDate: f.get("expiryDate") ?? "",
         gstRate: Number(f.get("gstRate") || 0) / 100,
-        accountId: f.get("accountId"),
-        poId: f.get("poId"),
+        accountId: f.get("accountId") ?? "",
+        poId: f.get("poId") ?? "",
         lines: lines.map((line) => ({ ...line, qty: Number(line.qty), rate: Number(line.rate) })),
       };
       const action = tab === "quote" ? "createQuote" : tab === "invoice" ? "createInvoice" : tab === "purchaseOrder" ? "createPurchaseOrder" : "createSupplierBill";
