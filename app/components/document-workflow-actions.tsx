@@ -12,43 +12,45 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
   const current = String(status || "DRAFT").toUpperCase();
 
   async function approve() {
-    setBusy(true); setMessage("");
+    setBusy(true);
+    setMessage("");
     try {
       const response = await fetch("/api/erp/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: "approvals", body: { payload: { recordType, recordId, decision: "APPROVE", note: "Document workflow" } } }),
+        body: JSON.stringify({
+          target: "approvals",
+          body: {
+            payload: {
+              recordType,
+              recordId,
+              decision: "APPROVE",
+              note: "Document workflow",
+            },
+          },
+        }),
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
       setMessage("Document approved.");
       router.refresh();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Approval failed"); }
-    finally { setBusy(false); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Approval failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function post() {
-    setBusy(true); setMessage("");
-    try {
-      const response = await fetch("/api/erp/transactions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "post", payload: { recordType, recordId } }),
-      });
-      const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error(body.error || "Post failed");
-      setMessage("Document posted.");
-      router.refresh();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Post failed"); }
-    finally { setBusy(false); }
-  }
+  if (current !== "DRAFT") return null;
 
-  if (!["DRAFT", "APPROVED"].includes(current)) return null;
-  return <div className="no-print" style={{ marginTop: 16 }}>
-    <div className="button-row">
-      {current === "DRAFT" && <button type="button" onClick={approve} disabled={busy}>{busy ? "Working…" : "Approve"}</button>}
-      {current === "APPROVED" && <button type="button" onClick={post} disabled={busy}>{busy ? "Working…" : "Post"}</button>}
+  return (
+    <div className="no-print" style={{ marginTop: 16 }}>
+      <div className="button-row">
+        <button type="button" onClick={approve} disabled={busy}>
+          {busy ? "Approving…" : "Approve"}
+        </button>
+      </div>
+      {message && <div className="small" style={{ marginTop: 8 }}>{message}</div>}
     </div>
-    {message && <div className="small" style={{ marginTop: 8 }}>{message}</div>}
-  </div>;
+  );
 }
