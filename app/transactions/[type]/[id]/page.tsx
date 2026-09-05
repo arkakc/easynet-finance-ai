@@ -14,62 +14,33 @@ const CONFIG: Record<string,{table:string;idField:string;numberField:string;line
  payment:{table:"Payments",idField:"paymentId",numberField:"paymentNumber",permission:"dashboard.read",title:"Payment / Receipt"},
  expense:{table:"Expenses",idField:"expenseId",numberField:"expenseNumber",permission:"purchase.read",title:"Expense"},
 };
-
 const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount"]);
 function display(key:string,value:unknown){if(moneyFields.has(key))return `K${Number(value||0).toFixed(2)}`;return String(value??"")}
-function transactionHref(type:string,id:string){const routeType=type==="supplierQuote"?"purchaseOrder":type;return `/transactions/${routeType}/${encodeURIComponent(id)}`;}
+function href(type:string,id:string){return `/transactions/${type==="supplierQuote"?"purchaseOrder":type}/${encodeURIComponent(id)}`;}
+type RefLink={label:string;type:string;id:string;number:string};
+
+async function resolvePrevious(type:string,record:any):Promise<RefLink|null>{
+ if(type==="invoice"&&record.sourceDocumentId){const r=(await findRecords<any>("Quotes",{quoteId:String(record.sourceDocumentId)},1)).rows[0];if(r)return{label:"Previous Document",type:"quote",id:r.quoteId,number:r.quoteNumber||r.quoteId};}
+ if(type==="supplierBill"&&record.sourceDocumentId){const r=(await findRecords<any>("PurchaseOrders",{poId:String(record.sourceDocumentId)},1)).rows[0];if(r)return{label:"Previous Document",type:"purchaseOrder",id:r.poId,number:r.poNumber||r.poId};}
+ if(type==="purchaseOrder"&&record.sourceDocumentId){const r=(await findRecords<any>("PurchaseOrders",{poId:String(record.sourceDocumentId)},1)).rows[0];if(r)return{label:"Previous Document",type:"supplierQuote",id:r.poId,number:r.poNumber||r.poId};}
+ if(type==="payment"&&record.againstDocumentId){const sourceId=String(record.againstDocumentId);const against=String(record.againstDocumentType||"").toLowerCase();if(against.includes("invoice")||String(record.partyType||"")==="Customer"){const r=(await findRecords<any>("Invoices",{invoiceId:sourceId},1)).rows[0];if(r)return{label:"Previous Document",type:"invoice",id:r.invoiceId,number:r.invoiceNumber||r.invoiceId};}const po=(await findRecords<any>("PurchaseOrders",{poId:sourceId},1)).rows[0];if(po)return{label:"Previous Document",type:"purchaseOrder",id:po.poId,number:po.poNumber||po.poId};const bill=(await findRecords<any>("SupplierBills",{billId:sourceId},1)).rows[0];if(bill)return{label:"Previous Document",type:"supplierBill",id:bill.billId,number:bill.billNumber||bill.billId};}
+ return null;
+}
+
+async function resolveConverted(type:string,id:string,number:string):Promise<RefLink|null>{
+ if(type==="quote"){const r=(await findRecords<any>("Invoices",{sourceDocumentId:id},1)).rows[0];if(r)return{label:"Converted To",type:"invoice",id:r.invoiceId,number:r.invoiceNumber||r.invoiceId};}
+ if(type==="invoice"){const r=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];if(r)return{label:"Converted To",type:"payment",id:r.paymentId,number:r.paymentNumber||r.paymentId};}
+ if(type==="purchaseOrder"&&number.startsWith("SUPQ-")){const rows=(await findRecords<any>("PurchaseOrders",{sourceDocumentId:id},10)).rows;const r=rows.find((x:any)=>!String(x.poNumber||"").startsWith("SUPQ-"));if(r)return{label:"Converted To",type:"purchaseOrder",id:r.poId,number:r.poNumber||r.poId};}
+ if(type==="purchaseOrder"){const bill=(await findRecords<any>("SupplierBills",{sourceDocumentId:id},1)).rows[0];if(bill)return{label:"Converted To",type:"supplierBill",id:bill.billId,number:bill.billNumber||bill.billId};const pay=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];if(pay)return{label:"Converted To",type:"payment",id:pay.paymentId,number:pay.paymentNumber||pay.paymentId};}
+ if(type==="supplierBill"){const pay=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];if(pay)return{label:"Converted To",type:"payment",id:pay.paymentId,number:pay.paymentNumber||pay.paymentId};}
+ return null;
+}
 
 export default async function TransactionDocumentPage({params}:{params:Promise<{type:string;id:string}>}){
- const{type,id}=await params;
- const config=CONFIG[type];
- if(!config)notFound();
- await requirePermission(config.permission);
- const result=await findRecords<any>(config.table,{[config.idField]:id},1);
- const record=result.rows[0];
- if(!record)notFound();
- if(type==="payment"){
-  if(String(record.partyType)==="Customer")await requirePermission("sales.read");
-  else if(String(record.partyType)==="Supplier")await requirePermission("purchase.read");
-  else await requirePermission("accounts.read");
- }
- const lines=config.lineTable&&config.lineIdField?(await findRecords<any>(config.lineTable,{[config.lineIdField]:id},500)).rows:[];
- const number=String(record[config.numberField]||id);
- let title=config.title;
- let module="accounts";
- if(type==="quote"||type==="invoice")module="sales";
- if(type==="purchaseOrder"||type==="supplierBill"||type==="expense")module="purchase";
- if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))title="Supplier Quotation";
- if(type==="payment"){
-  if(String(record.partyType)==="Customer"){title="Sales Payment Entry / Receipt";module="sales"}
-  else if(String(record.partyType)==="Supplier"){title="Purchase Payment / Receipt";module="purchase"}
- }
-
- const trackingFields=new Set(["sourceDocumentId","previousDocumentType","previousDocumentId","previousDocumentNo","convertedDocumentType","convertedDocumentId","convertedDocumentNo"]);
- const hidden=new Set([config.idField,config.numberField,"createdAt","updatedAt",...trackingFields]);
- const fields=Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined);
- const previousId=String(record.previousDocumentId||record.sourceDocumentId||"");
- const previousType=String(record.previousDocumentType||"");
- const previousNo=String(record.previousDocumentNo||previousId||"");
- const convertedId=String(record.convertedDocumentId||"");
- const convertedType=String(record.convertedDocumentType||"");
- const convertedNo=String(record.convertedDocumentNo||convertedId||"");
-
- return <div className="document-page">
-  <div className="document-toolbar no-print"><Link href={`/transactions?module=${module}`}>← {module==="sales"?"Sales Transactions":module==="purchase"?"Purchase Transactions":"Transactions"}</Link><div className="row-actions"><PrintButton/></div></div>
-  <section className="document-sheet">
-   <header className="document-header"><div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div><div className={`status-pill status-${String(record.status||"draft").toLowerCase()}`}>{record.status||"DRAFT"}</div></header>
-
-   {(previousId||convertedId)&&<div className="document-meta" style={{marginBottom:20}}>
-    {previousId&&<div><span>Previous Document</span><strong>{previousType?<Link href={transactionHref(previousType,previousId)}>{previousNo}</Link>:previousNo}</strong></div>}
-    {convertedId&&<div><span>Converted To</span><strong>{convertedType?<Link href={transactionHref(convertedType,convertedId)}>{convertedNo}</Link>:convertedNo}</strong></div>}
-   </div>}
-
-   <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{display(key,value)}</strong></div>)}</div>
-   {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=><tr key={line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index}><td>{line.lineNo||index+1}</td><td>{line.description}{line.itemId?<><br/><span className="small">{line.itemId}</span></>:null}</td><td>{line.qty}</td><td>{line.uom}</td><td>K{Number(line.rate||0).toFixed(2)}</td><td>K{Number(line.netAmount||0).toFixed(2)}</td><td>K{Number(line.gstAmount||0).toFixed(2)}</td><td><strong>K{Number(line.totalAmount||0).toFixed(2)}</strong></td></tr>)}</tbody></table></div>}
-   <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
-  </section>
-  <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
-  <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
- </div>;
+ const{type,id}=await params;const config=CONFIG[type];if(!config)notFound();await requirePermission(config.permission);const result=await findRecords<any>(config.table,{[config.idField]:id},1);const record=result.rows[0];if(!record)notFound();if(type==="payment"){if(String(record.partyType)==="Customer")await requirePermission("sales.read");else if(String(record.partyType)==="Supplier")await requirePermission("purchase.read");else await requirePermission("accounts.read")}
+ const lines=config.lineTable&&config.lineIdField?(await findRecords<any>(config.lineTable,{[config.lineIdField]:id},500)).rows:[];const number=String(record[config.numberField]||id);let title=config.title;let module="accounts";if(type==="quote"||type==="invoice")module="sales";if(type==="purchaseOrder"||type==="supplierBill"||type==="expense")module="purchase";if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))title="Supplier Quotation";if(type==="payment"){if(String(record.partyType)==="Customer"){title="Sales Payment Entry / Receipt";module="sales"}else if(String(record.partyType)==="Supplier"){title="Purchase Payment / Receipt";module="purchase"}}
+ const [previous,converted]=await Promise.all([resolvePrevious(type,record),resolveConverted(type,id,number)]);
+ const hidden=new Set([config.idField,config.numberField,"createdAt","updatedAt","sourceDocumentId","againstDocumentId","againstDocumentType"]);const fields=Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined);
+ return <div className="document-page"><div className="document-toolbar no-print"><Link href={`/transactions?module=${module}`}>← {module==="sales"?"Sales Transactions":module==="purchase"?"Purchase Transactions":"Transactions"}</Link><div className="row-actions"><PrintButton/></div></div><section className="document-sheet"><header className="document-header"><div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div><div className={`status-pill status-${String(record.status||"draft").toLowerCase()}`}>{record.status||"DRAFT"}</div></header>{(previous||converted)&&<div className="document-meta" style={{marginBottom:20}}>{previous&&<div><span>{previous.label}</span><strong><Link href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}{converted&&<div><span>{converted.label}</span><strong><Link href={href(converted.type,converted.id)}>{converted.number}</Link></strong></div>}</div>}<div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{display(key,value)}</strong></div>)}</div>{lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=><tr key={line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index}><td>{line.lineNo||index+1}</td><td>{line.description}{line.itemId?<><br/><span className="small">{line.itemId}</span></>:null}</td><td>{line.qty}</td><td>{line.uom}</td><td>K{Number(line.rate||0).toFixed(2)}</td><td>K{Number(line.netAmount||0).toFixed(2)}</td><td>K{Number(line.gstAmount||0).toFixed(2)}</td><td><strong>K{Number(line.totalAmount||0).toFixed(2)}</strong></td></tr>)}</tbody></table></div>}<div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div></section><DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/><DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/></div>;
 }
