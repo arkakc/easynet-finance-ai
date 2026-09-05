@@ -43,8 +43,23 @@ async function nextNumber(action: string) {
   return `${prefix}${String(max + 1).padStart(5, "0")}`;
 }
 
-export async function GET() {
+function permissionForAction(action: string, partyType?: string): Permission | undefined {
+  if (action === "createPayment") return partyType === "Supplier" ? "purchase.write" : "sales.write";
+  return ACTION_PERMISSION[action];
+}
+
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const nextAction = url.searchParams.get("nextNumberFor") || "";
+    if (nextAction) {
+      const partyType = url.searchParams.get("partyType") || undefined;
+      const permission = permissionForAction(nextAction, partyType);
+      if (!permission || !SERIES[nextAction]) return NextResponse.json({ ok: false, error: "Unsupported document type" }, { status: 400 });
+      await requirePermission(permission);
+      return NextResponse.json({ ok: true, action: nextAction, nextNumber: await nextNumber(nextAction) });
+    }
+
     const user = await requirePermission("dashboard.read");
     const response = await legacyGet();
     const body = await response.json();
@@ -82,8 +97,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json() as { action?: string; payload?: Record<string, unknown> };
-    let permission = body.action ? ACTION_PERMISSION[body.action] : undefined;
-    if (body.action === "createPayment") permission = String(body.payload?.partyType || "") === "Supplier" ? "purchase.write" : "sales.write";
+    const permission = body.action ? permissionForAction(body.action, String(body.payload?.partyType || "")) : undefined;
     if (!permission) return NextResponse.json({ ok: false, error: "Unsupported transaction action" }, { status: 400 });
     await requirePermission(permission);
     if (!env.APP_SECRET) throw new Error("Server compatibility credential is not configured");
