@@ -93,10 +93,11 @@ async function finalizePayment(payload:Record<string,unknown>){
       sourcePreviousStatus=String(sourceRow.status||"");
       await updateRecord(sourceTable,sourceIdField,sourceId,{status:"POSTED"},"payment-final-save:temporary-posting-state");
     }else{
-      sourceTable=againstType.includes("bill")?"SupplierBills":"PurchaseOrders";
+      const supplierInvoiceSource=againstType.includes("bill")||againstType.includes("supplier invoice");
+      sourceTable=supplierInvoiceSource?"SupplierBills":"PurchaseOrders";
       sourceIdField=sourceTable==="SupplierBills"?"billId":"poId";
       sourceRow=(await findRecords<any>(sourceTable,{[sourceIdField]:sourceId},1)).rows[0];
-      if(!sourceRow)throw new Error(sourceTable==="PurchaseOrders"?"Referenced Purchase Order not found":"Referenced Supplier Bill not found");
+      if(!sourceRow)throw new Error(sourceTable==="PurchaseOrders"?"Referenced Purchase Order not found":"Referenced Supplier Invoice not found");
       if(String(sourceRow.supplierId||"")!==String(row.partyId||""))throw new Error("Payment supplier does not match the source purchase document");
       const sourceTotal=Number(sourceRow.outstandingAmount??sourceRow.totalAmount??0);
       if(amount>sourceTotal+0.001)throw new Error("Supplier payment exceeds the source purchase document amount");
@@ -140,6 +141,11 @@ async function finalizePayment(payload:Record<string,unknown>){
         const allocated=all.filter((p:any)=>String(p.partyType||"")==="Customer"&&String(p.journalId||"").trim()).reduce((sum:number,p:any)=>sum+Number(p.amount||0),0);
         const invoice=(await findRecords<any>("Invoices",{invoiceId:sourceId},1)).rows[0];
         if(invoice){const total=Number(invoice.totalAmount||0);await updateRecord("Invoices","invoiceId",sourceId,{paidAmount:Math.min(total,allocated),outstandingAmount:Math.max(0,total-allocated),status:"CONVERTED"},"payment-final-save:allocation");}
+      }else if(sourceTable==="SupplierBills"){
+        const all=(await findRecords<any>("Payments",{againstDocumentId:sourceId},500)).rows;
+        const allocated=all.filter((p:any)=>String(p.partyType||"")==="Supplier"&&String(p.journalId||"").trim()).reduce((sum:number,p:any)=>sum+Number(p.amount||0),0);
+        const supplierInvoice=(await findRecords<any>("SupplierBills",{billId:sourceId},1)).rows[0];
+        if(supplierInvoice){const total=Number(supplierInvoice.totalAmount||0);await updateRecord("SupplierBills","billId",sourceId,{paidAmount:Math.min(total,allocated),outstandingAmount:Math.max(0,total-allocated),status:"CONVERTED"},"payment-final-save:supplier-allocation");}
       }else{
         await updateRecord(sourceTable,sourceIdField,sourceId,{status:"CONVERTED"},"payment-final-save:restore-source-state");
       }
@@ -179,7 +185,7 @@ export async function POST(request:Request){
         if(sourceType.includes("sales invoice")||String(payload.partyType||"")==="Customer"){
           const source=(await findRecords<any>("Invoices",{invoiceId:sourceId},1)).rows[0];
           if(source)await updateRecord("Invoices","invoiceId",sourceId,{status:"CONVERTED"},"conversion-tracking");
-        }else if(sourceType.includes("supplier bill")){
+        }else if(sourceType.includes("supplier bill")||sourceType.includes("supplier invoice")){
           const source=(await findRecords<any>("SupplierBills",{billId:sourceId},1)).rows[0];
           if(source)await updateRecord("SupplierBills","billId",sourceId,{status:"CONVERTED"},"conversion-tracking");
         }else{
