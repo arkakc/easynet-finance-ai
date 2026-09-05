@@ -102,23 +102,26 @@ export default function MastersPage() {
 
   async function submitCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const ok = await submitRecord("customer", Object.fromEntries(form.entries()));
-    if (ok) event.currentTarget.reset();
+    if (ok) formElement.reset();
   }
 
   async function submitSupplier(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const ok = await submitRecord("supplier", Object.fromEntries(form.entries()));
-    if (ok) event.currentTarget.reset();
+    if (ok) formElement.reset();
   }
 
   async function submitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const ok = await submitRecord("project", Object.fromEntries(form.entries()));
-    if (ok) event.currentTarget.reset();
+    if (ok) formElement.reset();
   }
 
   return (

@@ -72,8 +72,9 @@ export default function TransactionsPage() {
 
   async function submitCommercial(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
-      const f = new FormData(event.currentTarget);
+      const f = new FormData(formElement);
       const payload = {
         documentNumber: f.get("documentNumber"),
         partyId: f.get("partyId"),
@@ -88,7 +89,7 @@ export default function TransactionsPage() {
       };
       const action = tab === "quote" ? "createQuote" : tab === "invoice" ? "createInvoice" : tab === "purchaseOrder" ? "createPurchaseOrder" : "createSupplierBill";
       await call(action, payload);
-      event.currentTarget.reset();
+      formElement.reset();
       setLines([{ description: "", qty: "1", uom: "Each", rate: "0" }]);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Save failed");
@@ -97,19 +98,21 @@ export default function TransactionsPage() {
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
-      const f = new FormData(event.currentTarget);
+      const f = new FormData(formElement);
       await call("createPayment", Object.fromEntries(f.entries()));
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) { setStatus(error instanceof Error ? error.message : "Save failed"); }
   }
 
   async function submitExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     try {
-      const f = new FormData(event.currentTarget);
+      const f = new FormData(formElement);
       await call("createExpense", Object.fromEntries(f.entries()));
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) { setStatus(error instanceof Error ? error.message : "Save failed"); }
   }
 
