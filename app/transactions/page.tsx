@@ -51,6 +51,18 @@ const numberMeta: Partial<Record<Tab, { label: string; action: string; partyType
   purchasePayment: { label: "Auto Purchase Payment / Receipt No", action: "createPayment", partyType: "Supplier" },
 };
 
+function partyId(row: any) { return String(row.customerId || row.supplierId || ""); }
+function partyName(row: any) { return String(row.customerName || row.supplierName || partyId(row)); }
+function partyDisplay(row: any) { const id = partyId(row); const name = partyName(row); return id && name !== id ? `${name} (${id})` : name; }
+function resolveParty(options: any[], input: string) {
+  const q = input.trim().toLowerCase();
+  if (!q) return null;
+  return options.find((row) => partyDisplay(row).toLowerCase() === q)
+    || options.find((row) => partyId(row).toLowerCase() === q)
+    || options.find((row) => partyName(row).toLowerCase() === q)
+    || null;
+}
+
 export default function TransactionsPage() {
   const router = useRouter();
   const [module, setModule] = useState<Module>("sales");
@@ -59,6 +71,9 @@ export default function TransactionsPage() {
   const [tx, setTx] = useState<TxData>(emptyTx);
   const [status, setStatus] = useState("");
   const [selectedParty, setSelectedParty] = useState("");
+  const [partyInput, setPartyInput] = useState("");
+  const [expenseSupplier, setExpenseSupplier] = useState("");
+  const [expenseSupplierInput, setExpenseSupplierInput] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([{ description: "", qty: "1", uom: "Each", rate: "0" }]);
   const [gstRate, setGstRate] = useState("10");
   const [nextDocumentNo, setNextDocumentNo] = useState("Loading…");
@@ -71,9 +86,7 @@ export default function TransactionsPage() {
       const m = await fetch("/api/masters").then((r) => r.json());
       if (!m.ok) throw new Error(m.error || "Master-data load failed");
       setMasters({ customers: m.customers || [], suppliers: m.suppliers || [], projects: m.projects || [] });
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Master-data load failed");
-    }
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Master-data load failed"); }
   }
 
   async function loadTransactions() {
@@ -83,11 +96,8 @@ export default function TransactionsPage() {
       if (!t.ok) throw new Error(t.error || "Transaction load failed");
       setTx({ quotes: t.quotes || [], supplierQuotes: t.supplierQuotes || [], purchaseOrders: t.purchaseOrders || [], invoices: t.invoices || [], supplierBills: t.supplierBills || [], payments: t.payments || [], expenses: t.expenses || [] });
       setExistingLoaded(true);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Transaction load failed");
-    } finally {
-      setExistingLoading(false);
-    }
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Transaction load failed"); }
+    finally { setExistingLoading(false); }
   }
 
   async function loadNextDocumentNo(currentTab: Tab) {
@@ -101,23 +111,16 @@ export default function TransactionsPage() {
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Number load failed");
       setNextDocumentNo(body.nextNumber || "AUTO");
-    } catch {
-      setNextDocumentNo("AUTO");
-    }
+    } catch { setNextDocumentNo("AUTO"); }
   }
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("module") as Module | null;
     const resolved: Module = requested === "purchase" || requested === "expense" ? requested : "sales";
     const initialTab: Tab = resolved === "purchase" ? "supplierQuote" : resolved === "expense" ? "expense" : "salesQuote";
-    setModule(resolved);
-    setTab(initialTab);
-    setShowExisting(false);
-    setExistingLoaded(false);
-    void loadMasters();
-    void loadNextDocumentNo(initialTab);
+    setModule(resolved); setTab(initialTab); setShowExisting(false); setExistingLoaded(false);
+    void loadMasters(); void loadNextDocumentNo(initialTab);
   }, []);
-
   useEffect(() => { void loadNextDocumentNo(tab); }, [tab]);
 
   const salesSide = module === "sales";
@@ -132,17 +135,28 @@ export default function TransactionsPage() {
   const gstAmount = useMemo(() => subtotal * ((Number(gstRate) || 0) / 100), [subtotal, gstRate]);
   const netTotal = subtotal + gstAmount;
 
+  function handlePartyInput(value: string, options = partyOptions) {
+    setPartyInput(value);
+    const match = resolveParty(options, value);
+    setSelectedParty(match ? partyId(match) : "");
+  }
+  function handleExpenseSupplierInput(value: string) {
+    setExpenseSupplierInput(value);
+    const match = resolveParty(masters.suppliers, value);
+    setExpenseSupplier(match ? partyId(match) : "");
+  }
+  function validateParty(options: any[], input: string, selected: string, label: string) {
+    if (selected) return selected;
+    const match = resolveParty(options, input);
+    if (!match) throw new Error(`Select a valid ${label} from the suggestions`);
+    return partyId(match);
+  }
   function setLine(index: number, field: keyof DraftLine, value: string) { setLines((current) => current.map((line, i) => i === index ? { ...line, [field]: value } : line)); }
   function addLine() { setLines((current) => [...current, { description: "", qty: "1", uom: "Each", rate: "0" }]); }
   function removeLine(index: number) { setLines((current) => current.length === 1 ? current : current.filter((_, i) => i !== index)); }
+  function changeTab(value: Tab) { setTab(value); setSelectedParty(""); setPartyInput(""); setShowExisting(false); }
 
-  function changeTab(value: Tab) { setTab(value); setSelectedParty(""); setShowExisting(false); }
-
-  async function toggleExisting() {
-    if (showExisting) { setShowExisting(false); return; }
-    setShowExisting(true);
-    if (!existingLoaded) await loadTransactions();
-  }
+  async function toggleExisting() { if (showExisting) { setShowExisting(false); return; } setShowExisting(true); if (!existingLoaded) await loadTransactions(); }
 
   async function call(action: string, payload: unknown) {
     setStatus("Saving…");
@@ -159,7 +173,8 @@ export default function TransactionsPage() {
     event.preventDefault();
     try {
       const f = new FormData(event.currentTarget);
-      const payload = { documentNumber: "", partyId: f.get("partyId"), projectId: f.get("projectId") ?? "", documentDate: f.get("documentDate"), dueDate: f.get("dueDate") ?? "", expiryDate: f.get("expiryDate") ?? "", gstRate: Number(f.get("gstRate") || 0) / 100, accountId: f.get("accountId") ?? "", poId: "", lines: lines.map((line) => ({ ...line, qty: Number(line.qty), rate: Number(line.rate) })) };
+      const resolvedPartyId = validateParty(partyOptions, partyInput, selectedParty, salesSide ? "Customer" : "Supplier");
+      const payload = { documentNumber: "", partyId: resolvedPartyId, projectId: f.get("projectId") ?? "", documentDate: f.get("documentDate"), dueDate: f.get("dueDate") ?? "", expiryDate: f.get("expiryDate") ?? "", gstRate: Number(f.get("gstRate") || 0) / 100, accountId: f.get("accountId") ?? "", poId: "", lines: lines.map((line) => ({ ...line, qty: Number(line.qty), rate: Number(line.rate) })) };
       const action = tab === "salesQuote" ? "createQuote" : tab === "salesInvoice" ? "createInvoice" : tab === "supplierQuote" ? "createSupplierQuote" : "createPurchaseOrder";
       const result = await call(action, payload);
       const detailType = tab === "salesQuote" ? "quote" : tab === "salesInvoice" ? "invoice" : "purchaseOrder";
@@ -172,7 +187,9 @@ export default function TransactionsPage() {
     try {
       const f = new FormData(event.currentTarget);
       const isSalesPayment = tab === "salesPayment";
-      const result = await call("createPayment", { paymentNumber: "", paymentType: isSalesPayment ? "RECEIVE" : "PAY", partyType: isSalesPayment ? "Customer" : "Supplier", partyId: f.get("partyId"), projectId: f.get("projectId") ?? "", paymentDate: f.get("paymentDate"), amount: f.get("amount"), paymentMethod: f.get("paymentMethod"), cashBankAccountId: f.get("cashBankAccountId"), reference: f.get("reference") ?? "", againstDocumentType: f.get("againstDocumentType") ?? "", againstDocumentId: f.get("againstDocumentId") ?? "" });
+      const options = isSalesPayment ? masters.customers : masters.suppliers;
+      const resolvedPartyId = validateParty(options, partyInput, selectedParty, isSalesPayment ? "Customer" : "Supplier");
+      const result = await call("createPayment", { paymentNumber: "", paymentType: isSalesPayment ? "RECEIVE" : "PAY", partyType: isSalesPayment ? "Customer" : "Supplier", partyId: resolvedPartyId, projectId: f.get("projectId") ?? "", paymentDate: f.get("paymentDate"), amount: f.get("amount"), paymentMethod: f.get("paymentMethod"), cashBankAccountId: f.get("cashBankAccountId"), reference: f.get("reference") ?? "", againstDocumentType: f.get("againstDocumentType") ?? "", againstDocumentId: f.get("againstDocumentId") ?? "" });
       router.push(`/transactions/payment/${result.recordId}`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Save failed"); }
   }
@@ -181,24 +198,22 @@ export default function TransactionsPage() {
     event.preventDefault();
     try {
       const f = new FormData(event.currentTarget);
-      const result = await call("createExpense", { ...Object.fromEntries(f.entries()), expenseNumber: "" });
+      const supplierId = expenseSupplierInput.trim() ? validateParty(masters.suppliers, expenseSupplierInput, expenseSupplier, "Supplier") : "";
+      const result = await call("createExpense", { ...Object.fromEntries(f.entries()), supplierId, expenseNumber: "" });
       router.push(`/transactions/expense/${result.recordId}`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Save failed"); }
   }
 
-  async function post(recordType: "invoice" | "payment" | "expense", recordId: string) {
-    try { await call("post", { recordType, recordId }); }
-    catch (error) { setStatus(error instanceof Error ? error.message : "Post failed"); }
-  }
+  async function post(recordType: "invoice" | "payment" | "expense", recordId: string) { try { await call("post", { recordType, recordId }); } catch (error) { setStatus(error instanceof Error ? error.message : "Post failed"); } }
 
   const tabButton = (value: Tab, label: string) => <button type="button" key={value} className={tab === value ? "tab active" : "tab"} onClick={() => changeTab(value)}>{label}</button>;
   const view = (type: string, id: string) => <Link className="button-link secondary-link" href={`/transactions/${type}/${id}`}>View / Print</Link>;
   const title = module === "sales" ? "Sales Transactions" : module === "purchase" ? "Purchase Transactions" : "Expenses";
   const numberLabel = numberMeta[tab]?.label || "Auto Document No";
+  const partyListId = salesSide ? "customer-suggestions" : "supplier-suggestions";
 
   return <>
     <div className="page-heading"><div><h2>{title}</h2><p className="small">Create a new document first. Existing document registers load only when requested.</p></div></div>
-
     {module === "sales" && <div className="tabs wrap-tabs">{tabButton("salesQuote", "Sales Quotation")}{tabButton("salesInvoice", "Sales Invoice")}{tabButton("salesPayment", "Sales Payment Entry / Receipt")}</div>}
     {module === "purchase" && <div className="tabs wrap-tabs">{tabButton("supplierQuote", "Supplier Quotation")}{tabButton("purchaseOrder", "Purchase Order")}{tabButton("purchasePayment", "Purchase Payment / Receipt")}</div>}
     {status && <section className="panel status-banner">{status}</section>}
@@ -206,10 +221,9 @@ export default function TransactionsPage() {
     {commercial && <form className="panel" onSubmit={submitCommercial}>
       <div className="form-title-row"><h3>{tab === "salesQuote" ? "New Sales Quotation" : tab === "salesInvoice" ? "New Sales Invoice" : tab === "supplierQuote" ? "New Supplier Quotation" : "New Purchase Order"}</h3><span className="auto-badge">Document No: {nextDocumentNo || "AUTO"}</span></div>
       <div className="form-grid">
-        <label>{salesSide ? "Customer" : "Supplier"}<select name="partyId" required defaultValue="" onChange={(e) => setSelectedParty(e.target.value)}><option value="" disabled>Select</option>{partyOptions.map((p) => <option key={p.customerId || p.supplierId} value={p.customerId || p.supplierId}>{p.customerName || p.supplierName}</option>)}</select></label>
+        <label>{salesSide ? "Customer" : "Supplier"}<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value)} placeholder={`Type ${salesSide ? "customer" : "supplier"} name or ID`} autoComplete="off" required /><datalist id={partyListId}>{partyOptions.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
         <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{projectOptions.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName} ({p.projectId})</option>)}</select></label>
-        <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly aria-readonly="true" /></label>
-        <div></div>
+        <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly aria-readonly="true" /></label><div></div>
         <label>Date<input name="documentDate" type="date" required defaultValue={localDate()} /></label>
         {tab === "salesInvoice" && <label>Due Date<input name="dueDate" type="date" defaultValue={localDate(30)} /></label>}
         {(tab === "salesQuote" || tab === "supplierQuote") && <label>Valid Till<input name="expiryDate" type="date" defaultValue={localDate(7)} /></label>}
@@ -227,10 +241,9 @@ export default function TransactionsPage() {
 
     {(tab === "salesPayment" || tab === "purchasePayment") && <form className="panel form-grid" onSubmit={submitPayment}>
       <h3 className="form-title">{tab === "salesPayment" ? "New Sales Payment Entry / Receipt" : "New Purchase Payment / Receipt"} <span className="auto-badge">{nextDocumentNo || "AUTO"}</span></h3>
-      <label>{tab === "salesPayment" ? "Customer" : "Supplier"}<select name="partyId" required defaultValue=""><option value="" disabled>Select</option>{(tab === "salesPayment" ? masters.customers : masters.suppliers).map((p) => <option key={p.customerId || p.supplierId} value={p.customerId || p.supplierId}>{p.customerName || p.supplierName}</option>)}</select></label>
+      <label>{tab === "salesPayment" ? "Customer" : "Supplier"}<input list={partyListId} value={partyInput} onChange={(e) => handlePartyInput(e.target.value, tab === "salesPayment" ? masters.customers : masters.suppliers)} placeholder={`Type ${tab === "salesPayment" ? "customer" : "supplier"} name or ID`} autoComplete="off" required /><datalist id={partyListId}>{(tab === "salesPayment" ? masters.customers : masters.suppliers).map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
       <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
-      <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly aria-readonly="true" /></label>
-      <div></div>
+      <label>{numberLabel}<input value={nextDocumentNo || "AUTO"} readOnly aria-readonly="true" /></label><div></div>
       <label>Date<input name="paymentDate" type="date" required defaultValue={localDate()} /></label>
       <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label>
       <label>Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
@@ -241,7 +254,19 @@ export default function TransactionsPage() {
       <div className="form-wide"><button type="submit">Save Draft</button></div>
     </form>}
 
-    {tab === "expense" && <form className="panel form-grid" onSubmit={submitExpense}><h3 className="form-title">New Expense <span className="auto-badge">AUTO NO</span></h3><label>Date<input name="expenseDate" type="date" required defaultValue={localDate()} /></label><label>Supplier ID<input name="supplierId" /></label><label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label><label>Expense Account<input name="expenseAccountId" defaultValue="ACC-6600" required /></label><label>Net Amount<input name="netAmount" type="number" min="0" step="0.01" required /></label><label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue="0" /></label><label>Payment Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option></select></label><label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label><label className="form-wide">Description<input name="description" required /></label><div className="form-wide"><button type="submit">Save Draft</button></div></form>}
+    {tab === "expense" && <form className="panel form-grid" onSubmit={submitExpense}>
+      <h3 className="form-title">New Expense <span className="auto-badge">AUTO NO</span></h3>
+      <label>Date<input name="expenseDate" type="date" required defaultValue={localDate()} /></label>
+      <label>Supplier<input list="expense-supplier-suggestions" value={expenseSupplierInput} onChange={(e) => handleExpenseSupplierInput(e.target.value)} placeholder="Type supplier name or ID" autoComplete="off" /><datalist id="expense-supplier-suggestions">{masters.suppliers.map((p) => <option key={partyId(p)} value={partyDisplay(p)} />)}</datalist></label>
+      <label>Project<select name="projectId" defaultValue=""><option value="">No project</option>{masters.projects.map((p) => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
+      <label>Expense Account<input name="expenseAccountId" defaultValue="ACC-6600" required /></label>
+      <label>Net Amount<input name="netAmount" type="number" min="0" step="0.01" required /></label>
+      <label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue="0" /></label>
+      <label>Payment Method<select name="paymentMethod"><option>Cash</option><option>Bank Transfer</option><option>Card</option></select></label>
+      <label>Cash / Bank Account<input name="cashBankAccountId" defaultValue="ACC-1110" required /></label>
+      <label className="form-wide">Description<input name="description" required /></label>
+      <div className="form-wide"><button type="submit">Save Draft</button></div>
+    </form>}
 
     <div className="button-row existing-documents-cta"><button type="button" className="secondary" onClick={() => void toggleExisting()} disabled={existingLoading}>{existingLoading ? "Loading…" : showExisting ? "Hide Existing Documents" : existingLabel[tab]}</button></div>
 
