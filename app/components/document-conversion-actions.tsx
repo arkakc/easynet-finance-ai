@@ -3,31 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-function today() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-}
+function today(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`}
 
-export default function DocumentConversionActions({ type, id, status }: { type: string; id: string; status: string }) {
-  const router = useRouter();
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const canQuote = type === "quote" && ["APPROVED", "CONVERTED"].includes(status.toUpperCase());
-  const canPo = type === "purchaseOrder" && ["APPROVED", "BILL_CREATED", "BILLED"].includes(status.toUpperCase());
-  if (!canQuote && !canPo) return null;
-
-  async function convert() {
-    setBusy(true); setMessage("");
-    const action = canQuote ? "quoteToInvoice" : "poToBill";
-    const payload = canQuote
-      ? { quoteId: id, invoiceDate: today(), dueDate: "", revenueAccountId: "ACC-4100" }
-      : { poId: id, billDate: today(), dueDate: "", costAccountId: "ACC-5100" };
-    const response = await fetch("/api/erp/conversions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload }) });
-    const body = await response.json(); setBusy(false);
-    if (!response.ok || !body.ok) { setMessage(body.error || "Conversion failed"); return; }
-    const targetType = canQuote ? "invoice" : "supplierBill";
-    router.push(`/transactions/${targetType}/${body.createdId}`);
-    router.refresh();
-  }
-
-  return <div className="conversion-box no-print"><strong>Next Document</strong><p className="small">ERP-style mapped conversion keeps party, project, values and line items linked to this source document.</p><button type="button" disabled={busy} onClick={convert}>{busy ? "Creating…" : canQuote ? "Create Sales Invoice" : "Create Supplier Bill"}</button>{message && <span className="small">{message}</span>}</div>;
-}
+export default function DocumentConversionActions({type,id,status,documentNumber}:{type:string;id:string;status:string;documentNumber?:string}){const router=useRouter();const[message,setMessage]=useState(""),[busy,setBusy]=useState(false);const isSupplierQuote=type==="purchaseOrder"&&String(documentNumber||"").startsWith("SUPQ-");const canQuote=type==="quote"&&["APPROVED","CONVERTED"].includes(status.toUpperCase());const canSupplierQuote=isSupplierQuote&&["APPROVED","CONVERTED"].includes(status.toUpperCase());const canPo=type==="purchaseOrder"&&!isSupplierQuote&&["APPROVED","BILL_CREATED","BILLED"].includes(status.toUpperCase());if(!canQuote&&!canSupplierQuote&&!canPo)return null;
+async function convert(){setBusy(true);setMessage("");try{if(canSupplierQuote){const r=await fetch("/api/erp/purchase-conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({supplierQuoteId:id})});const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Conversion failed");router.push(`/transactions/purchaseOrder/${b.createdId}`);router.refresh();return}const action=canQuote?"quoteToInvoice":"poToBill";const payload=canQuote?{quoteId:id,invoiceDate:today(),dueDate:"",revenueAccountId:"ACC-4100"}:{poId:id,billDate:today(),dueDate:"",costAccountId:"ACC-5100"};const r=await fetch("/api/erp/conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,payload})});const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Conversion failed");router.push(`/transactions/${canQuote?"invoice":"supplierBill"}/${b.createdId}`);router.refresh()}catch(e){setMessage(e instanceof Error?e.message:"Conversion failed")}finally{setBusy(false)}}
+return <div className="conversion-box no-print"><strong>Next Document</strong><p className="small">Mapped conversion keeps party, project, values and line items linked to this source document.</p><button type="button" disabled={busy} onClick={convert}>{busy?"Creating…":canQuote?"Create Sales Invoice":canSupplierQuote?"Create Purchase Order":"Create Supplier Bill"}</button>{message&&<span className="small">{message}</span>}</div>}
