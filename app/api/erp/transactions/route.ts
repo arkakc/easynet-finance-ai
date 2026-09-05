@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
-import { listTable } from "@/lib/backend/apps-script";
+import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
@@ -23,6 +23,15 @@ const SERIES: Record<string, { table: string; field: string; prefix: string; pay
   createPayment: { table: "Payments", field: "paymentNumber", prefix: "PE", payloadField: "paymentNumber" },
   createExpense: { table: "Expenses", field: "expenseNumber", prefix: "EXP", payloadField: "expenseNumber" },
 };
+
+const WORKFLOW = {
+  quote: { table: "Quotes", idField: "quoteId" },
+  invoice: { table: "Invoices", idField: "invoiceId" },
+  purchaseOrder: { table: "PurchaseOrders", idField: "poId" },
+  supplierBill: { table: "SupplierBills", idField: "billId" },
+  payment: { table: "Payments", idField: "paymentId" },
+  expense: { table: "Expenses", idField: "expenseId" },
+} as const;
 
 function pngYear() {
   return new Intl.DateTimeFormat("en", { timeZone: "Pacific/Port_Moresby", year: "numeric" }).format(new Date());
@@ -78,16 +87,7 @@ export async function GET(request: Request) {
       return false;
     }) : [];
 
-    return NextResponse.json({
-      ...body,
-      quotes: canSales ? body.quotes || [] : [],
-      invoices: canSales ? body.invoices || [] : [],
-      supplierQuotes,
-      purchaseOrders,
-      supplierBills: canPurchase ? body.supplierBills || [] : [],
-      expenses: canPurchase ? body.expenses || [] : [],
-      payments,
-    });
+    return NextResponse.json({ ...body, quotes: canSales ? body.quotes || [] : [], invoices: canSales ? body.invoices || [] : [], supplierQuotes, purchaseOrders, supplierBills: canPurchase ? body.supplierBills || [] : [], expenses: canPurchase ? body.expenses || [] : [], payments });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : 401 });
@@ -103,6 +103,24 @@ export async function POST(request: Request) {
     if (!env.APP_SECRET) throw new Error("Server compatibility credential is not configured");
 
     let payload = body.payload || {};
+
+    if (body.action === "post") {
+      const recordType = String(payload.recordType || "") as keyof typeof WORKFLOW;
+      const recordId = String(payload.recordId || "");
+      const config = WORKFLOW[recordType];
+      if (!config || !recordId) return NextResponse.json({ ok: false, error: "Unsupported post document" }, { status: 400 });
+      const found = await findRecords<any>(config.table, { [config.idField]: recordId }, 1);
+      const row = found.rows[0];
+      if (!row) return NextResponse.json({ ok: false, error: "Document not found" }, { status: 404 });
+      const current = String(row.status || "DRAFT").toUpperCase();
+      if (current !== "APPROVED") return NextResponse.json({ ok: false, error: `Document must be APPROVED before posting. Current status: ${current}` }, { status: 400 });
+
+      if (recordType === "quote" || recordType === "purchaseOrder") {
+        const updated = await updateRecord(config.table, config.idField, recordId, { status: "POSTED" }, "finance-controller:post");
+        return NextResponse.json({ ok: true, result: { recordType, recordId, status: "POSTED", row: updated.row } });
+      }
+    }
+
     const series = body.action ? SERIES[body.action] : undefined;
     if (body.action && series && !String(payload[series.payloadField] || "").trim()) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
 
