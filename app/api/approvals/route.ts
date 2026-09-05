@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
+import { POST as legacyTransactionPost } from "@/app/api/transactions/route";
 
 const actionSchema = z.object({
   recordType: z.enum(["quote", "invoice", "purchaseOrder", "supplierBill", "payment", "expense"]),
@@ -18,6 +19,8 @@ const CONFIG = {
   payment: { table: "Payments", idField: "paymentId", label: "Payment / Receipt" },
   expense: { table: "Expenses", idField: "expenseId", label: "Expense" },
 } as const;
+
+const ACCOUNTING_TYPES = new Set(["invoice", "supplierBill", "payment", "expense"]);
 
 function requireSecret(secret?: string) {
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
@@ -36,6 +39,7 @@ export async function GET() {
       listTable<any>("Payments", 500, 0),
       listTable<any>("Expenses", 500, 0),
     ]);
+
     const pending = [
       ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
       ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
@@ -44,9 +48,31 @@ export async function GET() {
       ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment / Receipt" : "Purchase Payment / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
       ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
     ];
+
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Approval queue load failed" }, { status: 500 });
+  }
+}
+
+async function restoreLinkedDocumentAfterPayment(row: any) {
+  const againstDocumentId = String(row.againstDocumentId || "");
+  if (!againstDocumentId) return;
+
+  if (String(row.partyType || "") === "Customer") {
+    const result = await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1);
+    const invoice = result.rows[0];
+    if (invoice && String(invoice.status || "").toUpperCase() === "POSTED") {
+      await updateRecord("Invoices", "invoiceId", againstDocumentId, { status: "APPROVED" }, "finance-controller:approved-final-state");
+    }
+  }
+
+  if (String(row.partyType || "") === "Supplier") {
+    const result = await findRecords<any>("SupplierBills", { billId: againstDocumentId }, 1);
+    const bill = result.rows[0];
+    if (bill && String(bill.status || "").toUpperCase() === "POSTED") {
+      await updateRecord("SupplierBills", "billId", againstDocumentId, { status: "APPROVED" }, "finance-controller:approved-final-state");
+    }
   }
 }
 
@@ -59,14 +85,79 @@ export async function POST(request: Request) {
     const result = await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1);
     const row = result.rows[0];
     if (!row) throw new Error(`${config.label} not found`);
+
     const current = String(row.status || "DRAFT").toUpperCase();
-    if (input.decision === "APPROVE" && current !== "DRAFT") throw new Error(`Only DRAFT documents can be approved. Current status: ${current}`);
-    if (input.decision === "CANCEL" && !["DRAFT", "APPROVED"].includes(current)) throw new Error(`Cannot cancel document in ${current} status`);
-    const nextStatus = input.decision === "APPROVE" ? "APPROVED" : "CANCELLED";
-    const updated = await updateRecord(config.table, config.idField, input.recordId, { status: nextStatus }, `finance-controller:${input.note || input.decision.toLowerCase()}`);
-    return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: nextStatus, row: updated.row });
+    if (input.decision === "APPROVE" && current !== "DRAFT") {
+      throw new Error(`Only DRAFT documents can be approved. Current status: ${current}`);
+    }
+    if (input.decision === "CANCEL" && current !== "DRAFT") {
+      throw new Error(`Only DRAFT documents can be cancelled. Current status: ${current}`);
+    }
+
+    if (input.decision === "CANCEL") {
+      const cancelled = await updateRecord(
+        config.table,
+        config.idField,
+        input.recordId,
+        { status: "CANCELLED" },
+        `finance-controller:${input.note || "cancel"}`,
+      );
+      return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: "CANCELLED", row: cancelled.row });
+    }
+
+    await updateRecord(
+      config.table,
+      config.idField,
+      input.recordId,
+      { status: "APPROVED" },
+      `finance-controller:${input.note || "approve"}`,
+    );
+
+    if (ACCOUNTING_TYPES.has(input.recordType)) {
+      const internalRequest = new Request(request.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "post",
+          payload: { recordType: input.recordType, recordId: input.recordId },
+          secret: body.secret,
+        }),
+      });
+
+      const postingResponse = await legacyTransactionPost(internalRequest);
+      const postingBody = await postingResponse.json();
+
+      if (!postingResponse.ok || !postingBody.ok) {
+        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:approval-posting-rollback");
+        throw new Error(postingBody.error || "Accounting posting failed during approval");
+      }
+
+      await updateRecord(
+        config.table,
+        config.idField,
+        input.recordId,
+        { status: "APPROVED" },
+        "finance-controller:approved-final-state",
+      );
+
+      if (input.recordType === "payment") {
+        await restoreLinkedDocumentAfterPayment(row);
+      }
+    }
+
+    const finalResult = await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1);
+    return NextResponse.json({
+      ok: true,
+      recordType: input.recordType,
+      recordId: input.recordId,
+      previousStatus: current,
+      status: "APPROVED",
+      row: finalResult.rows[0],
+    });
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ") : error instanceof Error ? error.message : "Approval action failed";
+    const message = error instanceof z.ZodError
+      ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ")
+      : error instanceof Error ? error.message : "Approval action failed";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : 400 });
   }
 }
