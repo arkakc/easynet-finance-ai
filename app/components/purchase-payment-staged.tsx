@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
 const normalize = (value: unknown) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+const returnQuery = "?returnModule=purchase&returnTab=purchasePayment&returnMode=create";
 
 export default function PurchasePaymentStaged() {
   const router = useRouter();
@@ -110,7 +111,7 @@ export default function PurchasePaymentStaged() {
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Purchase Payment draft save failed");
-      router.push(`/transactions/payment/${body.result.recordId}`);
+      router.push(`/transactions/payment/${body.result.recordId}${returnQuery}`);
       router.refresh();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Purchase Payment draft save failed");
@@ -138,7 +139,7 @@ export default function PurchasePaymentStaged() {
       <div className="form-title-row"><h3>Approved Supplier Invoices Pending Payment Entry</h3><span className="auto-badge">{approved.length} Pending</span></div>
       <table className="data-table"><thead><tr><th>Supplier Invoice</th><th>Supplier</th><th>Project</th><th>Invoice Total</th><th>Outstanding</th><th>Action</th></tr></thead><tbody>
         {approved.length === 0 && <tr><td colSpan={6}>No approved Supplier Invoices with outstanding balance.</td></tr>}
-        {approved.map((invoice) => <tr key={invoice.billId}><td><Link href={`/transactions/supplierBill/${invoice.billId}`}><strong>{invoice.billNumber || invoice.billId}</strong></Link></td><td>{invoice.supplierId || "—"}</td><td>{invoice.projectId || "—"}</td><td>{money(invoice.totalAmount)}</td><td><strong>{money(invoice.outstandingAmount ?? invoice.totalAmount)}</strong></td><td><button type="button" onClick={() => selectForPayment(invoice)}>Convert Now</button></td></tr>)}
+        {approved.map((invoice) => <tr key={invoice.billId}><td><Link prefetch={false} href={`/transactions/supplierBill/${invoice.billId}${returnQuery}`}><strong>{invoice.billNumber || invoice.billId}</strong></Link></td><td>{invoice.supplierId || "—"}</td><td>{invoice.projectId || "—"}</td><td>{money(invoice.totalAmount)}</td><td><strong>{money(invoice.outstandingAmount ?? invoice.totalAmount)}</strong></td><td><button type="button" onClick={() => selectForPayment(invoice)}>Convert Now</button></td></tr>)}
       </tbody></table>
     </section>}
 
@@ -149,7 +150,7 @@ export default function PurchasePaymentStaged() {
         <div style={{ display: "flex", alignItems: "end" }}><button type="button" style={{ width: "100%", height: 52 }} onClick={() => void searchApproved()} disabled={loading}>{loading ? "Searching…" : "Search"}</button></div>
       </div>
       {searched && <div style={{ marginTop: 20 }}><div className="document-meta">
-        <div><span>Supplier Invoice</span><strong><Link href={`/transactions/supplierBill/${searched.billId}`}>{searched.billNumber || searched.billId}</Link></strong></div>
+        <div><span>Supplier Invoice</span><strong><Link prefetch={false} href={`/transactions/supplierBill/${searched.billId}${returnQuery}`}>{searched.billNumber || searched.billId}</Link></strong></div>
         <div><span>Supplier</span><strong>{searched.supplierId || "—"}</strong></div>
         <div><span>Project</span><strong>{searched.projectId || "—"}</strong></div>
         <div><span>Invoice Total</span><strong>{money(searched.totalAmount)}</strong></div>
