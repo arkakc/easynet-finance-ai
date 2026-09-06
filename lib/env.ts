@@ -25,3 +25,21 @@ const schema = z.object({
 });
 
 export const env = schema.parse(process.env);
+
+// Deliberately logs only boolean presence, never URLs, tokens, or secret values.
+// This makes Preview/Production configuration drift diagnosable from build/runtime logs.
+if (process.env.VERCEL) {
+  console.info("[backend-env-presence]", {
+    environment: process.env.VERCEL_ENV || "unknown",
+    coreUrl: Boolean(env.CORE_APPS_SCRIPT_WEB_APP_URL),
+    coreToken: Boolean(env.CORE_APPS_SCRIPT_API_TOKEN),
+    reportingUrl: Boolean(env.REPORTING_APPS_SCRIPT_WEB_APP_URL),
+    reportingToken: Boolean(env.REPORTING_APPS_SCRIPT_API_TOKEN),
+    documentUrl: Boolean(env.DOCUMENT_APPS_SCRIPT_WEB_APP_URL),
+    documentToken: Boolean(env.DOCUMENT_APPS_SCRIPT_API_TOKEN),
+    legacyUrl: Boolean(env.APPS_SCRIPT_WEB_APP_URL),
+    legacyToken: Boolean(env.APPS_SCRIPT_API_TOKEN),
+    appSecret: Boolean(env.APP_SECRET),
+    sessionSecret: Boolean(env.SESSION_SECRET),
+  });
+}
