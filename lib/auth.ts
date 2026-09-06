@@ -1,5 +1,5 @@
 import { createHmac, scryptSync, timingSafeEqual } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { env } from "@/lib/env";
 
 export type Role = "System Manager" | "Finance Controller" | "Accounts User" | "Sales User" | "Purchase User" | "Stock User" | "Management" | "Auditor";
@@ -77,13 +77,16 @@ export function verifySessionToken(token?: string | null): SessionUser | null {
   } catch { return null; }
 }
 
-function cookieFromRequest(request: Request, name: string) {
-  const raw = request.headers.get("cookie") || "";
+function cookieFromRawHeader(raw: string, name: string) {
   for (const part of raw.split(";")) {
     const [key, ...valueParts] = part.trim().split("=");
     if (key === name) return decodeURIComponent(valueParts.join("="));
   }
   return null;
+}
+
+function cookieFromRequest(request: Request, name: string) {
+  return cookieFromRawHeader(request.headers.get("cookie") || "", name);
 }
 
 export function getRequestUser(request: Request) {
@@ -92,7 +95,14 @@ export function getRequestUser(request: Request) {
 
 export async function getCurrentUser() {
   const store = await cookies();
-  return verifySessionToken(store.get(COOKIE_NAME)?.value);
+  const cookieToken = store.get(COOKIE_NAME)?.value;
+  if (cookieToken) return verifySessionToken(cookieToken);
+
+  // Some Next.js route-handler execution paths can lose the cookie-store view
+  // while still retaining the original Cookie header. Fall back to that raw
+  // header so server-side permission checks stay consistent with proxy auth.
+  const headerStore = await headers();
+  return verifySessionToken(cookieFromRawHeader(headerStore.get("cookie") || "", COOKIE_NAME));
 }
 
 export function hasPermission(user: SessionUser | null, permission: Permission) { return Boolean(user?.permissions.includes(permission)); }
