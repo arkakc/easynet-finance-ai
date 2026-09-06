@@ -30,12 +30,17 @@ export default function DocumentConversionActions({type,id,status,documentNumber
   const canSupplierQuote=isSupplierQuote&&["APPROVED","CONVERTED"].includes(normalizedStatus);
   const canPo=type==="purchaseOrder"&&!isSupplierQuote&&["APPROVED","BILL_CREATED","BILLED"].includes(normalizedStatus);
   const canInvoicePayment=type==="invoice"&&normalizedStatus==="APPROVED";
+  const canSupplierInvoicePayment=type==="supplierBill"&&normalizedStatus==="APPROVED";
 
-  if(!canQuote&&!canSupplierQuote&&!canPo&&!canInvoicePayment)return null;
+  if(!canQuote&&!canSupplierQuote&&!canPo&&!canInvoicePayment&&!canSupplierInvoicePayment)return null;
 
   async function convert(){
     setBusy(true);setMessage("");
     try{
+      if(canSupplierInvoicePayment){
+        router.push(`/transactions?module=purchase&tab=purchasePayment&mode=create&sourceBill=${encodeURIComponent(id)}`);
+        return;
+      }
       if(canInvoicePayment){
         const r=await fetch(`/api/erp/invoice-payment-context?id=${encodeURIComponent(id)}`,{cache:"no-store"});
         const b=await r.json();
@@ -95,7 +100,7 @@ export default function DocumentConversionActions({type,id,status,documentNumber
     }catch(e){setMessage(e instanceof Error?e.message:"Payment draft creation failed")}finally{setBusy(false)}
   }
 
-  const buttonLabel=canInvoicePayment?"Create Payment Entry / Receipt":canQuote?"Create Sales Invoice":canSupplierQuote?"Create Purchase Order":"Create Supplier Invoice";
+  const buttonLabel=canSupplierInvoicePayment?"Create Payment Entry / Receipt":canInvoicePayment?"Create Payment Entry / Receipt":canQuote?"Create Sales Invoice":canSupplierQuote?"Create Purchase Order":"Create Supplier Invoice";
 
   return <div className="conversion-box no-print">
     <strong>Next Document</strong>
