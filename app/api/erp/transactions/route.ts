@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { postJournal, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
@@ -170,14 +171,31 @@ export async function POST(request:Request){
     if(!permission)return NextResponse.json({ok:false,error:"Unsupported transaction action"},{status:400});
     await requirePermission(permission);
     if(!env.APP_SECRET)throw new Error("Server compatibility credential is not configured");
+
     let payload=body.payload||{};
     const series=body.action?SERIES[body.action]:undefined;
     if(body.action&&series&&!String(payload[series.payloadField]||"").trim())payload={...payload,[series.payloadField]:await nextNumber(body.action)};
+
+    let itemLinking: { created: number; linked: number; temporary: number } | undefined;
+    if(body.action&&["createQuote","createInvoice","createSupplierQuote","createPurchaseOrder"].includes(body.action)){
+      const rawLines=Array.isArray(payload.lines)?payload.lines as any[]:[];
+      const supplierQuotation=body.action==="createSupplierQuote";
+      const resolved=await resolveTransactionItems(rawLines,{
+        allowTemporary:supplierQuotation,
+        autoCreateMissing:!supplierQuotation,
+        actor:`transaction-${body.action}`,
+        defaultNewItemType:"STOCK",
+      });
+      payload={...payload,lines:resolved.lines};
+      itemLinking={created:resolved.createdItems.length,linked:resolved.linkedCount,temporary:resolved.temporaryCount};
+    }
+
     const legacyAction=body.action==="createSupplierQuote"?"createPurchaseOrder":body.action;
     const internal=new Request(request.url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:legacyAction,payload,secret:env.APP_SECRET})});
     const response=await legacyPost(internal);
     const result=await response.json();
     if(body.action==="createSupplierQuote"&&result?.ok&&result?.result)result.result.type="supplierQuote";
+    if(result?.ok&&result?.result&&itemLinking)result.result.itemLinking=itemLinking;
     if(response.ok&&result?.ok&&body.action==="createPayment"&&result?.result?.recordId){
       const sourceId=String(payload.againstDocumentId||"").trim();
       const sourceType=String(payload.againstDocumentType||"").toLowerCase();
