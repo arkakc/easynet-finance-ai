@@ -19,7 +19,7 @@ type InvoicePaymentContext={
 };
 
 function approvedPoLifecycle(status:string){
-  return ["APPROVED","PART_RECEIVED","CONVERTED","BILL_CREATED","BILLED"].includes(status);
+  return ["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED"].includes(status);
 }
 
 export default function DocumentConversionActions({type,id,status,documentNumber}:{type:string;id:string;status:string;documentNumber?:string}){
@@ -33,8 +33,8 @@ export default function DocumentConversionActions({type,id,status,documentNumber
   const canQuote=type==="quote"&&["APPROVED","CONVERTED"].includes(normalizedStatus);
   const canSupplierQuote=isSupplierQuote&&["APPROVED","CONVERTED"].includes(normalizedStatus);
   const canPo=type==="purchaseOrder"&&!isSupplierQuote&&approvedPoLifecycle(normalizedStatus);
-  const canInvoicePayment=type==="invoice"&&normalizedStatus==="APPROVED";
-  const canSupplierInvoicePayment=type==="supplierBill"&&normalizedStatus==="APPROVED";
+  const canInvoicePayment=type==="invoice"&&normalizedStatus==="POSTED";
+  const canSupplierInvoicePayment=type==="supplierBill"&&normalizedStatus==="POSTED";
 
   if(!canQuote&&!canSupplierQuote&&!canPo&&!canInvoicePayment&&!canSupplierInvoicePayment)return null;
 
@@ -63,7 +63,7 @@ export default function DocumentConversionActions({type,id,status,documentNumber
         router.push(`/transactions/purchaseOrder/${b.createdId}`);router.refresh();return;
       }
       const action=canQuote?"quoteToInvoice":"poToBill";
-      const payload=canQuote?{quoteId:id,invoiceDate:today(),dueDate:"",revenueAccountId:"ACC-4100"}:{poId:id,billDate:today(),dueDate:"",costAccountId:"ACC-5100"};
+      const payload=canQuote?{quoteId:id,invoiceDate:today(),dueDate:"",revenueAccountId:"ACC-4100",updateStock:true}:{poId:id,billDate:today(),dueDate:"",costAccountId:"ACC-5100"};
       const r=await fetch("/api/erp/conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,payload})});
       const b=await r.json();
       if(!r.ok||!b.ok)throw new Error(b.error||"Conversion failed");
@@ -112,7 +112,7 @@ export default function DocumentConversionActions({type,id,status,documentNumber
 
   return <div className="conversion-box no-print">
     <strong>Next Document</strong>
-    <p className="small">Mapped actions keep source-document, Item Master, party and project linkage.</p>
+    <p className="small">Mapped actions keep source-document, Item Master, party, project and accounting linkage.</p>
 
     {!paymentContext&&canPo&&<div className="button-row">
       <button type="button" className="secondary" disabled={busy} onClick={openPurchaseReceipt}>Create Purchase Receipt / Goods Receipt</button>
