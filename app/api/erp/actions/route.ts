@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { requirePermission, type Permission } from "@/lib/auth";
+import { requireRequestPermission, type Permission } from "@/lib/auth";
 import { POST as approvalsPost } from "@/app/api/approvals/route";
 import { POST as assetsPost } from "@/app/api/assets/route";
 import { POST as budgetsPost } from "@/app/api/budgets/route";
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
     }
 
     const body = incoming.body || {};
-    await requirePermission(permissionFor(incoming.target, body));
+    requireRequestPermission(request, permissionFor(incoming.target, body));
 
     if (!env.APP_SECRET) {
       throw new Error("Server compatibility credential is not configured");
