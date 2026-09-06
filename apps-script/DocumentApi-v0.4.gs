@@ -191,6 +191,86 @@ function documentRowObject_(headers, row) {
   return obj;
 }
 
+function migrateDocumentsFromLegacySpreadsheet(sourceSpreadsheetId, overwriteExisting) {
+  if (!sourceSpreadsheetId) throw new Error('sourceSpreadsheetId is required');
+  const source = SpreadsheetApp.openById(String(sourceSpreadsheetId));
+  const target = documentSpreadsheet_();
+  if (source.getId() === target.getId()) throw new Error('Source and target spreadsheet cannot be the same');
+
+  const allowOverwrite = overwriteExisting === true;
+  const report = { copied: {}, skippedMissing: [], skippedNonEmpty: [], headerIssues: [] };
+
+  Object.keys(DOCUMENT_TABLES).forEach(function(name) {
+    const expected = DOCUMENT_TABLES[name];
+    const sourceSheet = source.getSheetByName(name);
+    if (!sourceSheet) {
+      report.skippedMissing.push(name);
+      return;
+    }
+
+    const sourceLastRow = sourceSheet.getLastRow();
+    const sourceLastCol = sourceSheet.getLastColumn();
+    if (sourceLastCol === 0) {
+      report.skippedMissing.push(name);
+      return;
+    }
+
+    const sourceHeaders = sourceSheet.getRange(1, 1, 1, sourceLastCol).getValues()[0].map(function(v) { return String(v || ''); });
+    const sourceIndex = {};
+    sourceHeaders.forEach(function(h, i) { if (h) sourceIndex[h] = i; });
+    const missingHeaders = expected.filter(function(h) { return sourceIndex[h] == null; });
+    if (missingHeaders.length) {
+      report.headerIssues.push({ table: name, missingHeaders: missingHeaders });
+      return;
+    }
+
+    const targetSheet = target.getSheetByName(name) || target.insertSheet(name);
+    documentEnsureSheet_(target, name, expected);
+    if (targetSheet.getLastRow() > 1 && !allowOverwrite) {
+      report.skippedNonEmpty.push(name);
+      return;
+    }
+
+    const sourceRows = sourceLastRow > 1 ? sourceSheet.getRange(2, 1, sourceLastRow - 1, sourceLastCol).getValues() : [];
+    const mappedRows = sourceRows.map(function(row) {
+      return expected.map(function(h) { return row[sourceIndex[h]]; });
+    });
+
+    if (allowOverwrite && targetSheet.getLastRow() > 1) {
+      targetSheet.getRange(2, 1, targetSheet.getLastRow() - 1, Math.max(targetSheet.getLastColumn(), expected.length)).clearContent();
+    }
+    if (mappedRows.length) {
+      targetSheet.getRange(2, 1, mappedRows.length, expected.length).setValues(mappedRows);
+    }
+    report.copied[name] = mappedRows.length;
+  });
+
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+function verifyDocumentMigrationAgainstLegacy(sourceSpreadsheetId) {
+  if (!sourceSpreadsheetId) throw new Error('sourceSpreadsheetId is required');
+  const source = SpreadsheetApp.openById(String(sourceSpreadsheetId));
+  const target = documentSpreadsheet_();
+  const report = {};
+
+  Object.keys(DOCUMENT_TABLES).forEach(function(name) {
+    const sourceSheet = source.getSheetByName(name);
+    const targetSheet = target.getSheetByName(name);
+    const sourceRows = sourceSheet ? Math.max(0, sourceSheet.getLastRow() - 1) : null;
+    const targetRows = targetSheet ? Math.max(0, targetSheet.getLastRow() - 1) : null;
+    report[name] = {
+      sourceRows: sourceRows,
+      targetRows: targetRows,
+      match: sourceRows === targetRows
+    };
+  });
+
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
 function documentEnsureToken_() {
   const props = PropertiesService.getScriptProperties();
   let token = props.getProperty('API_TOKEN');
