@@ -42,6 +42,34 @@ const REPORTING_TABLES = new Set([
   "ReportDashboardKPI",
 ]);
 
+const TABLE_ID_FIELDS: Record<string, string> = {
+  Settings: "key",
+  Accounts: "accountId",
+  Customers: "customerId",
+  Suppliers: "supplierId",
+  Projects: "projectId",
+  Items: "itemId",
+  Quotes: "quoteId",
+  QuoteLines: "quoteLineId",
+  PurchaseOrders: "poId",
+  POLines: "poLineId",
+  Invoices: "invoiceId",
+  InvoiceLines: "invoiceLineId",
+  SupplierBills: "billId",
+  SupplierBillLines: "billLineId",
+  Payments: "paymentId",
+  Expenses: "expenseId",
+  Loans: "loanId",
+  LoanEvents: "loanEventId",
+  PaymentSchedules: "scheduleId",
+  StockMovements: "movementId",
+  FixedAssets: "assetId",
+  Budgets: "budgetId",
+  Exceptions: "exceptionId",
+  Documents: "documentId",
+  DocumentLines: "documentLineId",
+};
+
 class BackendApplicationError extends Error {}
 
 /*
@@ -246,10 +274,38 @@ export async function appendRecord<T = Record<string, unknown>>(table: string, r
   return { ...result, row: result.row } as BackendEnvelope<{ row: T }>;
 }
 
+async function verifyBatchAppendRows<T>(table: string, records: Record<string, unknown>[]): Promise<T[] | null> {
+  if (!records.length) return [];
+  const idField = TABLE_ID_FIELDS[table];
+  if (!idField) return null;
+
+  const verified: T[] = [];
+  for (const record of records) {
+    const idValue = record[idField];
+    if (idValue === undefined || idValue === null || String(idValue).trim() === "") return null;
+    const found = await findRecords<T>(table, { [idField]: idValue }, 1);
+    if (!found.rows[0]) return null;
+    verified.push(found.rows[0]);
+  }
+  return verified;
+}
+
 export async function batchAppend<T = Record<string, unknown>>(table: string, records: Record<string, unknown>[], actor = "web-app") {
   const result = await callBackend<{ rows?: T[] }>("batchAppend", { table, records, actor });
-  if (!Array.isArray(result.rows)) throw new Error(`Apps Script protocol error: batchAppend(${table}) did not return rows[]`);
-  return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
+  if (Array.isArray(result.rows)) {
+    return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
+  }
+
+  // A write must never be blindly retried: the first Apps Script execution may
+  // already have committed the rows even when the response envelope is missing
+  // its `rows` property. Verify the intended primary keys with read-only calls;
+  // only accept the write when every requested row is actually present.
+  const verifiedRows = await verifyBatchAppendRows<T>(table, records);
+  if (verifiedRows && verifiedRows.length === records.length) {
+    return { ...result, rows: verifiedRows } as BackendEnvelope<{ rows: T[] }>;
+  }
+
+  throw new Error(`Apps Script protocol error: batchAppend(${table}) did not return rows[] and the committed rows could not be verified`);
 }
 
 export async function updateRecord<T = Record<string, unknown>>(table: string, idField: string, idValue: string, patch: Record<string, unknown>, actor = "web-app") {
