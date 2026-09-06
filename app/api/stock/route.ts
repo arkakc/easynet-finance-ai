@@ -61,23 +61,10 @@ function inventoryState(rows: any[], fallbackRate = 0) {
   return { qty, value: round2(value), rate: round4(Math.max(0, rate)) };
 }
 
-function normalized(value: unknown) {
-  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-function poLineMatchesItem(line: any, item: any) {
-  const itemId = String(item.itemId || "");
-  const itemCode = String(item.itemCode || itemId);
-  const lineItem = String(line.itemId || "");
-  if (lineItem && (lineItem === itemId || lineItem === itemCode)) return true;
-
-  const description = normalized(line.description);
-  const code = normalized(itemCode);
-  const name = normalized(item.itemName);
-  if (!description) return false;
-  if (code && (description === code || description.includes(code))) return true;
-  if (name && name.length >= 4 && (description === name || description.includes(name))) return true;
-  return false;
+function approvedPurchaseOrderStatus(value: unknown) {
+  // CONVERTED / BILL_CREATED / BILLED are legacy post-approval lifecycle values.
+  // They remain receivable so an invoice-created PO does not lose stock-receipt capability.
+  return ["APPROVED", "PART_RECEIVED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
 }
 
 function weightedPoRate(lines: any[]) {
@@ -90,9 +77,9 @@ function weightedPoRate(lines: any[]) {
 export async function GET(request: Request) {
   try {
     const scope = new URL(request.url).searchParams.get("scope") || "full";
-    const items = await listTable<any>("Items", 500, 0);
 
     if (scope === "items") {
+      const items = await listTable<any>("Items", 500, 0);
       return NextResponse.json({
         ok: true,
         items: items.rows.map((item: any) => ({ ...item, uom: String(item.uom || "Each") })),
@@ -100,10 +87,11 @@ export async function GET(request: Request) {
       });
     }
 
-    const [movements, purchaseOrders, poLines] = await Promise.all([
-      listTable("StockMovements", 500, 0),
-      listTable("PurchaseOrders", 500, 0),
-      listTable("POLines", 500, 0),
+    const [items, movements, purchaseOrders, poLines] = await Promise.all([
+      listTable<any>("Items", 500, 0),
+      listTable<any>("StockMovements", 500, 0),
+      listTable<any>("PurchaseOrders", 500, 0),
+      listTable<any>("POLines", 500, 0),
     ]);
 
     const enrichedItems = items.rows.map((item: any) => {
@@ -164,6 +152,7 @@ export async function POST(request: Request) {
       if (String(itemRow.itemType || "").toUpperCase() !== "STOCK") {
         throw new Error("Stock movements are only allowed for STOCK items");
       }
+
       if (record.projectId) {
         const project = await findRecords("Projects", { projectId: record.projectId }, 1);
         if (!project.rows.length) throw new Error("Project does not exist");
@@ -171,43 +160,60 @@ export async function POST(request: Request) {
 
       const movements = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
       const current = inventoryState(movements.rows, Number(itemRow.defaultRate || 0));
-      const onHand = current.qty;
       const incoming = ["PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN"].includes(record.movementType);
-      if (!incoming && record.qty > onHand + 0.0001) {
-        throw new Error(`Insufficient stock. On hand ${onHand}, requested ${record.qty}`);
+
+      if (!incoming && record.qty > current.qty + 0.0001) {
+        throw new Error(`Insufficient stock. On hand ${current.qty}, requested ${record.qty}`);
       }
 
       let effectiveUnitCost = incoming ? record.unitCost : current.rate;
+      let receiptContext: { orderedQty: number; alreadyReceived: number; remainingBefore: number; remainingAfter: number } | null = null;
 
       if (record.movementType === "PURCHASE_RECEIPT") {
-        if (!record.sourceDocumentId) throw new Error("Purchase receipt requires a source PO ID");
+        if (!record.sourceDocumentId) throw new Error("Purchase Receipt requires an approved Purchase Order");
+
         const po = await findRecords<any>("PurchaseOrders", { poId: record.sourceDocumentId }, 1);
         const poRow = po.rows[0];
-        if (!poRow) throw new Error("Purchase receipt source must be a valid PO ID");
-        if (!["APPROVED", "PART_RECEIVED", "RECEIVED", "BILL_CREATED", "BILLED"].includes(String(poRow.status || "").toUpperCase())) {
-          throw new Error("Purchase receipt requires an approved purchase order");
+        if (!poRow || String(poRow.poNumber || "").toUpperCase().startsWith("SUPQ-")) {
+          throw new Error("Purchase Receipt source must be a valid Purchase Order");
+        }
+        if (!approvedPurchaseOrderStatus(poRow.status)) {
+          throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
         }
         if (record.projectId && String(poRow.projectId || "") !== record.projectId) {
-          throw new Error("Purchase receipt project does not match the purchase order");
+          throw new Error("Purchase Receipt project does not match the Purchase Order");
         }
 
         const poLines = await findRecords<any>("POLines", { poId: record.sourceDocumentId }, 500);
-        const matchingLines = poLines.rows.filter((line: any) => poLineMatchesItem(line, itemRow));
-        const orderedQty = matchingLines.reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
-        if (orderedQty <= 0) throw new Error("Item is not present on the purchase order. Link the PO line to this Item Master record.");
+        const matchingLines = poLines.rows.filter((line: any) => String(line.itemId || "") === String(record.itemId));
+        if (!matchingLines.length) {
+          throw new Error("Purchase Order item is not linked to this Item Master record. Fix the PO Item link before receiving stock.");
+        }
 
+        const orderedQty = matchingLines.reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
         const alreadyReceived = movements.rows
           .filter((row: any) => row.movementType === "PURCHASE_RECEIPT" && String(row.sourceDocumentId || "") === record.sourceDocumentId)
           .reduce((sum: number, row: any) => sum + Number(row.qtyIn || 0), 0);
-        if (alreadyReceived + record.qty > orderedQty + 0.0001) {
-          throw new Error(`Purchase receipt exceeds ordered quantity. Ordered ${orderedQty}, already received ${alreadyReceived}`);
+        const remainingBefore = Math.max(0, orderedQty - alreadyReceived);
+
+        if (remainingBefore <= 0.0001) throw new Error("This Purchase Order item is already fully received");
+        if (record.qty > remainingBefore + 0.0001) {
+          throw new Error(`Purchase Receipt exceeds remaining quantity. Ordered ${orderedQty}, already received ${alreadyReceived}, remaining ${remainingBefore}`);
         }
 
         effectiveUnitCost = weightedPoRate(matchingLines);
+        receiptContext = {
+          orderedQty,
+          alreadyReceived,
+          remainingBefore,
+          remainingAfter: Math.max(0, remainingBefore - record.qty),
+        };
       }
 
-      const movementId = `MOV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const prefix = record.movementType === "PURCHASE_RECEIPT" ? "PR" : "MOV";
+      const movementId = `${prefix}-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
       const value = round2(record.qty * effectiveUnitCost);
+
       const result = await appendRecord("StockMovements", {
         movementId,
         movementDate: normalizeAccountingDate(record.movementDate),
@@ -242,7 +248,10 @@ export async function POST(request: Request) {
           previousRate: current.rate,
           movementUnitCost: round4(effectiveUnitCost),
           movingAverageRate: round4(Math.max(0, nextRate)),
+          previousQty: current.qty,
+          newQty: projectedQty,
         },
+        purchaseReceipt: receiptContext,
       });
     }
 
