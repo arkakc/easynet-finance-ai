@@ -79,6 +79,27 @@ function serviceConfig(service: BackendService): ServiceConfig {
   throw new Error(`${service} Apps Script backend is not configured`);
 }
 
+export function backendConfigStatus() {
+  const statusFor = (service: BackendService) => {
+    const split = service === "core"
+      ? { url: env.CORE_APPS_SCRIPT_WEB_APP_URL, token: env.CORE_APPS_SCRIPT_API_TOKEN }
+      : service === "reporting"
+        ? { url: env.REPORTING_APPS_SCRIPT_WEB_APP_URL, token: env.REPORTING_APPS_SCRIPT_API_TOKEN }
+        : { url: env.DOCUMENT_APPS_SCRIPT_WEB_APP_URL, token: env.DOCUMENT_APPS_SCRIPT_API_TOKEN };
+    const splitUrl = Boolean(split.url);
+    const splitToken = Boolean(split.token);
+    const legacyUrl = Boolean(env.APPS_SCRIPT_WEB_APP_URL);
+    const legacyToken = Boolean(env.APPS_SCRIPT_API_TOKEN);
+    const source = splitUrl && splitToken ? "split" : legacyUrl && legacyToken ? "legacy" : "unconfigured";
+    return { source, splitUrl, splitToken, legacyFallbackReady: legacyUrl && legacyToken };
+  };
+  return {
+    core: statusFor("core"),
+    reporting: statusFor("reporting"),
+    document: statusFor("document"),
+  };
+}
+
 function serviceFor(action: BackendAction, payload: Record<string, unknown>): BackendService {
   if (action === "uploadSource" || action === "deleteSource") return "document";
   const table = String(payload.table || "");
@@ -123,7 +144,13 @@ async function executeBackend<T>(
       if (!data || typeof data !== "object" || typeof data.ok !== "boolean") {
         throw new Error(`${service} Apps Script backend returned an invalid response envelope`);
       }
-      if (!data.ok) throw new BackendApplicationError(data.error || `${service} Apps Script backend returned an error`);
+      if (!data.ok) {
+        const backendMessage = String(data.error || "");
+        if (backendMessage.trim().toLowerCase() === "unauthorized") {
+          throw new BackendApplicationError(`${service} backend authentication failed (${config.source} configuration). Check the ${service.toUpperCase()} Apps Script URL/API token pair in this Vercel environment.`);
+        }
+        throw new BackendApplicationError(backendMessage || `${service} Apps Script backend returned an error`);
+      }
       return data;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(`${service} Apps Script backend request failed`);
