@@ -77,12 +77,32 @@ export function verifySessionToken(token?: string | null): SessionUser | null {
   } catch { return null; }
 }
 
+function cookieFromRequest(request: Request, name: string) {
+  const raw = request.headers.get("cookie") || "";
+  for (const part of raw.split(";")) {
+    const [key, ...valueParts] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(valueParts.join("="));
+  }
+  return null;
+}
+
+export function getRequestUser(request: Request) {
+  return verifySessionToken(cookieFromRequest(request, COOKIE_NAME));
+}
+
 export async function getCurrentUser() {
   const store = await cookies();
   return verifySessionToken(store.get(COOKIE_NAME)?.value);
 }
 
 export function hasPermission(user: SessionUser | null, permission: Permission) { return Boolean(user?.permissions.includes(permission)); }
+
+export function requireRequestPermission(request: Request, permission: Permission) {
+  const user = getRequestUser(request);
+  if (!user) throw new Error("Unauthorized");
+  if (!hasPermission(user, permission)) throw new Error("Forbidden");
+  return user;
+}
 
 export async function requirePermission(permission: Permission) {
   const user = await getCurrentUser();
