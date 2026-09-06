@@ -20,28 +20,21 @@ const CONFIG = {
   expense: { table: "Expenses", idField: "expenseId", label: "Expense" },
 } as const;
 
-// Payments are intentionally excluded. Payment approval is authorization only;
-// the accounting effect is created later by the explicit Final Save action.
+// Payments are authorization-only at approval. Their GL effect is created by Final Save.
 const ACCOUNTING_TYPES = new Set(["invoice", "supplierBill", "expense"]);
 
 function requireSecret(secret?: string) {
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
-
 const isDraft = (value: unknown) => String(value || "").trim().toUpperCase() === "DRAFT";
 
 export async function GET() {
   try {
     const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses] = await Promise.all([
-      listTable<any>("Quotes", 500, 0),
-      listTable<any>("Invoices", 500, 0),
-      listTable<any>("PurchaseOrders", 500, 0),
-      listTable<any>("SupplierBills", 500, 0),
-      listTable<any>("Payments", 500, 0),
-      listTable<any>("Expenses", 500, 0),
+      listTable<any>("Quotes", 500, 0), listTable<any>("Invoices", 500, 0), listTable<any>("PurchaseOrders", 500, 0),
+      listTable<any>("SupplierBills", 500, 0), listTable<any>("Payments", 500, 0), listTable<any>("Expenses", 500, 0),
     ]);
-
     const pending = [
       ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
       ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
@@ -50,7 +43,6 @@ export async function GET() {
       ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
       ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
     ];
-
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Approval queue load failed" }, { status: 500 });
@@ -63,10 +55,8 @@ export async function POST(request: Request) {
     requireSecret(body.secret);
     const input = actionSchema.parse(body.payload || {});
     const config = CONFIG[input.recordType];
-    const result = await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1);
-    const row = result.rows[0];
+    const row = (await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1)).rows[0];
     if (!row) throw new Error(`${config.label} not found`);
-
     const current = String(row.status || "DRAFT").toUpperCase();
     if (input.decision === "APPROVE" && current !== "DRAFT") throw new Error(`Only DRAFT documents can be approved. Current status: ${current}`);
     if (input.decision === "CANCEL" && current !== "DRAFT") throw new Error(`Only DRAFT documents can be cancelled. Current status: ${current}`);
@@ -90,11 +80,11 @@ export async function POST(request: Request) {
         await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:approval-posting-rollback");
         throw new Error(postingBody.error || "Accounting posting failed during approval");
       }
-      await updateRecord(config.table, config.idField, input.recordId, { status: "APPROVED" }, "finance-controller:approved-final-state");
     }
 
-    const finalResult = await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1);
-    return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: "APPROVED", row: finalResult.rows[0] });
+    const finalRow = (await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1)).rows[0];
+    const finalStatus = String(finalRow?.status || "APPROVED").toUpperCase();
+    return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: finalStatus, row: finalRow });
   } catch (error) {
     const message = error instanceof z.ZodError
       ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ")
