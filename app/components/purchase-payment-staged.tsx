@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Mode = "menu" | "invoice" | "direct";
@@ -123,6 +123,11 @@ export default function PurchasePaymentStaged() {
     setSelectedInvoice(null);
     setSupplierInput("");
     setSelectedSupplier("");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("sourceBill");
+      window.history.replaceState(window.history.state, "", `${url.pathname}?${url.searchParams.toString()}`);
+    }
   }
 
   function selectInvoice(row: any) {
@@ -131,6 +136,28 @@ export default function PurchasePaymentStaged() {
     setStatus("");
     window.setTimeout(() => document.getElementById("purchase-payment-invoice-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sourceBill = new URLSearchParams(window.location.search).get("sourceBill")?.trim() || "";
+    if (!sourceBill) return;
+    let active = true;
+    void (async () => {
+      setMode("invoice");
+      setStatus("Loading approved Supplier Invoice…");
+      const [rows] = await Promise.all([loadInvoices(), loadNextNo()]);
+      if (!active) return;
+      const match = rows.find((row: any) => String(row.billId || "") === sourceBill
+        && String(row.status || "").toUpperCase() === "APPROVED"
+        && Number(row.outstandingAmount ?? row.totalAmount ?? 0) > 0);
+      if (!match) {
+        setStatus("Selected Supplier Invoice is not approved or has no outstanding amount.");
+        return;
+      }
+      selectInvoice(match);
+    })();
+    return () => { active = false; };
+  }, []);
 
   async function searchInvoice() {
     let rows = supplierInvoices;
