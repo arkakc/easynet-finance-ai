@@ -4,6 +4,15 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
+import { inventoryState, round2, round4, weightedRate } from "@/lib/accounting/inventory";
+import {
+  inventoryAdjustmentPosting,
+  inventoryIssuePosting,
+  postJournal,
+  purchaseReceiptPosting,
+  type PostingLine,
+} from "@/lib/accounting/posting";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
@@ -15,6 +24,7 @@ const itemSchema = z.object({
   defaultRate: z.coerce.number().finite().nonnegative().optional().default(0),
   taxCode: z.string().trim().optional().default(""),
   uom: z.string().trim().min(1).default("Each"),
+  deferredRevenueMonths: z.coerce.number().int().min(0).max(120).optional().default(0),
 });
 
 const movementSchema = z.object({
@@ -37,8 +47,15 @@ const purchaseReceiptSchema = z.object({
   })).min(1),
 });
 
-const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
-const round4 = (value: number) => Math.round((value + Number.EPSILON) * 10000) / 10000;
+const valueAdjustmentSchema = z.object({
+  movementDate: z.string().trim().min(8),
+  itemId: z.string().trim().min(1),
+  projectId: z.string().trim().optional().default(""),
+  adjustmentType: z.enum(["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"]),
+  amount: z.coerce.number().finite().nonnegative().optional().default(0),
+  targetUnitCost: z.coerce.number().finite().nonnegative().optional().default(0),
+  sourceDocumentId: z.string().trim().optional().default(""),
+});
 
 function requireSecret(secret?: string) {
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
@@ -55,31 +72,8 @@ function nextItemCode(items: any[]) {
   return `ITEM-${String(max + 1).padStart(5, "0")}`;
 }
 
-function inventoryState(rows: any[], fallbackRate = 0) {
-  let qty = 0;
-  let value = 0;
-  for (const row of rows) {
-    const qtyIn = Number(row.qtyIn || 0);
-    const qtyOut = Number(row.qtyOut || 0);
-    const rowValue = Math.abs(Number(row.value || 0));
-    qty += qtyIn - qtyOut;
-    value += qtyIn > 0 ? rowValue : -rowValue;
-  }
-  if (Math.abs(qty) < 0.0000001) qty = 0;
-  if (Math.abs(value) < 0.005) value = 0;
-  const rate = qty > 0 ? value / qty : Number(fallbackRate || 0);
-  return { qty, value: round2(value), rate: round4(Math.max(0, rate)) };
-}
-
 function approvedPurchaseOrderStatus(value: unknown) {
-  return ["APPROVED", "PART_RECEIVED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
-}
-
-function weightedPoRate(lines: any[]) {
-  const qty = lines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
-  if (!(qty > 0)) return 0;
-  const value = lines.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.rate || 0), 0);
-  return round4(value / qty);
+  return ["APPROVED", "PART_RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
 }
 
 function mergeReceiptLines(lines: Array<{ itemId: string; qty: number }>) {
@@ -88,15 +82,71 @@ function mergeReceiptLines(lines: Array<{ itemId: string; qty: number }>) {
   return [...merged.entries()].map(([itemId, qty]) => ({ itemId, qty }));
 }
 
+function receiptQty(rows: any[], poId: string, itemId: string) {
+  return rows
+    .filter((movement: any) => String(movement.sourceDocumentId || "") === poId
+      && String(movement.itemId || "") === itemId
+      && String(movement.movementType || "") === "PURCHASE_RECEIPT")
+    .reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0), 0);
+}
+
+function inverseLines(lines: PostingLine[]) {
+  return lines.map((line) => ({
+    ...line,
+    debit: Number(line.credit || 0),
+    credit: Number(line.debit || 0),
+    description: `Rollback: ${line.description || "inventory posting"}`,
+  }));
+}
+
+async function compensateJournal(input: {
+  postingDate: string;
+  documentType: string;
+  documentId: string;
+  documentNumber: string;
+  projectId?: string;
+  lines: PostingLine[];
+  reason: string;
+}) {
+  try {
+    await postJournal({
+      postingDate: input.postingDate,
+      documentType: `${input.documentType}_ROLLBACK`,
+      documentId: input.documentId,
+      documentNumber: `${input.documentNumber}-ROLLBACK`,
+      reference: input.reason,
+      projectId: input.projectId,
+      lines: inverseLines(input.lines),
+      createdBy: "stock-rollback",
+      approvedBy: "System Compensation",
+    });
+  } catch (rollbackError) {
+    try {
+      await appendRecord("Exceptions", {
+        severity: "CRITICAL",
+        module: "Stock Accounting",
+        recordType: input.documentType,
+        recordId: input.documentId,
+        message: `Automatic GL compensation failed: ${rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"}`,
+        status: "OPEN",
+        assignedTo: "Finance Controller",
+      }, "stock-accounting-rollback");
+    } catch { /* best effort */ }
+  }
+}
+
 export async function GET(request: Request) {
   try {
     const scope = new URL(request.url).searchParams.get("scope") || "full";
-
     if (scope === "items") {
       const items = await listTable<any>("Items", 500, 0);
       return NextResponse.json({
         ok: true,
-        items: items.rows.map((item: any) => ({ ...item, uom: String(item.uom || "Each") })),
+        items: items.rows.map((item: any) => ({
+          ...item,
+          uom: String(item.uom || "Each"),
+          deferredRevenueMonths: Number(item.deferredRevenueMonths || 0),
+        })),
         nextItemCode: nextItemCode(items.rows),
       });
     }
@@ -111,7 +161,14 @@ export async function GET(request: Request) {
     const enrichedItems = items.rows.map((item: any) => {
       const rows = movements.rows.filter((movement: any) => String(movement.itemId || "") === String(item.itemId || ""));
       const state = inventoryState(rows, Number(item.defaultRate || 0));
-      return { ...item, uom: String(item.uom || "Each"), defaultRate: state.rate, stockQty: state.qty, stockValue: state.value };
+      return {
+        ...item,
+        uom: String(item.uom || "Each"),
+        deferredRevenueMonths: Number(item.deferredRevenueMonths || 0),
+        defaultRate: state.rate,
+        stockQty: state.qty,
+        stockValue: state.value,
+      };
     });
 
     return NextResponse.json({
@@ -129,7 +186,8 @@ export async function GET(request: Request) {
 
 async function createPurchaseReceipt(raw: unknown) {
   const record = purchaseReceiptSchema.parse(raw || {});
-  const receiptLines = mergeReceiptLines(record.lines);
+  const lines = mergeReceiptLines(record.lines);
+  await ensureAccountingInfrastructure();
 
   const [poResult, poLinesResult, itemsResult, movementsResult] = await Promise.all([
     findRecords<any>("PurchaseOrders", { poId: record.sourceDocumentId }, 1),
@@ -139,54 +197,39 @@ async function createPurchaseReceipt(raw: unknown) {
   ]);
 
   const po = poResult.rows[0];
-  if (!po || String(po.poNumber || "").toUpperCase().startsWith("SUPQ-")) {
-    throw new Error("Purchase Receipt source must be a valid Purchase Order");
-  }
-  if (!approvedPurchaseOrderStatus(po.status)) {
-    throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
-  }
-  if (record.projectId && String(po.projectId || "") !== record.projectId) {
-    throw new Error("Purchase Receipt project does not match the Purchase Order");
-  }
+  if (!po || String(po.poNumber || "").toUpperCase().startsWith("SUPQ-")) throw new Error("Purchase Receipt source must be a valid Purchase Order");
+  if (!approvedPurchaseOrderStatus(po.status)) throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
+  if (record.projectId && String(po.projectId || "") !== record.projectId) throw new Error("Purchase Receipt project does not match the Purchase Order");
 
   const itemMap = new Map(itemsResult.rows.map((item: any) => [String(item.itemId || ""), item]));
   const receiptNumber = `PR-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
   const movementDate = normalizeAccountingDate(record.movementDate);
-
   const movementsToCreate: any[] = [];
   const valuations: any[] = [];
+  let inventoryValue = 0;
 
-  for (let index = 0; index < receiptLines.length; index += 1) {
-    const line = receiptLines[index];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const item = itemMap.get(line.itemId);
     if (!item) throw new Error(`Item does not exist: ${line.itemId}`);
-    if (String(item.itemType || "").toUpperCase() !== "STOCK") {
-      throw new Error(`Purchase Receipt can only receive STOCK items: ${item.itemCode || line.itemId}`);
-    }
+    if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error(`Purchase Receipt can only receive STOCK items: ${item.itemCode || line.itemId}`);
 
     const matchingPoLines = poLinesResult.rows.filter((poLine: any) => String(poLine.itemId || "") === line.itemId);
-    if (!matchingPoLines.length) {
-      throw new Error(`Purchase Order item is not linked to Item Master: ${item.itemCode || line.itemId}`);
-    }
-
+    if (!matchingPoLines.length) throw new Error(`Purchase Order item is not linked to Item Master: ${item.itemCode || line.itemId}`);
     const orderedQty = matchingPoLines.reduce((sum: number, poLine: any) => sum + Number(poLine.qty || 0), 0);
-    const itemMovements = movementsResult.rows.filter((movement: any) => String(movement.itemId || "") === line.itemId);
-    const alreadyReceived = itemMovements
-      .filter((movement: any) => movement.movementType === "PURCHASE_RECEIPT" && String(movement.sourceDocumentId || "") === record.sourceDocumentId)
-      .reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0), 0);
+    const alreadyReceived = receiptQty(movementsResult.rows, record.sourceDocumentId, line.itemId);
     const remainingBefore = Math.max(0, orderedQty - alreadyReceived);
-
     if (remainingBefore <= 0.0001) throw new Error(`Item is already fully received: ${item.itemCode || line.itemId}`);
-    if (line.qty > remainingBefore + 0.0001) {
-      throw new Error(`Receipt quantity exceeds remaining PO quantity for ${item.itemCode || line.itemId}. Remaining ${remainingBefore}`);
-    }
+    if (line.qty > remainingBefore + 0.0001) throw new Error(`Receipt quantity exceeds remaining PO quantity for ${item.itemCode || line.itemId}. Remaining ${remainingBefore}`);
 
+    const itemMovements = movementsResult.rows.filter((movement: any) => String(movement.itemId || "") === line.itemId);
     const current = inventoryState(itemMovements, Number(item.defaultRate || 0));
-    const poRate = weightedPoRate(matchingPoLines);
+    const poRate = weightedRate(matchingPoLines);
     const value = round2(line.qty * poRate);
-    const newQty = current.qty + line.qty;
-    const newValue = current.value + value;
+    const newQty = round4(current.qty + line.qty);
+    const newValue = round2(current.value + value);
     const movingAverageRate = newQty > 0 ? round4(newValue / newQty) : poRate;
+    inventoryValue = round2(inventoryValue + value);
 
     movementsToCreate.push({
       movementId: `${receiptNumber}-${String(index + 1).padStart(3, "0")}`,
@@ -198,9 +241,10 @@ async function createPurchaseReceipt(raw: unknown) {
       qtyOut: 0,
       unitCost: poRate,
       value,
+      valueAdjustment: 0,
       sourceDocumentId: record.sourceDocumentId,
+      journalId: "",
     });
-
     valuations.push({
       itemId: line.itemId,
       itemCode: item.itemCode || line.itemId,
@@ -216,28 +260,207 @@ async function createPurchaseReceipt(raw: unknown) {
     });
   }
 
-  const created = await batchAppend("StockMovements", movementsToCreate, "purchase-receipt-ui");
+  const glLines = purchaseReceiptPosting({
+    inventoryValue,
+    supplierId: po.supplierId,
+    projectId: record.projectId || po.projectId || "",
+  });
+  const journal = await postJournal({
+    postingDate: movementDate,
+    documentType: "PURCHASE_RECEIPT",
+    documentId: receiptNumber,
+    documentNumber: receiptNumber,
+    reference: `Purchase Receipt against ${po.poNumber || po.poId}`,
+    projectId: record.projectId || po.projectId || "",
+    lines: glLines,
+  });
 
-  await Promise.all(valuations.map((valuation) => updateRecord(
-    "Items",
-    "itemId",
-    valuation.itemId,
-    { defaultRate: valuation.movingAverageRate },
-    "stock-valuation",
-  )));
+  try {
+    const rowsWithJournal = movementsToCreate.map((movement) => ({ ...movement, journalId: journal.journalId }));
+    const created = await batchAppend("StockMovements", rowsWithJournal, "purchase-receipt-ui");
+    await Promise.all(valuations.map((valuation) => updateRecord(
+      "Items", "itemId", valuation.itemId, { defaultRate: valuation.movingAverageRate }, "stock-valuation",
+    )));
 
-  return {
-    receiptNumber,
-    purchaseOrderId: record.sourceDocumentId,
-    purchaseOrderNumber: po.poNumber || po.poId,
-    rows: created.rows || movementsToCreate,
-    valuations,
-  };
+    const poItemIds = [...new Set(poLinesResult.rows.map((line: any) => String(line.itemId || "")).filter(Boolean))];
+    const allFullyReceived = poItemIds.every((itemId) => {
+      const item = itemMap.get(itemId);
+      if (String(item?.itemType || "").toUpperCase() !== "STOCK") return true;
+      const ordered = poLinesResult.rows.filter((line: any) => String(line.itemId || "") === itemId).reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
+      const nowReceived = receiptQty([...movementsResult.rows, ...rowsWithJournal], record.sourceDocumentId, itemId);
+      return nowReceived + 0.0001 >= ordered;
+    });
+    const currentStatus = String(po.status || "").toUpperCase();
+    if (!currentStatus.includes("BILL")) {
+      await updateRecord("PurchaseOrders", "poId", po.poId, { status: allFullyReceived ? "RECEIVED" : "PART_RECEIVED" }, "purchase-receipt-ui");
+    }
+
+    return {
+      receiptNumber,
+      purchaseOrderId: record.sourceDocumentId,
+      purchaseOrderNumber: po.poNumber || po.poId,
+      journalId: journal.journalId,
+      rows: created.rows || rowsWithJournal,
+      valuations,
+      inventoryValue,
+    };
+  } catch (error) {
+    await compensateJournal({
+      postingDate: movementDate,
+      documentType: "PURCHASE_RECEIPT",
+      documentId: receiptNumber,
+      documentNumber: receiptNumber,
+      projectId: record.projectId || po.projectId || "",
+      lines: glLines,
+      reason: `Automatic rollback because stock persistence failed for ${receiptNumber}`,
+    });
+    throw error;
+  }
+}
+
+async function createPhysicalMovement(raw: unknown) {
+  const record = movementSchema.parse(raw || {});
+  await ensureAccountingInfrastructure();
+  const itemResult = await findRecords<any>("Items", { itemId: record.itemId }, 1);
+  const item = itemResult.rows[0];
+  if (!item) throw new Error("Item does not exist");
+  if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Stock movements are only allowed for STOCK items");
+  if (record.projectId) {
+    const project = await findRecords("Projects", { projectId: record.projectId }, 1);
+    if (!project.rows.length) throw new Error("Project does not exist");
+  }
+
+  const movementRows = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
+  const current = inventoryState(movementRows.rows, Number(item.defaultRate || 0));
+  const incoming = ["ADJUSTMENT_IN", "RETURN_IN"].includes(record.movementType);
+  if (!incoming && record.qty > current.qty + 0.0001) throw new Error(`Insufficient stock. On hand ${current.qty}, requested ${record.qty}`);
+
+  const effectiveUnitCost = record.movementType === "ADJUSTMENT_IN" ? Number(record.unitCost || 0) : current.rate;
+  if (record.movementType === "ADJUSTMENT_IN" && !(effectiveUnitCost > 0)) throw new Error("Adjustment In requires a positive Unit Cost");
+  const movementId = `MOV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const movementDate = normalizeAccountingDate(record.movementDate);
+  const value = round2(record.qty * effectiveUnitCost);
+  const costAccountId = String(item.costAccount || "ACC-5100");
+
+  let glLines: PostingLine[];
+  if (["PROJECT_ISSUE", "RETURN_OUT"].includes(record.movementType)) {
+    glLines = inventoryIssuePosting({ amount: value, costAccountId, projectId: record.projectId, description: record.movementType === "PROJECT_ISSUE" ? "Project material issue" : "Inventory return out" });
+  } else if (record.movementType === "RETURN_IN") {
+    glLines = [
+      { accountId: "ACC-1150", debit: value, projectId: record.projectId, description: "Inventory returned in" },
+      { accountId: costAccountId, credit: value, projectId: record.projectId, description: "Reverse prior inventory cost" },
+    ];
+  } else {
+    glLines = inventoryAdjustmentPosting({
+      amountDelta: incoming ? value : -value,
+      projectId: record.projectId,
+      type: record.movementType,
+      costAccountId,
+    });
+  }
+
+  const journal = await postJournal({
+    postingDate: movementDate,
+    documentType: `STOCK_${record.movementType}`,
+    documentId: movementId,
+    documentNumber: movementId,
+    reference: record.sourceDocumentId || record.movementType.replaceAll("_", " "),
+    projectId: record.projectId,
+    lines: glLines,
+  });
+
+  try {
+    const result = await appendRecord("StockMovements", {
+      movementId,
+      movementDate,
+      itemId: record.itemId,
+      projectId: record.projectId,
+      movementType: record.movementType,
+      qtyIn: incoming ? record.qty : 0,
+      qtyOut: incoming ? 0 : record.qty,
+      unitCost: round4(effectiveUnitCost),
+      value,
+      valueAdjustment: 0,
+      sourceDocumentId: record.sourceDocumentId,
+      journalId: journal.journalId,
+    }, "stock-ui");
+
+    const projectedQty = round4(incoming ? current.qty + record.qty : current.qty - record.qty);
+    const projectedValue = round2(incoming ? current.value + value : current.value - value);
+    const nextRate = projectedQty > 0 ? round4(projectedValue / projectedQty) : current.rate;
+    await updateRecord("Items", "itemId", record.itemId, { defaultRate: Math.max(0, nextRate) }, "stock-valuation");
+
+    return { row: result.row, journalId: journal.journalId, valuation: { previousRate: current.rate, movementUnitCost: round4(effectiveUnitCost), movingAverageRate: Math.max(0, nextRate), previousQty: current.qty, newQty: projectedQty } };
+  } catch (error) {
+    await compensateJournal({ postingDate: movementDate, documentType: `STOCK_${record.movementType}`, documentId: movementId, documentNumber: movementId, projectId: record.projectId, lines: glLines, reason: `Automatic rollback because stock movement persistence failed for ${movementId}` });
+    throw error;
+  }
+}
+
+async function createValueAdjustment(raw: unknown) {
+  const record = valueAdjustmentSchema.parse(raw || {});
+  await ensureAccountingInfrastructure();
+  const item = (await findRecords<any>("Items", { itemId: record.itemId }, 1)).rows[0];
+  if (!item) throw new Error("Item does not exist");
+  if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Inventory value adjustments are only allowed for STOCK items");
+  const movements = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
+  const current = inventoryState(movements.rows, Number(item.defaultRate || 0));
+  if (!(current.qty > 0)) throw new Error("Inventory value adjustment requires positive stock on hand");
+
+  let delta = 0;
+  if (record.adjustmentType === "LANDED_COST") {
+    if (!(record.amount > 0)) throw new Error("Landed Cost amount must be greater than zero");
+    delta = round2(record.amount);
+  } else {
+    if (!(record.targetUnitCost >= 0)) throw new Error("Target Unit Cost is required");
+    if (record.adjustmentType === "NRV_WRITEDOWN" && record.targetUnitCost > current.rate + 0.0001) throw new Error("NRV write-down cannot increase inventory unit cost");
+    delta = round2(current.qty * (record.targetUnitCost - current.rate));
+    if (record.adjustmentType === "NRV_WRITEDOWN" && delta >= 0) throw new Error("NRV write-down must reduce inventory value");
+    if (record.adjustmentType === "REVALUATION" && Math.abs(delta) < 0.005) throw new Error("Revaluation does not change inventory value");
+  }
+
+  const movementId = `VAL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const movementDate = normalizeAccountingDate(record.movementDate);
+  const glLines = inventoryAdjustmentPosting({ amountDelta: delta, projectId: record.projectId, type: record.adjustmentType, costAccountId: String(item.costAccount || "ACC-5100") });
+  const journal = await postJournal({
+    postingDate: movementDate,
+    documentType: `INVENTORY_${record.adjustmentType}`,
+    documentId: movementId,
+    documentNumber: movementId,
+    reference: record.sourceDocumentId || record.adjustmentType.replaceAll("_", " "),
+    projectId: record.projectId,
+    lines: glLines,
+  });
+
+  try {
+    const newValue = round2(current.value + delta);
+    if (newValue < -0.005) throw new Error("Inventory adjustment would create a negative inventory value");
+    const nextRate = round4(Math.max(0, newValue / current.qty));
+    const result = await appendRecord("StockMovements", {
+      movementId,
+      movementDate,
+      itemId: record.itemId,
+      projectId: record.projectId,
+      movementType: record.adjustmentType,
+      qtyIn: 0,
+      qtyOut: 0,
+      unitCost: nextRate,
+      value: Math.abs(delta),
+      valueAdjustment: delta,
+      sourceDocumentId: record.sourceDocumentId,
+      journalId: journal.journalId,
+    }, "stock-value-adjustment");
+    await updateRecord("Items", "itemId", record.itemId, { defaultRate: nextRate }, "stock-valuation");
+    return { row: result.row, journalId: journal.journalId, valuation: { previousRate: current.rate, previousValue: current.value, valueAdjustment: delta, movingAverageRate: nextRate, newValue } };
+  } catch (error) {
+    await compensateJournal({ postingDate: movementDate, documentType: `INVENTORY_${record.adjustmentType}`, documentId: movementId, documentNumber: movementId, projectId: record.projectId, lines: glLines, reason: `Automatic rollback because inventory value adjustment persistence failed for ${movementId}` });
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -246,7 +469,6 @@ export async function POST(request: Request) {
       const itemCode = nextItemCode(items.rows);
       const byCode = await findRecords("Items", { itemCode }, 1);
       if (byCode.rows.length) throw new Error(`Generated item code already exists: ${itemCode}. Refresh and try again.`);
-
       const result = await appendRecord("Items", {
         itemId: itemCode,
         itemCode,
@@ -258,72 +480,14 @@ export async function POST(request: Request) {
         taxCode: record.taxCode,
         active: true,
         uom: record.uom,
+        deferredRevenueMonths: record.itemType === "STOCK" ? 0 : record.deferredRevenueMonths,
       }, "stock-ui");
       return NextResponse.json({ ok: true, row: result.row });
     }
 
-    if (body.action === "createPurchaseReceipt") {
-      const result = await createPurchaseReceipt(body.record);
-      return NextResponse.json({ ok: true, ...result });
-    }
-
-    if (body.action === "createMovement") {
-      const record = movementSchema.parse(body.record || {});
-      const item = await findRecords<any>("Items", { itemId: record.itemId }, 1);
-      const itemRow = item.rows[0];
-      if (!itemRow) throw new Error("Item does not exist");
-      if (String(itemRow.itemType || "").toUpperCase() !== "STOCK") {
-        throw new Error("Stock movements are only allowed for STOCK items");
-      }
-
-      if (record.projectId) {
-        const project = await findRecords("Projects", { projectId: record.projectId }, 1);
-        if (!project.rows.length) throw new Error("Project does not exist");
-      }
-
-      const movements = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
-      const current = inventoryState(movements.rows, Number(itemRow.defaultRate || 0));
-      const incoming = ["ADJUSTMENT_IN", "RETURN_IN"].includes(record.movementType);
-
-      if (!incoming && record.qty > current.qty + 0.0001) {
-        throw new Error(`Insufficient stock. On hand ${current.qty}, requested ${record.qty}`);
-      }
-
-      const effectiveUnitCost = incoming ? record.unitCost : current.rate;
-      const movementId = `MOV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
-      const value = round2(record.qty * effectiveUnitCost);
-      const result = await appendRecord("StockMovements", {
-        movementId,
-        movementDate: normalizeAccountingDate(record.movementDate),
-        itemId: record.itemId,
-        projectId: record.projectId,
-        movementType: record.movementType,
-        qtyIn: incoming ? record.qty : 0,
-        qtyOut: incoming ? 0 : record.qty,
-        unitCost: round4(effectiveUnitCost),
-        value,
-        sourceDocumentId: record.sourceDocumentId,
-      }, "stock-ui");
-
-      const projectedQty = incoming ? current.qty + record.qty : current.qty - record.qty;
-      const projectedValue = incoming ? current.value + value : current.value - value;
-      const nextRate = incoming ? (projectedQty > 0 ? projectedValue / projectedQty : effectiveUnitCost) : current.rate;
-
-      await updateRecord("Items", "itemId", record.itemId, { defaultRate: round4(Math.max(0, nextRate)) }, "stock-valuation");
-
-      return NextResponse.json({
-        ok: true,
-        row: result.row,
-        valuation: {
-          previousRate: current.rate,
-          movementUnitCost: round4(effectiveUnitCost),
-          movingAverageRate: round4(Math.max(0, nextRate)),
-          previousQty: current.qty,
-          newQty: projectedQty,
-        },
-      });
-    }
-
+    if (body.action === "createPurchaseReceipt") return NextResponse.json({ ok: true, ...(await createPurchaseReceipt(body.record)) });
+    if (body.action === "createMovement") return NextResponse.json({ ok: true, ...(await createPhysicalMovement(body.record)) });
+    if (body.action === "createValueAdjustment") return NextResponse.json({ ok: true, ...(await createValueAdjustment(body.record)) });
     throw new Error("Unsupported stock action");
   } catch (error) {
     const message = error instanceof z.ZodError
