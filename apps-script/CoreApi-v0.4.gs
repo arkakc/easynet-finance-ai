@@ -1,4 +1,4 @@
-const CORE_API_VERSION = '0.4.1';
+const CORE_API_VERSION = '0.4.2';
 
 const CORE_TABLES = {
   Settings: ['key','value','notes','updatedAt'],
@@ -6,7 +6,7 @@ const CORE_TABLES = {
   Customers: ['customerId','customerName','contactPerson','phone','email','address','taxId','creditTermsDays','creditLimit','active','createdAt','updatedAt'],
   Suppliers: ['supplierId','supplierName','contactPerson','phone','email','address','taxId','paymentTermsDays','active','createdAt','updatedAt'],
   Projects: ['projectId','projectName','customerId','startDate','endDate','status','contractNet','gstAmount','contractTotal','expectedCost','projectManager','createdAt','updatedAt'],
-  Items: ['itemId','itemCode','itemName','itemType','revenueAccount','costAccount','defaultRate','taxCode','active','createdAt','updatedAt'],
+  Items: ['itemId','itemCode','itemName','itemType','revenueAccount','costAccount','defaultRate','taxCode','active','createdAt','updatedAt','uom'],
   Quotes: ['quoteId','quoteNumber','customerId','projectId','quoteDate','expiryDate','netAmount','gstAmount','totalAmount','status','sourceDocumentId','createdAt','updatedAt'],
   QuoteLines: ['quoteLineId','quoteId','lineNo','itemId','description','qty','uom','rate','netAmount','gstAmount','totalAmount'],
   PurchaseOrders: ['poId','poNumber','supplierId','projectId','poDate','netAmount','gstAmount','totalAmount','status','sourceDocumentId','createdAt','updatedAt'],
@@ -304,7 +304,21 @@ function coreBootstrapStatus_() {
 function coreEnsureSheet_(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
-  if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  } else {
+    const existingColumnCount = Math.max(1, sheet.getLastColumn());
+    const existingHeaders = sheet.getRange(1, 1, 1, existingColumnCount).getValues()[0].map(function(value) { return String(value || ''); });
+    headers.forEach(function(header, index) {
+      if (!existingHeaders[index]) {
+        sheet.getRange(1, index + 1).setValue(header);
+      } else if (existingHeaders[index] !== header) {
+        throw new Error('Core schema mismatch in ' + name + ' column ' + (index + 1) + ': expected ' + header + ', found ' + existingHeaders[index]);
+      }
+    });
+  }
+
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
 }
