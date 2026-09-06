@@ -281,7 +281,10 @@ export default function TransactionsPage() {
 
   function workflowActions(recordType: RecordType, id: string, rowStatus: string) {
     const normalized = String(rowStatus || "DRAFT").toUpperCase();
-    return <>{normalized === "DRAFT" && <button type="button" onClick={() => void approve(recordType, id)}>Approve</button>}</>;
+    return <>
+      {normalized === "DRAFT" && <button type="button" onClick={() => void approve(recordType, id)}>Approve</button>}
+      {recordType === "supplierBill" && normalized === "APPROVED" && <Link prefetch={false} className="button-link" href={`/transactions?module=purchase&tab=purchasePayment&mode=create&sourceBill=${encodeURIComponent(id)}`}>Create Payment Entry</Link>}
+    </>;
   }
 
   async function submitCommercial(event: FormEvent<HTMLFormElement>) {
