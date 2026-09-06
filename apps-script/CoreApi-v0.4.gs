@@ -1,4 +1,4 @@
-const CORE_API_VERSION = '0.4.2';
+const CORE_API_VERSION = '0.5.0';
 
 const CORE_TABLES = {
   Settings: ['key','value','notes','updatedAt'],
@@ -6,12 +6,12 @@ const CORE_TABLES = {
   Customers: ['customerId','customerName','contactPerson','phone','email','address','taxId','creditTermsDays','creditLimit','active','createdAt','updatedAt'],
   Suppliers: ['supplierId','supplierName','contactPerson','phone','email','address','taxId','paymentTermsDays','active','createdAt','updatedAt'],
   Projects: ['projectId','projectName','customerId','startDate','endDate','status','contractNet','gstAmount','contractTotal','expectedCost','projectManager','createdAt','updatedAt'],
-  Items: ['itemId','itemCode','itemName','itemType','revenueAccount','costAccount','defaultRate','taxCode','active','createdAt','updatedAt','uom'],
+  Items: ['itemId','itemCode','itemName','itemType','revenueAccount','costAccount','defaultRate','taxCode','active','createdAt','updatedAt','uom','deferredRevenueMonths'],
   Quotes: ['quoteId','quoteNumber','customerId','projectId','quoteDate','expiryDate','netAmount','gstAmount','totalAmount','status','sourceDocumentId','createdAt','updatedAt'],
   QuoteLines: ['quoteLineId','quoteId','lineNo','itemId','description','qty','uom','rate','netAmount','gstAmount','totalAmount'],
   PurchaseOrders: ['poId','poNumber','supplierId','projectId','poDate','netAmount','gstAmount','totalAmount','status','sourceDocumentId','createdAt','updatedAt'],
   POLines: ['poLineId','poId','lineNo','itemId','description','qty','uom','rate','netAmount','gstAmount','totalAmount'],
-  Invoices: ['invoiceId','invoiceNumber','customerId','projectId','invoiceDate','dueDate','netAmount','gstAmount','totalAmount','paidAmount','outstandingAmount','status','sourceDocumentId','journalId','createdAt','updatedAt'],
+  Invoices: ['invoiceId','invoiceNumber','customerId','projectId','invoiceDate','dueDate','netAmount','gstAmount','totalAmount','paidAmount','outstandingAmount','status','sourceDocumentId','journalId','createdAt','updatedAt','updateStock'],
   InvoiceLines: ['invoiceLineId','invoiceId','lineNo','itemId','description','qty','uom','rate','netAmount','gstAmount','totalAmount','revenueAccountId'],
   SupplierBills: ['billId','billNumber','supplierId','projectId','billDate','dueDate','poId','netAmount','gstAmount','totalAmount','paidAmount','outstandingAmount','status','sourceDocumentId','journalId','createdAt','updatedAt'],
   SupplierBillLines: ['billLineId','billId','lineNo','itemId','description','qty','uom','rate','netAmount','gstAmount','totalAmount','costAccountId'],
@@ -22,7 +22,7 @@ const CORE_TABLES = {
   JournalHeaders: ['journalId','postingDate','documentType','documentId','documentNumber','reference','projectId','status','reversalOfJournalId','createdBy','approvedBy','createdAt','postedAt'],
   JournalLines: ['journalLineId','journalId','lineNo','accountId','customerId','supplierId','projectId','debit','credit','taxCode','description','createdAt'],
   PaymentSchedules: ['scheduleId','sourceType','sourceId','projectId','partyId','milestone','dueDate','percentage','amount','status','createdAt','updatedAt'],
-  StockMovements: ['movementId','movementDate','itemId','projectId','movementType','qtyIn','qtyOut','unitCost','value','sourceDocumentId','createdAt'],
+  StockMovements: ['movementId','movementDate','itemId','projectId','movementType','qtyIn','qtyOut','unitCost','value','sourceDocumentId','createdAt','valueAdjustment','journalId'],
   FixedAssets: ['assetId','assetName','assetCategory','purchaseDate','supplierId','cost','serialNumber','location','assignedTo','usefulLifeMonths','accumulatedDepreciation','netBookValue','status','sourceDocumentId','createdAt','updatedAt'],
   Budgets: ['budgetId','financialYear','period','accountId','projectId','budgetAmount','actualAmount','variance','createdAt','updatedAt'],
   Exceptions: ['exceptionId','severity','module','recordType','recordId','message','status','assignedTo','createdAt','resolvedAt','resolution'],
@@ -229,9 +229,7 @@ function corePostJournal_(payload) {
       throw new Error('Journal ID already exists: ' + header.journalId);
     }
     if (existingHeaders.some(function(row) {
-      return String(row.status).toUpperCase() === 'POSTED' &&
-        String(row.documentType) === String(header.documentType) &&
-        String(row.documentId) === String(header.documentId);
+      return String(row.status).toUpperCase() === 'POSTED' && String(row.documentType) === String(header.documentType) && String(row.documentId) === String(header.documentId);
     })) {
       throw new Error('This document already has a posted journal');
     }
@@ -274,15 +272,7 @@ function corePostJournal_(payload) {
 function coreAudit_(action, tableName, recordId, details, actor) {
   try {
     const t = coreTable_('AuditLog');
-    t.sheet.appendRow([
-      Utilities.getUuid(),
-      new Date().toISOString(),
-      actor || 'system',
-      action || '',
-      tableName || '',
-      recordId || '',
-      details || ''
-    ]);
+    t.sheet.appendRow([Utilities.getUuid(), new Date().toISOString(), actor || 'system', action || '', tableName || '', recordId || '', details || '']);
   } catch (e) {
     console.error('Audit log failed', e);
   }
@@ -304,21 +294,16 @@ function coreBootstrapStatus_() {
 function coreEnsureSheet_(ss, name, headers) {
   let sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
-
   if (sheet.getLastRow() === 0) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   } else {
     const existingColumnCount = Math.max(1, sheet.getLastColumn());
     const existingHeaders = sheet.getRange(1, 1, 1, existingColumnCount).getValues()[0].map(function(value) { return String(value || ''); });
     headers.forEach(function(header, index) {
-      if (!existingHeaders[index]) {
-        sheet.getRange(1, index + 1).setValue(header);
-      } else if (existingHeaders[index] !== header) {
-        throw new Error('Core schema mismatch in ' + name + ' column ' + (index + 1) + ': expected ' + header + ', found ' + existingHeaders[index]);
-      }
+      if (!existingHeaders[index]) sheet.getRange(1, index + 1).setValue(header);
+      else if (existingHeaders[index] !== header) throw new Error('Core schema mismatch in ' + name + ' column ' + (index + 1) + ': expected ' + header + ', found ' + existingHeaders[index]);
     });
   }
-
   sheet.setFrozenRows(1);
   sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
 }
@@ -348,67 +333,34 @@ function coreJson_(value) {
   return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/*
- * One-time migration helper for moving Core tables from the legacy all-in-one
- * spreadsheet into the new Core ERP spreadsheet. It is intentionally not
- * exposed through doPost(). Run it manually from the Apps Script editor only.
- */
 function migrateCoreFromLegacySpreadsheet(sourceSpreadsheetId, overwriteExisting) {
   if (!sourceSpreadsheetId) throw new Error('sourceSpreadsheetId is required');
   const source = SpreadsheetApp.openById(String(sourceSpreadsheetId));
   const target = coreSpreadsheet_();
   if (source.getId() === target.getId()) throw new Error('Source and target spreadsheet cannot be the same');
-
   const allowOverwrite = overwriteExisting === true;
   const report = { copied: {}, skippedMissing: [], skippedNonEmpty: [], headerIssues: [] };
-
   Object.keys(CORE_TABLES).forEach(function(name) {
     const expected = CORE_TABLES[name];
     const sourceSheet = source.getSheetByName(name);
-    if (!sourceSheet) {
-      report.skippedMissing.push(name);
-      return;
-    }
-
+    if (!sourceSheet) { report.skippedMissing.push(name); return; }
     const sourceLastRow = sourceSheet.getLastRow();
     const sourceLastCol = sourceSheet.getLastColumn();
-    if (sourceLastCol === 0) {
-      report.skippedMissing.push(name);
-      return;
-    }
-
+    if (sourceLastCol === 0) { report.skippedMissing.push(name); return; }
     const sourceHeaders = sourceSheet.getRange(1, 1, 1, sourceLastCol).getValues()[0].map(function(v) { return String(v || ''); });
     const sourceIndex = {};
     sourceHeaders.forEach(function(h, i) { if (h) sourceIndex[h] = i; });
     const missingHeaders = expected.filter(function(h) { return sourceIndex[h] == null; });
-    if (missingHeaders.length) {
-      report.headerIssues.push({ table: name, missingHeaders: missingHeaders });
-      return;
-    }
-
+    if (missingHeaders.length) { report.headerIssues.push({ table: name, missingHeaders: missingHeaders }); return; }
     const targetSheet = target.getSheetByName(name) || target.insertSheet(name);
     coreEnsureSheet_(target, name, expected);
-    if (targetSheet.getLastRow() > 1 && !allowOverwrite) {
-      report.skippedNonEmpty.push(name);
-      return;
-    }
-
-    const sourceRows = sourceLastRow > 1
-      ? sourceSheet.getRange(2, 1, sourceLastRow - 1, sourceLastCol).getValues()
-      : [];
-    const mappedRows = sourceRows.map(function(row) {
-      return expected.map(function(h) { return row[sourceIndex[h]]; });
-    });
-
-    if (allowOverwrite && targetSheet.getLastRow() > 1) {
-      targetSheet.getRange(2, 1, targetSheet.getLastRow() - 1, Math.max(targetSheet.getLastColumn(), expected.length)).clearContent();
-    }
-    if (mappedRows.length) {
-      targetSheet.getRange(2, 1, mappedRows.length, expected.length).setValues(mappedRows);
-    }
+    if (targetSheet.getLastRow() > 1 && !allowOverwrite) { report.skippedNonEmpty.push(name); return; }
+    const sourceRows = sourceLastRow > 1 ? sourceSheet.getRange(2, 1, sourceLastRow - 1, sourceLastCol).getValues() : [];
+    const mappedRows = sourceRows.map(function(row) { return expected.map(function(h) { return row[sourceIndex[h]]; }); });
+    if (allowOverwrite && targetSheet.getLastRow() > 1) targetSheet.getRange(2, 1, targetSheet.getLastRow() - 1, Math.max(targetSheet.getLastColumn(), expected.length)).clearContent();
+    if (mappedRows.length) targetSheet.getRange(2, 1, mappedRows.length, expected.length).setValues(mappedRows);
     report.copied[name] = mappedRows.length;
   });
-
   Logger.log(JSON.stringify(report, null, 2));
   return report;
 }
@@ -418,19 +370,13 @@ function verifyCoreMigrationAgainstLegacy(sourceSpreadsheetId) {
   const source = SpreadsheetApp.openById(String(sourceSpreadsheetId));
   const target = coreSpreadsheet_();
   const report = {};
-
   Object.keys(CORE_TABLES).forEach(function(name) {
     const sourceSheet = source.getSheetByName(name);
     const targetSheet = target.getSheetByName(name);
     const sourceRows = sourceSheet ? Math.max(0, sourceSheet.getLastRow() - 1) : null;
     const targetRows = targetSheet ? Math.max(0, targetSheet.getLastRow() - 1) : null;
-    report[name] = {
-      sourceRows: sourceRows,
-      targetRows: targetRows,
-      match: sourceRows === null ? null : sourceRows === targetRows
-    };
+    report[name] = { sourceRows: sourceRows, targetRows: targetRows, match: sourceRows === null ? null : sourceRows === targetRows };
   });
-
   Logger.log(JSON.stringify(report, null, 2));
   return report;
 }
