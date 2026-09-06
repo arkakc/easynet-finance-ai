@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { findRecords } from "@/lib/backend/apps-script";
+import { findRecords, listTable } from "@/lib/backend/apps-script";
 import { requirePermission, type Permission } from "@/lib/auth";
 import PrintButton from "@/app/components/print-button";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
@@ -86,9 +86,10 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   if(!config)notFound();
   await requirePermission(config.permission);
 
-  const [result,lineResult]=await Promise.all([
+  const [result,lineResult,itemResult]=await Promise.all([
     findRecords<any>(config.table,{[config.idField]:id},1),
     config.lineTable&&config.lineIdField?findRecords<any>(config.lineTable,{[config.lineIdField]:id},500):Promise.resolve({rows:[] as any[]}),
+    config.lineTable?listTable<any>("Items",500,0):Promise.resolve({rows:[] as any[]}),
   ]);
   const record=result.rows[0];
   if(!record)notFound();
@@ -101,9 +102,11 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
 
   const lines=lineResult.rows||[];
   const number=String(record[config.numberField]||id);
+  const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
+  const itemMap=new Map((itemResult.rows||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item]));
   const rowStatus=String(record.status||"DRAFT").toUpperCase();
   let title=config.title;
-  if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))title="Supplier Quotation";
+  if(isSupplierQuotation)title="Supplier Quotation";
   if(type==="payment"){
     if(String(record.partyType)==="Customer")title="Sales Payment Entry / Receipt";
     else if(String(record.partyType)==="Supplier")title="Purchase Payment Entry / Receipt";
@@ -142,7 +145,27 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
         {converted&&<div><span>{converted.label}</span><strong><Link prefetch={false} href={href(converted.type,converted.id)}>{converted.number}</Link></strong></div>}
       </div>}
       <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{display(key,value)}</strong></div>)}</div>
-      {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=><tr key={line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index}><td>{line.lineNo||index+1}</td><td>{line.description}{line.itemId?<><br/><span className="small">{line.itemId}</span></>:null}</td><td>{line.qty}</td><td>{line.uom}</td><td>K{Number(line.rate||0).toFixed(2)}</td><td>K{Number(line.netAmount||0).toFixed(2)}</td><td>K{Number(line.gstAmount||0).toFixed(2)}</td><td><strong>K{Number(line.totalAmount||0).toFixed(2)}</strong></td></tr>)}</tbody></table></div>}
+      {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{
+        const itemId=String(line.itemId||"");
+        const item=itemId?itemMap.get(itemId):null;
+        const itemCode=String(item?.itemCode||item?.itemId||itemId||"");
+        const itemName=String(item?.itemName||line.description||"");
+        const uom=String(line.uom||item?.uom||"Each");
+        const movingAverage=item?`K${Number(item.defaultRate||0).toFixed(2)}`:"—";
+        const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;
+        return <tr key={lineKey}>
+          <td>{line.lineNo||index+1}</td>
+          <td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td>
+          <td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>:itemName}</td>
+          <td>{uom}</td>
+          <td>{movingAverage}</td>
+          <td>{line.qty}</td>
+          <td>K{Number(line.rate||0).toFixed(2)}</td>
+          <td>K{Number(line.netAmount||0).toFixed(2)}</td>
+          <td>K{Number(line.gstAmount||0).toFixed(2)}</td>
+          <td><strong>K{Number(line.totalAmount||0).toFixed(2)}</strong></td>
+        </tr>;
+      })}</tbody></table></div>}
       <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
     </section>
     <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
