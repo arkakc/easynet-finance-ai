@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { backendConfigStatus, backendHealthAll } from "@/lib/backend/apps-script";
 
-// Preview redeploy marker after split-backend token synchronization.
+// Preview redeploy marker after Core 0.4.1 and Document deployment synchronization.
 export async function GET() {
   try {
     const configuration = backendConfigStatus();
