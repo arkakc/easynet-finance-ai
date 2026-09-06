@@ -18,6 +18,10 @@ type InvoicePaymentContext={
   outstandingAmount:number;
 };
 
+function approvedPoLifecycle(status:string){
+  return ["APPROVED","PART_RECEIVED","CONVERTED","BILL_CREATED","BILLED"].includes(status);
+}
+
 export default function DocumentConversionActions({type,id,status,documentNumber}:{type:string;id:string;status:string;documentNumber?:string}){
   const router=useRouter();
   const[message,setMessage]=useState("");
@@ -28,11 +32,15 @@ export default function DocumentConversionActions({type,id,status,documentNumber
   const isSupplierQuote=type==="purchaseOrder"&&String(documentNumber||"").startsWith("SUPQ-");
   const canQuote=type==="quote"&&["APPROVED","CONVERTED"].includes(normalizedStatus);
   const canSupplierQuote=isSupplierQuote&&["APPROVED","CONVERTED"].includes(normalizedStatus);
-  const canPo=type==="purchaseOrder"&&!isSupplierQuote&&["APPROVED","BILL_CREATED","BILLED"].includes(normalizedStatus);
+  const canPo=type==="purchaseOrder"&&!isSupplierQuote&&approvedPoLifecycle(normalizedStatus);
   const canInvoicePayment=type==="invoice"&&normalizedStatus==="APPROVED";
   const canSupplierInvoicePayment=type==="supplierBill"&&normalizedStatus==="APPROVED";
 
   if(!canQuote&&!canSupplierQuote&&!canPo&&!canInvoicePayment&&!canSupplierInvoicePayment)return null;
+
+  function openPurchaseReceipt(){
+    router.push(`/stock?mode=movement&sourcePo=${encodeURIComponent(id)}`);
+  }
 
   async function convert(){
     setBusy(true);setMessage("");
@@ -104,8 +112,15 @@ export default function DocumentConversionActions({type,id,status,documentNumber
 
   return <div className="conversion-box no-print">
     <strong>Next Document</strong>
-    <p className="small">Mapped conversion keeps party, project, values and source-document linkage.</p>
-    {!paymentContext&&<button type="button" disabled={busy} onClick={convert}>{busy?"Loading…":buttonLabel}</button>}
+    <p className="small">Mapped actions keep source-document, Item Master, party and project linkage.</p>
+
+    {!paymentContext&&canPo&&<div className="button-row">
+      <button type="button" className="secondary" disabled={busy} onClick={openPurchaseReceipt}>Create Purchase Receipt / Goods Receipt</button>
+      <button type="button" disabled={busy} onClick={convert}>{busy?"Loading…":"Create Supplier Invoice"}</button>
+    </div>}
+
+    {!paymentContext&&!canPo&&<button type="button" disabled={busy} onClick={convert}>{busy?"Loading…":buttonLabel}</button>}
+
     {paymentContext&&<form onSubmit={createPaymentDraft} className="form-grid" style={{marginTop:16}}>
       <label>Sales Invoice<input value={paymentContext.invoiceNumber||paymentContext.invoiceId} readOnly/></label>
       <label>Customer<input value={paymentContext.customerId} readOnly/></label>
