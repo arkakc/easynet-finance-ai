@@ -63,17 +63,32 @@ async function queuedWrite<T>(service: BackendService, task: () => Promise<T>): 
   finally { release(); }
 }
 
-function serviceConfig(service: BackendService): ServiceConfig {
-  const legacyUrl = env.APPS_SCRIPT_WEB_APP_URL;
-  const legacyToken = env.APPS_SCRIPT_API_TOKEN;
-
-  const split = service === "core"
+function splitConfig(service: BackendService) {
+  return service === "core"
     ? { url: env.CORE_APPS_SCRIPT_WEB_APP_URL, token: env.CORE_APPS_SCRIPT_API_TOKEN }
     : service === "reporting"
       ? { url: env.REPORTING_APPS_SCRIPT_WEB_APP_URL, token: env.REPORTING_APPS_SCRIPT_API_TOKEN }
       : { url: env.DOCUMENT_APPS_SCRIPT_WEB_APP_URL, token: env.DOCUMENT_APPS_SCRIPT_API_TOKEN };
+}
 
-  if (split.url && split.token) return { url: split.url, token: split.token, source: "split" };
+function serviceConfig(service: BackendService): ServiceConfig {
+  const legacyUrl = env.APPS_SCRIPT_WEB_APP_URL;
+  const legacyToken = env.APPS_SCRIPT_API_TOKEN;
+  const split = splitConfig(service);
+  const hasSplitUrl = Boolean(split.url);
+  const hasSplitToken = Boolean(split.token);
+
+  if (hasSplitUrl && hasSplitToken) {
+    return { url: split.url!, token: split.token!, source: "split" };
+  }
+
+  // Never silently route a partially configured split service back to the old
+  // all-in-one database. That can make UAT appear to work while writing data to
+  // the wrong backend. A partial pair is therefore a hard configuration error.
+  if (hasSplitUrl !== hasSplitToken) {
+    throw new Error(`${service} split backend is partially configured. Both the Apps Script URL and API token are required.`);
+  }
+
   if (legacyUrl && legacyToken) return { url: legacyUrl, token: legacyToken, source: "legacy" };
 
   throw new Error(`${service} Apps Script backend is not configured`);
@@ -81,17 +96,20 @@ function serviceConfig(service: BackendService): ServiceConfig {
 
 export function backendConfigStatus() {
   const statusFor = (service: BackendService) => {
-    const split = service === "core"
-      ? { url: env.CORE_APPS_SCRIPT_WEB_APP_URL, token: env.CORE_APPS_SCRIPT_API_TOKEN }
-      : service === "reporting"
-        ? { url: env.REPORTING_APPS_SCRIPT_WEB_APP_URL, token: env.REPORTING_APPS_SCRIPT_API_TOKEN }
-        : { url: env.DOCUMENT_APPS_SCRIPT_WEB_APP_URL, token: env.DOCUMENT_APPS_SCRIPT_API_TOKEN };
+    const split = splitConfig(service);
     const splitUrl = Boolean(split.url);
     const splitToken = Boolean(split.token);
     const legacyUrl = Boolean(env.APPS_SCRIPT_WEB_APP_URL);
     const legacyToken = Boolean(env.APPS_SCRIPT_API_TOKEN);
-    const source = splitUrl && splitToken ? "split" : legacyUrl && legacyToken ? "legacy" : "unconfigured";
-    return { source, splitUrl, splitToken, legacyFallbackReady: legacyUrl && legacyToken };
+    const partial = splitUrl !== splitToken;
+    const source = splitUrl && splitToken
+      ? "split"
+      : partial
+        ? "partial-error"
+        : legacyUrl && legacyToken
+          ? "legacy"
+          : "unconfigured";
+    return { source, splitUrl, splitToken, partial, legacyFallbackReady: legacyUrl && legacyToken };
   };
   return {
     core: statusFor("core"),
