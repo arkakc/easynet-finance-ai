@@ -18,15 +18,15 @@ const CONFIG: Record<string,{table:string;idField:string;numberField:string;line
 
 const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount"]);
+const VALID_MODULES=new Set(["sales","purchase","expense"]);
+const VALID_TABS=new Set(["salesQuote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
+const VALID_MODES=new Set(["menu","create","list"]);
+const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
+
 function display(key:string,value:unknown){if(moneyFields.has(key))return `K${Number(value||0).toFixed(2)}`;return String(value??"")}
 function href(type:string,id:string){return `/transactions/${type==="supplierQuote"?"purchaseOrder":type}/${encodeURIComponent(id)}`;}
 type RefLink={label:string;type:string;id:string;number:string};
 
-/*
- * Previous-document links use the source ID already stored on the current
- * document. That avoids another Apps Script request just to resolve a display
- * number, which makes document views much faster on high-latency connections.
- */
 function previousLink(type:string,record:any):RefLink|null{
   if(type==="invoice"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"quote",id,number:id};}
   if(type==="supplierBill"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"purchaseOrder",id,number:id};}
@@ -68,14 +68,24 @@ async function resolveConverted(type:string,id:string,number:string):Promise<Ref
   return null;
 }
 
-export default async function TransactionDocumentPage({params}:{params:Promise<{type:string;id:string}>}){
+function inferredSection(type:string,number:string,record:any){
+  if(type==="quote")return{module:"sales",tab:"salesQuote"};
+  if(type==="invoice")return{module:"sales",tab:"salesInvoice"};
+  if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))return{module:"purchase",tab:"supplierQuote"};
+  if(type==="purchaseOrder")return{module:"purchase",tab:"purchaseOrder"};
+  if(type==="supplierBill")return{module:"purchase",tab:"supplierInvoice"};
+  if(type==="payment"&&String(record.partyType||"")==="Customer")return{module:"sales",tab:"salesPayment"};
+  if(type==="payment")return{module:"purchase",tab:"purchasePayment"};
+  if(type==="expense")return{module:"expense",tab:"expense"};
+  return{module:"sales",tab:"salesQuote"};
+}
+
+export default async function TransactionDocumentPage({params,searchParams}:{params:Promise<{type:string;id:string}>;searchParams:Promise<Record<string,string|string[]|undefined>>}){
   const{type,id}=await params;
   const config=CONFIG[type];
   if(!config)notFound();
   await requirePermission(config.permission);
 
-  // Header and line reads are independent, so fetch them concurrently instead
-  // of paying two sequential Apps Script round trips.
   const [result,lineResult]=await Promise.all([
     findRecords<any>(config.table,{[config.idField]:id},1),
     config.lineTable&&config.lineIdField?findRecords<any>(config.lineTable,{[config.lineIdField]:id},500):Promise.resolve({rows:[] as any[]}),
@@ -93,25 +103,33 @@ export default async function TransactionDocumentPage({params}:{params:Promise<{
   const number=String(record[config.numberField]||id);
   const rowStatus=String(record.status||"DRAFT").toUpperCase();
   let title=config.title;
-  let module="accounts";
-  if(type==="quote"||type==="invoice")module="sales";
-  if(type==="purchaseOrder"||type==="supplierBill"||type==="expense")module="purchase";
   if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))title="Supplier Quotation";
   if(type==="payment"){
-    if(String(record.partyType)==="Customer"){title="Sales Payment Entry / Receipt";module="sales";}
-    else if(String(record.partyType)==="Supplier"){title="Purchase Payment Entry / Receipt";module="purchase";}
+    if(String(record.partyType)==="Customer")title="Sales Payment Entry / Receipt";
+    else if(String(record.partyType)==="Supplier")title="Purchase Payment Entry / Receipt";
   }
 
   const previous=previousLink(type,record);
   const shouldResolveConverted=["CONVERTED","BILL_CREATED","BILLED","PAID"].includes(rowStatus);
   const converted=shouldResolveConverted?await resolveConverted(type,id,number):null;
 
+  const query=await searchParams;
+  const inferred=inferredSection(type,number,record);
+  const requestedModule=Array.isArray(query.returnModule)?query.returnModule[0]:query.returnModule;
+  const requestedTab=Array.isArray(query.returnTab)?query.returnTab[0]:query.returnTab;
+  const requestedMode=Array.isArray(query.returnMode)?query.returnMode[0]:query.returnMode;
+  const backModule=requestedModule&&VALID_MODULES.has(requestedModule)?requestedModule:inferred.module;
+  const backTab=requestedTab&&VALID_TABS.has(requestedTab)?requestedTab:inferred.tab;
+  const backMode=requestedMode&&VALID_MODES.has(requestedMode)?requestedMode:"menu";
+  const backHref=`/transactions?module=${encodeURIComponent(backModule)}&tab=${encodeURIComponent(backTab)}&mode=${encodeURIComponent(backMode)}`;
+  const backLabel=SECTION_LABELS[backTab]||"Transactions";
+
   const hidden=new Set([config.idField,config.numberField,"createdAt","updatedAt","sourceDocumentId","againstDocumentId","againstDocumentType"]);
   const fields=Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined);
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
-      <Link prefetch={false} href={`/transactions?module=${module}`}>← {module==="sales"?"Sales Transactions":module==="purchase"?"Purchase Transactions":"Transactions"}</Link>
+      <Link prefetch={false} href={backHref}>← Back to {backLabel}</Link>
       <div className="row-actions"><PrintButton/></div>
     </div>
     <section className="document-sheet">
