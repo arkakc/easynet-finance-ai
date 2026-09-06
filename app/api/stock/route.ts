@@ -14,6 +14,7 @@ const itemSchema = z.object({
   costAccount: z.string().trim().optional().default("ACC-5100"),
   defaultRate: z.coerce.number().finite().nonnegative().optional().default(0),
   taxCode: z.string().trim().optional().default(""),
+  uom: z.string().trim().min(1).default("Each"),
 });
 
 const movementSchema = z.object({
@@ -86,10 +87,20 @@ function weightedPoRate(lines: any[]) {
   return round4(value / qty);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const [items, movements, purchaseOrders, poLines] = await Promise.all([
-      listTable("Items", 500, 0),
+    const scope = new URL(request.url).searchParams.get("scope") || "full";
+    const items = await listTable<any>("Items", 500, 0);
+
+    if (scope === "items") {
+      return NextResponse.json({
+        ok: true,
+        items: items.rows.map((item: any) => ({ ...item, uom: String(item.uom || "Each") })),
+        nextItemCode: nextItemCode(items.rows),
+      });
+    }
+
+    const [movements, purchaseOrders, poLines] = await Promise.all([
       listTable("StockMovements", 500, 0),
       listTable("PurchaseOrders", 500, 0),
       listTable("POLines", 500, 0),
@@ -98,7 +109,7 @@ export async function GET() {
     const enrichedItems = items.rows.map((item: any) => {
       const rows = movements.rows.filter((movement: any) => String(movement.itemId || "") === String(item.itemId || ""));
       const state = inventoryState(rows, Number(item.defaultRate || 0));
-      return { ...item, defaultRate: state.rate, stockQty: state.qty, stockValue: state.value };
+      return { ...item, uom: String(item.uom || "Each"), defaultRate: state.rate, stockQty: state.qty, stockValue: state.value };
     });
 
     return NextResponse.json({
@@ -138,6 +149,7 @@ export async function POST(request: Request) {
           defaultRate: 0,
           taxCode: record.taxCode,
           active: true,
+          uom: record.uom,
         },
         "stock-ui",
       );
@@ -182,7 +194,7 @@ export async function POST(request: Request) {
         const poLines = await findRecords<any>("POLines", { poId: record.sourceDocumentId }, 500);
         const matchingLines = poLines.rows.filter((line: any) => poLineMatchesItem(line, itemRow));
         const orderedQty = matchingLines.reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
-        if (orderedQty <= 0) throw new Error("Item is not present on the purchase order. Link the PO line to this item or use the item code/name in the PO description.");
+        if (orderedQty <= 0) throw new Error("Item is not present on the purchase order. Link the PO line to this Item Master record.");
 
         const alreadyReceived = movements.rows
           .filter((row: any) => row.movementType === "PURCHASE_RECEIPT" && String(row.sourceDocumentId || "") === record.sourceDocumentId)
