@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -13,7 +14,7 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
 
   async function approve() {
     setBusy(true);
-    setMessage("");
+    setMessage("Approving…");
     try {
       const response = await fetch("/api/erp/actions", {
         method: "POST",
@@ -46,6 +47,7 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
   return (
     <div className="no-print" style={{ marginTop: 16 }}>
       <div className="button-row">
+        {recordType === "invoice" && <Link prefetch={false} className="button-link secondary-link" href={`/transactions/invoice/${encodeURIComponent(recordId)}/edit`}>Edit Draft Sales Invoice</Link>}
         <button type="button" onClick={approve} disabled={busy}>
           {busy ? "Approving…" : "Approve"}
         </button>
