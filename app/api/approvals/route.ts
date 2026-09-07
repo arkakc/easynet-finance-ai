@@ -28,6 +28,23 @@ function requireSecret(secret?: string) {
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
 const isDraft = (value: unknown) => String(value || "").trim().toUpperCase() === "DRAFT";
+const explicitlyFalse = (value: unknown) => ["false", "0", "no", "off"].includes(String(value ?? "").trim().toLowerCase());
+
+async function assertSalesInvoiceStockPolicy(invoice: any) {
+  const [lines, items] = await Promise.all([
+    findRecords<any>("InvoiceLines", { invoiceId: invoice.invoiceId }, 500),
+    listTable<any>("Items", 500, 0),
+  ]);
+  const itemMap = new Map(items.rows.map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
+  const hasStock = lines.rows.some((line: any) => String(itemMap.get(String(line.itemId || ""))?.itemType || "").toUpperCase() === "STOCK");
+  if (hasStock && explicitlyFalse(invoice.updateStock)) {
+    throw new Error("Stock Sales Invoice cannot be approved with Update Stock disabled while Delivery Note is not enabled. Enable Update Stock so Moving Average COGS and Inventory are posted together.");
+  }
+  // Blank is treated as true for legacy/direct invoices created before the 0.5 field existed.
+  if (hasStock && String(invoice.updateStock ?? "").trim() === "") {
+    await updateRecord("Invoices", "invoiceId", invoice.invoiceId, { updateStock: true }, "finance-controller:stock-policy-default");
+  }
+}
 
 export async function GET() {
   try {
@@ -66,6 +83,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: "CANCELLED", row: cancelled.row });
     }
 
+    if (input.recordType === "invoice") await assertSalesInvoiceStockPolicy(row);
     await updateRecord(config.table, config.idField, input.recordId, { status: "APPROVED" }, `finance-controller:${input.note || "approve"}`);
 
     if (ACCOUNTING_TYPES.has(input.recordType)) {
