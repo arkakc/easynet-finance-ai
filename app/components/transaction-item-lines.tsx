@@ -26,6 +26,7 @@ type Props = {
   lines: TransactionDraftLine[];
   items: TransactionItemMaster[];
   supplierQuotation?: boolean;
+  masterOnly?: boolean;
   onChange: (lines: TransactionDraftLine[]) => void;
 };
 
@@ -63,10 +64,10 @@ export function emptyTransactionLine(): TransactionDraftLine {
   };
 }
 
-export default function TransactionItemLines({ lines, items, supplierQuotation = false, onChange }: Props) {
+export default function TransactionItemLines({ lines, items, supplierQuotation = false, masterOnly = false, onChange }: Props) {
   const salesQuotation = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
-  const temporaryQuotation = supplierQuotation || salesQuotation;
-  const datalistId = temporaryQuotation ? "quotation-item-master" : "transaction-item-master";
+  const temporaryQuotation = !masterOnly && (supplierQuotation || salesQuotation);
+  const datalistId = temporaryQuotation ? "quotation-item-master" : masterOnly ? "draft-invoice-item-master" : "transaction-item-master";
 
   function patchLine(index: number, patch: Partial<TransactionDraftLine>) {
     onChange(lines.map((line, rowIndex) => rowIndex === index ? { ...line, ...patch } : line));
@@ -89,8 +90,8 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
     patchLine(index, {
       itemId: "",
       itemInput: value,
-      itemName: value,
-      description: value,
+      itemName: masterOnly ? "" : value,
+      description: masterOnly ? "" : value,
     });
   }
 
@@ -131,7 +132,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
             const linked = line.itemId ? items.find((item) => String(item.itemId || item.itemCode) === line.itemId) : null;
             const movingAverage = linked ? Number(linked.defaultRate || 0) : 0;
             const temporary = temporaryQuotation && !linked;
-            const pendingCreate = !temporaryQuotation && !linked && line.itemName.trim();
+            const pendingCreate = !masterOnly && !temporaryQuotation && !linked && line.itemName.trim();
 
             return <tr key={index}>
               <td>
@@ -139,33 +140,33 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
                   list={datalistId}
                   value={line.itemInput}
                   onChange={(event) => changeItem(index, event.target.value)}
-                  placeholder={temporaryQuotation ? "Search Item Master or type quotation item" : "Search Item Master or type new item"}
+                  placeholder={masterOnly ? "Search and select Item Master" : temporaryQuotation ? "Search Item Master or type quotation item" : "Search Item Master or type new item"}
                   autoComplete="off"
                   required
                 />
                 <span className="small" style={{ display: "block", marginTop: 6 }}>
-                  {linked ? "Linked to Item Master" : temporary ? "Temporary Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
+                  {linked ? "Linked to Item Master" : masterOnly ? "Select an Item Master record before Save" : temporary ? "Temporary Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
                 </span>
               </td>
               <td>
                 {linked
                   ? <Link prefetch={false} href={`/stock/item/${encodeURIComponent(linked.itemId || linked.itemCode)}`}><strong>{itemCode(linked)}</strong></Link>
-                  : <strong>{temporary ? "TEMP" : "AUTO"}</strong>}
+                  : <strong>{masterOnly ? "SELECT" : temporary ? "TEMP" : "AUTO"}</strong>}
               </td>
               <td>
                 <input
                   value={line.itemName}
                   onChange={(event) => patchLine(index, { itemName: event.target.value, description: event.target.value, itemInput: linked ? line.itemInput : event.target.value })}
-                  readOnly={Boolean(linked)}
+                  readOnly={Boolean(linked) || masterOnly}
                   required
                 />
-                {!linked && !temporaryQuotation && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }}>
+                {!linked && !temporaryQuotation && !masterOnly && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }}>
                   <option value="STOCK">Stock Item</option>
                   <option value="SERVICE">Service Item</option>
                   <option value="NON_STOCK">Non-Stock Item</option>
                 </select>}
               </td>
-              <td><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} required /></td>
+              <td><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required /></td>
               <td><input value={money(movingAverage)} readOnly /></td>
               <td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required /></td>
               <td><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required /></td>
@@ -180,6 +181,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
     <div className="button-row" style={{ marginTop: 12 }}>
       <button type="button" className="secondary" onClick={addLine}>Add Line</button>
       {temporaryQuotation && <span className="small">Quotation allows temporary free-text items. Temporary rows are not saved to Item Master until the quotation is converted to the next operational document.</span>}
+      {masterOnly && <span className="small">Draft Sales Invoice lines must remain linked to Item Master. Add, remove, change quantity or rate before approval.</span>}
     </div>
   </>;
 }
