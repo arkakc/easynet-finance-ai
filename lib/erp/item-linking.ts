@@ -11,6 +11,7 @@ export type ItemMasterRow = {
   taxCode?: string;
   active?: boolean | string | number;
   uom?: string;
+  deferredRevenueMonths?: number | string;
 };
 
 export type TransactionItemLine = {
@@ -22,6 +23,9 @@ export type TransactionItemLine = {
   qty?: number | string;
   uom?: string;
   rate?: number | string;
+  revenueAccountId?: string;
+  costAccountId?: string;
+  deferredRevenueMonths?: number | string;
   [key: string]: unknown;
 };
 
@@ -60,14 +64,21 @@ function validNewItemType(value: unknown, fallback: ResolveOptions["defaultNewIt
   return type === "SERVICE" || type === "NON_STOCK" ? type : "STOCK";
 }
 
+function accountingMetadata(item: ItemMasterRow) {
+  return {
+    revenueAccountId: String(item.revenueAccount || (String(item.itemType || "").toUpperCase() === "SERVICE" ? "ACC-4100" : "ACC-4200")),
+    costAccountId: String(item.costAccount || (String(item.itemType || "").toUpperCase() === "SERVICE" ? "ACC-5200" : "ACC-5100")),
+    deferredRevenueMonths: Math.max(0, Math.trunc(Number(item.deferredRevenueMonths || 0))),
+  };
+}
+
 /**
  * ERP-style item resolution for transaction rows.
  *
- * - Existing Item Code / Item ID is the strongest match.
- * - An exact unique Item Name is also accepted so the UI can provide quick search.
- * - Supplier Quotation can keep temporary rows (itemId="") without polluting Item Master.
- * - All other commercial documents can auto-create a missing item before the document is saved.
- * - Items are loaded once and missing items are batch-created to keep Apps Script round-trips low.
+ * Item Master is the accounting/stock source of truth. Supplier Quotation is
+ * the only document allowed to retain a temporary free-text row. Once a row is
+ * linked, revenue/cost/UOM/deferred-revenue metadata is carried downstream so
+ * conversions never silently fall back to a generic account.
  */
 export async function resolveTransactionItems(
   rawLines: TransactionItemLine[],
@@ -105,7 +116,7 @@ export async function resolveTransactionItems(
       const sameName = byName.get(nameKey) || [];
       if (sameName.length === 1) item = sameName[0];
       if (sameName.length > 1 && !identity) {
-        throw new Error(`Line ${index + 1}: multiple Item Master records use the name \"${name}\". Select the Item Code.`);
+        throw new Error(`Line ${index + 1}: multiple Item Master records use the name "${name}". Select the Item Code.`);
       }
     }
 
@@ -118,8 +129,10 @@ export async function resolveTransactionItems(
         itemName: String(item.itemName || name),
         itemType: String(item.itemType || line.itemType || "STOCK"),
         description: String(item.itemName || name),
-        uom: String(line.uom || item.uom || "Each"),
+        uom: String(item.uom || line.uom || "Each"),
         movingAverageCost: Number(item.defaultRate || 0),
+        taxCode: String(item.taxCode || ""),
+        ...accountingMetadata(item),
       };
     }
 
@@ -138,6 +151,9 @@ export async function resolveTransactionItems(
         description: name,
         uom: String(line.uom || "Each"),
         movingAverageCost: 0,
+        revenueAccountId: "",
+        costAccountId: "",
+        deferredRevenueMonths: 0,
         temporaryItem: true,
       };
     }
@@ -165,6 +181,7 @@ export async function resolveTransactionItems(
         taxCode: "",
         active: true,
         uom,
+        deferredRevenueMonths: 0,
       };
       createdItems.push(created);
       createdByKey.set(createKey, created);
@@ -181,6 +198,7 @@ export async function resolveTransactionItems(
       description: created.itemName,
       uom,
       movingAverageCost: 0,
+      ...accountingMetadata(created),
       autoCreatedItem: true,
     };
   });
