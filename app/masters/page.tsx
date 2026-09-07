@@ -1,9 +1,230 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-type Customer={customerId:string;customerName:string;contactPerson?:string;phone?:string;email?:string;address?:string;taxId?:string;creditTermsDays?:number|string;creditLimit?:number|string};type Supplier={supplierId:string;supplierName:string;contactPerson?:string;phone?:string;email?:string;address?:string;taxId?:string;paymentTermsDays?:number|string};type Project={projectId:string;projectName:string;customerId:string;startDate?:string;endDate?:string;status?:string;contractNet?:number|string;gstAmount?:number|string;contractTotal?:number|string;expectedCost?:number|string;projectManager?:string};type Data={customers:Customer[];suppliers:Supplier[];projects:Project[]};const emptyData:Data={customers:[],suppliers:[],projects:[]};
-export default function MastersPage(){const[data,setData]=useState<Data>(emptyData),[loading,setLoading]=useState(true),[message,setMessage]=useState(""),[tab,setTab]=useState<"customer"|"supplier"|"project">("customer");const customerOptions=useMemo(()=>[...data.customers].sort((a,b)=>a.customerName.localeCompare(b.customerName)),[data.customers]);async function loadData(){setLoading(true);try{const r=await fetch("/api/masters");const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Failed to load master data");setData({customers:b.customers||[],suppliers:b.suppliers||[],projects:b.projects||[]})}catch(e){setMessage(e instanceof Error?e.message:"Master-data load failed")}finally{setLoading(false)}}useEffect(()=>{void loadData()},[]);async function submitRecord(type:"customer"|"supplier"|"project",record:Record<string,unknown>){setMessage("Saving...");try{const r=await fetch("/api/erp/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target:"masters",body:{type,record}})});const b=await r.json();if(!r.ok||!b.ok)throw new Error(b.error||"Save failed");setMessage(`${type} saved successfully.`);await loadData();return true}catch(e){setMessage(e instanceof Error?e.message:"Save failed");return false}}async function submitCustomer(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=e.currentTarget;const ok=await submitRecord("customer",Object.fromEntries(new FormData(f).entries()));if(ok)f.reset()}async function submitSupplier(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=e.currentTarget;const ok=await submitRecord("supplier",Object.fromEntries(new FormData(f).entries()));if(ok)f.reset()}async function submitProject(e:FormEvent<HTMLFormElement>){e.preventDefault();const f=e.currentTarget;const ok=await submitRecord("project",Object.fromEntries(new FormData(f).entries()));if(ok)f.reset()}
-return <><h2>Business Masters</h2><p className="small">Customer, Supplier and Project write access is controlled by the signed-in user's role permissions.</p><div className="tabs"><button className={tab==="customer"?"tab active":"tab"} onClick={()=>setTab("customer")}>Customers</button><button className={tab==="supplier"?"tab active":"tab"} onClick={()=>setTab("supplier")}>Suppliers</button><button className={tab==="project"?"tab active":"tab"} onClick={()=>setTab("project")}>Projects</button></div>{message&&<section className="panel"><strong>Status:</strong> {message}</section>}
-{tab==="customer"&&<><form className="panel form-grid" onSubmit={submitCustomer}><h3 className="form-title">New Customer</h3><label>Customer ID<input name="customerId" placeholder="Optional"/></label><label>Customer Name<input name="customerName" required/></label><label>Contact Person<input name="contactPerson"/></label><label>Phone<input name="phone"/></label><label>Email<input name="email" type="email"/></label><label>Tax ID<input name="taxId"/></label><label>Credit Terms (days)<input name="creditTermsDays" type="number" min="0" defaultValue="0"/></label><label>Credit Limit<input name="creditLimit" type="number" min="0" step="0.01" defaultValue="0"/></label><label className="form-wide">Address<textarea name="address" rows={2}/></label><div className="form-wide"><button type="submit">Save Customer</button></div></form><section className="panel table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>Customer</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Limit</th></tr></thead><tbody>{data.customers.map(r=><tr key={r.customerId}><td>{r.customerId}</td><td>{r.customerName}</td><td>{r.contactPerson||"—"}</td><td>{r.phone||"—"}</td><td>{r.email||"—"}</td><td>{r.creditTermsDays||0} days</td><td>{r.creditLimit||0}</td></tr>)}{!loading&&!data.customers.length&&<tr><td colSpan={7}>No customers found.</td></tr>}</tbody></table></section></>}
-{tab==="supplier"&&<><form className="panel form-grid" onSubmit={submitSupplier}><h3 className="form-title">New Supplier</h3><label>Supplier ID<input name="supplierId" placeholder="Optional"/></label><label>Supplier Name<input name="supplierName" required/></label><label>Contact Person<input name="contactPerson"/></label><label>Phone<input name="phone"/></label><label>Email<input name="email" type="email"/></label><label>Tax ID<input name="taxId"/></label><label>Payment Terms (days)<input name="paymentTermsDays" type="number" min="0" defaultValue="0"/></label><label className="form-wide">Address<textarea name="address" rows={2}/></label><div className="form-wide"><button type="submit">Save Supplier</button></div></form><section className="panel table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>Supplier</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th></tr></thead><tbody>{data.suppliers.map(r=><tr key={r.supplierId}><td>{r.supplierId}</td><td>{r.supplierName}</td><td>{r.contactPerson||"—"}</td><td>{r.phone||"—"}</td><td>{r.email||"—"}</td><td>{r.paymentTermsDays||0} days</td></tr>)}</tbody></table></section></>}
-{tab==="project"&&<><form className="panel form-grid" onSubmit={submitProject}><h3 className="form-title">New Project</h3><label>Project ID<input name="projectId"/></label><label>Project Name<input name="projectName" required/></label><label>Customer<select name="customerId" required defaultValue=""><option value="" disabled>Select customer</option>{customerOptions.map(c=><option key={c.customerId} value={c.customerId}>{c.customerName} ({c.customerId})</option>)}</select></label><label>Status<select name="status" defaultValue="OPEN"><option>OPEN</option><option>ACTIVE</option><option>ON HOLD</option><option>COMPLETED</option><option>CANCELLED</option></select></label><label>Start Date<input name="startDate" type="date"/></label><label>End Date<input name="endDate" type="date"/></label><label>Contract Net<input name="contractNet" type="number" min="0" step="0.01" defaultValue="0"/></label><label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue="0"/></label><label>Contract Total<input name="contractTotal" type="number" min="0" step="0.01" defaultValue="0"/></label><label>Expected Cost<input name="expectedCost" type="number" min="0" step="0.01" defaultValue="0"/></label><label>Project Manager<input name="projectManager"/></label><div className="form-wide"><button type="submit">Save Project</button></div></form><section className="panel table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>Project</th><th>Customer</th><th>Status</th><th>Net</th><th>GST</th><th>Total</th><th>Expected Cost</th></tr></thead><tbody>{data.projects.map(r=><tr key={r.projectId}><td>{r.projectId}</td><td>{r.projectName}</td><td>{r.customerId}</td><td>{r.status||"—"}</td><td>{r.contractNet||0}</td><td>{r.gstAmount||0}</td><td>{r.contractTotal||0}</td><td>{r.expectedCost||0}</td></tr>)}</tbody></table></section></>}</>}
+
+type Customer = {
+  customerId: string;
+  customerName: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  taxId?: string;
+  creditTermsDays?: number | string;
+  creditLimit?: number | string;
+};
+
+type Supplier = {
+  supplierId: string;
+  supplierName: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  taxId?: string;
+  paymentTermsDays?: number | string;
+};
+
+type Project = {
+  projectId: string;
+  projectName: string;
+  customerId: string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  contractNet?: number | string;
+  gstAmount?: number | string;
+  contractTotal?: number | string;
+  expectedCost?: number | string;
+  projectManager?: string;
+};
+
+type Data = { customers: Customer[]; suppliers: Supplier[]; projects: Project[] };
+type Tab = "customer" | "supplier" | "project";
+type SavingType = Tab | "";
+
+const emptyData: Data = { customers: [], suppliers: [], projects: [] };
+
+export default function MastersPage() {
+  const [data, setData] = useState<Data>(emptyData);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [tab, setTab] = useState<Tab>("customer");
+  const [savingType, setSavingType] = useState<SavingType>("");
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+
+  const customerOptions = useMemo(
+    () => [...data.customers].sort((a, b) => a.customerName.localeCompare(b.customerName)),
+    [data.customers],
+  );
+  const busy = Boolean(savingType);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/masters", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Failed to load master data");
+      setData({ customers: body.customers || [], suppliers: body.suppliers || [], projects: body.projects || [] });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Master-data load failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void loadData(); }, []);
+
+  async function submitRecord(type: Tab, record: Record<string, unknown>, mode: "create" | "update") {
+    if (busy) return false;
+    setSavingType(type);
+    setMessage("Saving...");
+    try {
+      const response = await fetch("/api/erp/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "masters", body: { type, mode, record } }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Save failed");
+      setMessage(`${type === "customer" ? "Customer" : type === "supplier" ? "Supplier" : "Project"} saved successfully.`);
+      await loadData();
+      return true;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Save failed");
+      return false;
+    } finally {
+      setSavingType("");
+    }
+  }
+
+  async function submitCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const record = Object.fromEntries(new FormData(form).entries());
+    const mode = editingCustomer ? "update" : "create";
+    if (editingCustomer) record.customerId = editingCustomer.customerId;
+    const ok = await submitRecord("customer", record, mode);
+    if (ok) { setEditingCustomer(null); form.reset(); }
+  }
+
+  async function submitSupplier(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const record = Object.fromEntries(new FormData(form).entries());
+    const mode = editingSupplier ? "update" : "create";
+    if (editingSupplier) record.supplierId = editingSupplier.supplierId;
+    const ok = await submitRecord("supplier", record, mode);
+    if (ok) { setEditingSupplier(null); form.reset(); }
+  }
+
+  async function submitProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const record = Object.fromEntries(new FormData(form).entries());
+    const mode = editingProject ? "update" : "create";
+    if (editingProject) record.projectId = editingProject.projectId;
+    const ok = await submitRecord("project", record, mode);
+    if (ok) { setEditingProject(null); form.reset(); }
+  }
+
+  function switchTab(next: Tab) {
+    if (busy) return;
+    setTab(next);
+    setMessage("");
+  }
+
+  return <>
+    <h2>Business Masters</h2>
+    <p className="small">Customer, Supplier and Project IDs are system-generated and cannot be manually changed.</p>
+
+    <div className="tabs">
+      <button disabled={busy} className={tab === "customer" ? "tab active" : "tab"} onClick={() => switchTab("customer")}>Customers</button>
+      <button disabled={busy} className={tab === "supplier" ? "tab active" : "tab"} onClick={() => switchTab("supplier")}>Suppliers</button>
+      <button disabled={busy} className={tab === "project" ? "tab active" : "tab"} onClick={() => switchTab("project")}>Projects</button>
+    </div>
+
+    {message && <section className="panel"><strong>Status:</strong> {message}</section>}
+
+    {tab === "customer" && <>
+      <form key={editingCustomer?.customerId || "new-customer"} className="panel form-grid" onSubmit={submitCustomer}>
+        <h3 className="form-title">{editingCustomer ? "Edit Customer" : "New Customer"}</h3>
+        <label>Customer ID<input value={editingCustomer?.customerId || "Auto-generated on save"} readOnly disabled /></label>
+        <label>Customer Name<input name="customerName" required defaultValue={editingCustomer?.customerName || ""} disabled={busy} /></label>
+        <label>Contact Person<input name="contactPerson" defaultValue={editingCustomer?.contactPerson || ""} disabled={busy} /></label>
+        <label>Phone<input name="phone" defaultValue={editingCustomer?.phone || ""} disabled={busy} /></label>
+        <label>Email<input name="email" type="email" defaultValue={editingCustomer?.email || ""} disabled={busy} /></label>
+        <label>Tax ID<input name="taxId" defaultValue={editingCustomer?.taxId || ""} disabled={busy} /></label>
+        <label>Credit Terms (days)<input name="creditTermsDays" type="number" min="0" defaultValue={editingCustomer?.creditTermsDays ?? 0} disabled={busy} /></label>
+        <label>Credit Limit<input name="creditLimit" type="number" min="0" step="0.01" defaultValue={editingCustomer?.creditLimit ?? 0} disabled={busy} /></label>
+        <label className="form-wide">Address<textarea name="address" rows={2} defaultValue={editingCustomer?.address || ""} disabled={busy} /></label>
+        <div className="form-wide button-row">
+          <button type="submit" disabled={busy}>{savingType === "customer" ? "Saving..." : editingCustomer ? "Save Changes" : "Save Customer"}</button>
+          {editingCustomer && <button type="button" className="secondary" disabled={busy} onClick={() => setEditingCustomer(null)}>Cancel Edit</button>}
+        </div>
+      </form>
+      <section className="panel table-wrap"><table className="data-table">
+        <thead><tr><th>ID</th><th>Customer</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Limit</th><th>Action</th></tr></thead>
+        <tbody>
+          {data.customers.map((row) => <tr key={row.customerId}><td>{row.customerId}</td><td>{row.customerName}</td><td>{row.contactPerson || "—"}</td><td>{row.phone || "—"}</td><td>{row.email || "—"}</td><td>{row.creditTermsDays || 0} days</td><td>{row.creditLimit || 0}</td><td><button type="button" className="secondary" disabled={busy} onClick={() => setEditingCustomer(row)}>Edit</button></td></tr>)}
+          {!loading && !data.customers.length && <tr><td colSpan={8}>No customers found.</td></tr>}
+        </tbody>
+      </table></section>
+    </>}
+
+    {tab === "supplier" && <>
+      <form key={editingSupplier?.supplierId || "new-supplier"} className="panel form-grid" onSubmit={submitSupplier}>
+        <h3 className="form-title">{editingSupplier ? "Edit Supplier" : "New Supplier"}</h3>
+        <label>Supplier ID<input value={editingSupplier?.supplierId || "Auto-generated on save"} readOnly disabled /></label>
+        <label>Supplier Name<input name="supplierName" required defaultValue={editingSupplier?.supplierName || ""} disabled={busy} /></label>
+        <label>Contact Person<input name="contactPerson" defaultValue={editingSupplier?.contactPerson || ""} disabled={busy} /></label>
+        <label>Phone<input name="phone" defaultValue={editingSupplier?.phone || ""} disabled={busy} /></label>
+        <label>Email<input name="email" type="email" defaultValue={editingSupplier?.email || ""} disabled={busy} /></label>
+        <label>Tax ID<input name="taxId" defaultValue={editingSupplier?.taxId || ""} disabled={busy} /></label>
+        <label>Payment Terms (days)<input name="paymentTermsDays" type="number" min="0" defaultValue={editingSupplier?.paymentTermsDays ?? 0} disabled={busy} /></label>
+        <label className="form-wide">Address<textarea name="address" rows={2} defaultValue={editingSupplier?.address || ""} disabled={busy} /></label>
+        <div className="form-wide button-row">
+          <button type="submit" disabled={busy}>{savingType === "supplier" ? "Saving..." : editingSupplier ? "Save Changes" : "Save Supplier"}</button>
+          {editingSupplier && <button type="button" className="secondary" disabled={busy} onClick={() => setEditingSupplier(null)}>Cancel Edit</button>}
+        </div>
+      </form>
+      <section className="panel table-wrap"><table className="data-table">
+        <thead><tr><th>ID</th><th>Supplier</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Action</th></tr></thead>
+        <tbody>
+          {data.suppliers.map((row) => <tr key={row.supplierId}><td>{row.supplierId}</td><td>{row.supplierName}</td><td>{row.contactPerson || "—"}</td><td>{row.phone || "—"}</td><td>{row.email || "—"}</td><td>{row.paymentTermsDays || 0} days</td><td><button type="button" className="secondary" disabled={busy} onClick={() => setEditingSupplier(row)}>Edit</button></td></tr>)}
+          {!loading && !data.suppliers.length && <tr><td colSpan={7}>No suppliers found.</td></tr>}
+        </tbody>
+      </table></section>
+    </>}
+
+    {tab === "project" && <>
+      <form key={editingProject?.projectId || "new-project"} className="panel form-grid" onSubmit={submitProject}>
+        <h3 className="form-title">{editingProject ? "Edit Project" : "New Project"}</h3>
+        <label>Project ID<input value={editingProject?.projectId || "Auto-generated on save"} readOnly disabled /></label>
+        <label>Project Name<input name="projectName" required defaultValue={editingProject?.projectName || ""} disabled={busy} /></label>
+        <label>Customer<select name="customerId" required defaultValue={editingProject?.customerId || ""} disabled={busy}><option value="" disabled>Select customer</option>{customerOptions.map((customer) => <option key={customer.customerId} value={customer.customerId}>{customer.customerName} ({customer.customerId})</option>)}</select></label>
+        <label>Status<select name="status" defaultValue={editingProject?.status || "OPEN"} disabled={busy}><option>OPEN</option><option>ACTIVE</option><option>ON HOLD</option><option>COMPLETED</option><option>CANCELLED</option></select></label>
+        <label>Start Date<input name="startDate" type="date" defaultValue={editingProject?.startDate || ""} disabled={busy} /></label>
+        <label>End Date<input name="endDate" type="date" defaultValue={editingProject?.endDate || ""} disabled={busy} /></label>
+        <label>Contract Net<input name="contractNet" type="number" min="0" step="0.01" defaultValue={editingProject?.contractNet ?? 0} disabled={busy} /></label>
+        <label>GST Amount<input name="gstAmount" type="number" min="0" step="0.01" defaultValue={editingProject?.gstAmount ?? 0} disabled={busy} /></label>
+        <label>Contract Total<input name="contractTotal" type="number" min="0" step="0.01" defaultValue={editingProject?.contractTotal ?? 0} disabled={busy} /></label>
+        <label>Expected Cost<input name="expectedCost" type="number" min="0" step="0.01" defaultValue={editingProject?.expectedCost ?? 0} disabled={busy} /></label>
+        <label>Project Manager<input name="projectManager" defaultValue={editingProject?.projectManager || ""} disabled={busy} /></label>
+        <div className="form-wide button-row">
+          <button type="submit" disabled={busy}>{savingType === "project" ? "Saving..." : editingProject ? "Save Changes" : "Save Project"}</button>
+          {editingProject && <button type="button" className="secondary" disabled={busy} onClick={() => setEditingProject(null)}>Cancel Edit</button>}
+        </div>
+      </form>
+      <section className="panel table-wrap"><table className="data-table">
+        <thead><tr><th>ID</th><th>Project</th><th>Customer</th><th>Status</th><th>Net</th><th>GST</th><th>Total</th><th>Expected Cost</th><th>Action</th></tr></thead>
+        <tbody>
+          {data.projects.map((row) => <tr key={row.projectId}><td>{row.projectId}</td><td>{row.projectName}</td><td>{row.customerId}</td><td>{row.status || "—"}</td><td>{row.contractNet || 0}</td><td>{row.gstAmount || 0}</td><td>{row.contractTotal || 0}</td><td>{row.expectedCost || 0}</td><td><button type="button" className="secondary" disabled={busy} onClick={() => setEditingProject(row)}>Edit</button></td></tr>)}
+          {!loading && !data.projects.length && <tr><td colSpan={9}>No projects found.</td></tr>}
+        </tbody>
+      </table></section>
+    </>}
+  </>;
+}
