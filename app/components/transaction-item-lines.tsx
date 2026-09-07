@@ -12,6 +12,7 @@ export type TransactionItemMaster = {
 };
 
 export type TransactionDraftLine = {
+  lineId?: string;
   itemId: string;
   itemInput: string;
   itemName: string;
@@ -26,7 +27,9 @@ type Props = {
   lines: TransactionDraftLine[];
   items: TransactionItemMaster[];
   supplierQuotation?: boolean;
+  temporaryQuotation?: boolean;
   masterOnly?: boolean;
+  disabled?: boolean;
   onChange: (lines: TransactionDraftLine[]) => void;
 };
 
@@ -53,6 +56,7 @@ function resolveItem(items: TransactionItemMaster[], value: string) {
 
 export function emptyTransactionLine(): TransactionDraftLine {
   return {
+    lineId: "",
     itemId: "",
     itemInput: "",
     itemName: "",
@@ -64,16 +68,26 @@ export function emptyTransactionLine(): TransactionDraftLine {
   };
 }
 
-export default function TransactionItemLines({ lines, items, supplierQuotation = false, masterOnly = false, onChange }: Props) {
-  const salesQuotation = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
-  const temporaryQuotation = !masterOnly && (supplierQuotation || salesQuotation);
-  const datalistId = temporaryQuotation ? "quotation-item-master" : masterOnly ? "draft-invoice-item-master" : "transaction-item-master";
+export default function TransactionItemLines({
+  lines,
+  items,
+  supplierQuotation = false,
+  temporaryQuotation: temporaryQuotationProp,
+  masterOnly = false,
+  disabled = false,
+  onChange,
+}: Props) {
+  const salesQuotationFromUrl = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
+  const temporaryQuotation = !masterOnly && (temporaryQuotationProp ?? (supplierQuotation || salesQuotationFromUrl));
+  const datalistId = temporaryQuotation ? "quotation-item-master" : masterOnly ? "draft-document-item-master" : "transaction-item-master";
 
   function patchLine(index: number, patch: Partial<TransactionDraftLine>) {
+    if (disabled) return;
     onChange(lines.map((line, rowIndex) => rowIndex === index ? { ...line, ...patch } : line));
   }
 
   function changeItem(index: number, value: string) {
+    if (disabled) return;
     const match = resolveItem(items, value);
     if (match) {
       patchLine(index, {
@@ -96,10 +110,12 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
   }
 
   function addLine() {
+    if (disabled) return;
     onChange([...lines, emptyTransactionLine()]);
   }
 
   function removeLine(index: number) {
+    if (disabled) return;
     if (lines.length === 1) {
       onChange([emptyTransactionLine()]);
       return;
@@ -134,7 +150,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
             const temporary = temporaryQuotation && !linked;
             const pendingCreate = !masterOnly && !temporaryQuotation && !linked && line.itemName.trim();
 
-            return <tr key={index}>
+            return <tr key={line.lineId || index}>
               <td>
                 <input
                   list={datalistId}
@@ -143,6 +159,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
                   placeholder={masterOnly ? "Search and select Item Master" : temporaryQuotation ? "Search Item Master or type quotation item" : "Search Item Master or type new item"}
                   autoComplete="off"
                   required
+                  disabled={disabled}
                 />
                 <span className="small" style={{ display: "block", marginTop: 6 }}>
                   {linked ? "Linked to Item Master" : masterOnly ? "Select an Item Master record before Save" : temporary ? "Temporary Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
@@ -159,19 +176,20 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
                   onChange={(event) => patchLine(index, { itemName: event.target.value, description: event.target.value, itemInput: linked ? line.itemInput : event.target.value })}
                   readOnly={Boolean(linked) || masterOnly}
                   required
+                  disabled={disabled}
                 />
-                {!linked && !temporaryQuotation && !masterOnly && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }}>
+                {!linked && !temporaryQuotation && !masterOnly && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }} disabled={disabled}>
                   <option value="STOCK">Stock Item</option>
                   <option value="SERVICE">Service Item</option>
                   <option value="NON_STOCK">Non-Stock Item</option>
                 </select>}
               </td>
-              <td><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required /></td>
-              <td><input value={money(movingAverage)} readOnly /></td>
-              <td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required /></td>
-              <td><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required /></td>
+              <td><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required disabled={disabled} /></td>
+              <td><input value={money(movingAverage)} readOnly disabled /></td>
+              <td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required disabled={disabled} /></td>
+              <td><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required disabled={disabled} /></td>
               <td><strong>{money((Number(line.qty) || 0) * (Number(line.rate) || 0))}</strong></td>
-              <td><button type="button" className="secondary" onClick={() => removeLine(index)}>Remove</button></td>
+              <td><button type="button" className="secondary" onClick={() => removeLine(index)} disabled={disabled}>Remove</button></td>
             </tr>;
           })}
         </tbody>
@@ -179,9 +197,9 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
     </div>
 
     <div className="button-row" style={{ marginTop: 12 }}>
-      <button type="button" className="secondary" onClick={addLine}>Add Line</button>
+      <button type="button" className="secondary" onClick={addLine} disabled={disabled}>Add Line</button>
       {temporaryQuotation && <span className="small">Quotation allows temporary free-text items. Temporary rows are not saved to Item Master until the quotation is converted to the next operational document.</span>}
-      {masterOnly && <span className="small">Draft Sales Invoice lines must remain linked to Item Master. Add, remove, change quantity or rate before approval.</span>}
+      {masterOnly && <span className="small">Operational draft lines must remain linked to Item Master.</span>}
     </div>
   </>;
 }
