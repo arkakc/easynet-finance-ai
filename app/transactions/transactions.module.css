@@ -59,6 +59,29 @@
   margin-top: 0;
 }
 
+.partialReceiptRow td {
+  background: #fff8e6;
+}
+
+.receiptCompleteRow td {
+  background: #eef8f1;
+}
+
+.outstandingRow td {
+  background: #fff4f4;
+}
+
+.partialPaidRow td {
+  background: #eef6ff;
+}
+
+.partialReceiptRow:hover td,
+.receiptCompleteRow:hover td,
+.outstandingRow:hover td,
+.partialPaidRow:hover td {
+  filter: brightness(.985);
+}
+
 @media (max-width: 760px) {
   .chooserGrid {
     grid-template-columns: 1fr;
