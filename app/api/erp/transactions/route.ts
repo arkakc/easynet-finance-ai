@@ -156,10 +156,10 @@ export async function POST(request: Request) {
     let itemLinking: { created: number; linked: number; temporary: number } | undefined;
     if (body.action && ["createQuote", "createInvoice", "createSupplierQuote", "createPurchaseOrder"].includes(body.action)) {
       const rawLines = Array.isArray(payload.lines) ? payload.lines as any[] : [];
-      const supplierQuotation = body.action === "createSupplierQuote";
+      const temporaryQuotation = body.action === "createSupplierQuote" || body.action === "createQuote";
       const resolved = await resolveTransactionItems(rawLines, {
-        allowTemporary: supplierQuotation,
-        autoCreateMissing: !supplierQuotation,
+        allowTemporary: temporaryQuotation,
+        autoCreateMissing: !temporaryQuotation,
         actor: `transaction-${body.action}`,
         defaultNewItemType: "STOCK",
       });
