@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type PaymentRecord = {
@@ -61,11 +61,11 @@ export default function PaymentFinalSave({ record }: { record: PaymentRecord }) 
 
   async function finalSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (finalized) return;
+    if (finalized || busy) return;
     const confirmed = window.confirm("Are you sure you want to finalize this Payment Entry? This will create the accounting effect.");
     if (!confirmed) { setMessage("Final Save cancelled. The form is still editable."); return; }
 
-    setBusy(true); setMessage("Finalizing Payment Entry…");
+    setBusy(true); setMessage("Final Saving Payment Entry… Please wait until accounting posting is complete.");
     try {
       const form = new FormData(event.currentTarget);
       const response = await fetch("/api/erp/transactions", {
@@ -85,10 +85,10 @@ export default function PaymentFinalSave({ record }: { record: PaymentRecord }) 
 
   async function allocate(document: any) {
     const documentId = customerAdvance ? String(document.invoiceId || "") : String(document.billId || "");
-    if (!documentId) return;
+    if (!documentId || busy) return;
     const label = customerAdvance ? String(document.invoiceNumber || documentId) : String(document.billNumber || documentId);
     if (!window.confirm(`Allocate the full advance ${money(record.amount)} to ${label}?`)) return;
-    setBusy(true); setMessage("Allocating advance…");
+    setBusy(true); setMessage("Saving advance allocation…");
     try {
       const response = await fetch("/api/erp/transactions", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -113,7 +113,7 @@ export default function PaymentFinalSave({ record }: { record: PaymentRecord }) 
     <section className="panel no-print" style={{ marginTop: 20 }}>
       <div className="form-title-row">
         <div><h3>{finalized ? "Payment Entry Finalized" : "Approved Payment Entry — Final Review"}</h3><p className="small">{directAdvance ? (customerAdvance ? "This is a Customer Advance: Dr Cash/Bank, Cr Customer Advances. Allocate it later to a posted Sales Invoice." : "This is a Supplier Advance: Dr Supplier Advances, Cr Cash/Bank. Allocate it later to a posted Supplier Invoice.") : "Approval authorizes the payment. Final Save creates the accounting effect."}</p></div>
-        <span className="auto-badge">{finalized ? (directAdvance ? "FINALIZED ADVANCE" : "FINALIZED") : "APPROVED — EDITABLE"}</span>
+        <span className="auto-badge">{busy ? "SAVING…" : finalized ? (directAdvance ? "FINALIZED ADVANCE" : "FINALIZED") : "APPROVED — EDITABLE"}</span>
       </div>
 
       <form className="form-grid" onSubmit={finalSave} style={{ marginTop: 18 }}>
@@ -126,7 +126,7 @@ export default function PaymentFinalSave({ record }: { record: PaymentRecord }) 
         <label>Payment Method<select name="paymentMethod" defaultValue={record.paymentMethod || ""} required disabled={finalized || busy}><option value="">Select method</option><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
         <label>Cash / Bank Account<input name="cashBankAccountId" defaultValue={record.cashBankAccountId || ""} placeholder="Select / enter cash or bank account" required disabled={finalized || busy} /></label>
         <label className="form-wide">Reference<input name="reference" defaultValue={record.reference || ""} placeholder="Bank reference / receipt reference" disabled={finalized || busy} /></label>
-        {!finalized && <div className="form-wide"><button type="submit" disabled={busy}>{busy ? "Finalizing…" : "Final Save"}</button></div>}
+        {!finalized && <div className="form-wide"><button type="submit" disabled={busy}>{busy ? "Saving…" : "Final Save"}</button></div>}
       </form>
       {message && <div className="status-banner" style={{ marginTop: 14 }}>{message}</div>}
     </section>
@@ -139,7 +139,7 @@ export default function PaymentFinalSave({ record }: { record: PaymentRecord }) 
           const id = customerAdvance ? row.invoiceId : row.billId;
           const number = customerAdvance ? row.invoiceNumber : row.billNumber;
           const type = customerAdvance ? "invoice" : "supplierBill";
-          return <tr key={id}><td><Link prefetch={false} href={`/transactions/${type}/${encodeURIComponent(id)}`}><strong>{number || id}</strong></Link></td><td>{row.projectId || "—"}</td><td>{money(row.totalAmount)}</td><td><strong>{money(row.outstandingAmount ?? row.totalAmount)}</strong></td><td>{row.status}</td><td><button type="button" disabled={busy} onClick={() => void allocate(row)}>{busy ? "Working…" : "Allocate Full Advance"}</button></td></tr>;
+          return <tr key={id}><td><Link prefetch={false} href={`/transactions/${type}/${encodeURIComponent(id)}`}><strong>{number || id}</strong></Link></td><td>{row.projectId || "—"}</td><td>{money(row.totalAmount)}</td><td><strong>{money(row.outstandingAmount ?? row.totalAmount)}</strong></td><td>{row.status}</td><td><button type="button" disabled={busy} onClick={() => void allocate(row)}>{busy ? "Saving…" : "Allocate Full Advance"}</button></td></tr>;
         })}
       </tbody></table>
     </section>}
