@@ -24,6 +24,8 @@ const SERIES: Record<string, { table: string; field: string; prefix: string; pay
   createExpense: { table: "Expenses", field: "expenseNumber", prefix: "EXP", payloadField: "expenseNumber" },
 };
 
+const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
+
 function pngYear() { return new Intl.DateTimeFormat("en", { timeZone: "Pacific/Port_Moresby", year: "numeric" }).format(new Date()); }
 async function nextNumber(action: string) {
   const config = SERIES[action];
@@ -41,6 +43,24 @@ async function nextNumber(action: string) {
 function permissionForAction(action: string, partyType?: string): Permission | undefined {
   if (action === "createPayment" || action === "finalizePayment" || action === "allocateAdvance") return partyType === "Supplier" ? "purchase.write" : "sales.write";
   return ACTION_PERMISSION[action];
+}
+
+async function cashBankAvailability(accountId: string) {
+  if (!CASH_BANK_IDS.has(accountId)) throw new Error("Select a valid Cash / Bank account from the controlled account list");
+  const [accountResult, lineResult] = await Promise.all([
+    findRecords<any>("Accounts", { accountId }, 1),
+    listTable<any>("JournalLines", 500, 0),
+  ]);
+  const account = accountResult.rows[0];
+  if (!account) throw new Error("Cash / Bank account does not exist");
+  if (["false", "0", "inactive"].includes(String(account.active ?? "true").toLowerCase())) throw new Error("Cash / Bank account is inactive");
+  const balance = (lineResult.rows || [])
+    .filter((line: any) => String(line.accountId || "") === accountId)
+    .reduce((sum: number, line: any) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0);
+  return {
+    balance: Math.round((balance + Number.EPSILON) * 100) / 100,
+    label: `${String(account.accountName || accountId)} (${accountId})`,
+  };
 }
 
 export async function GET(request: Request) {
@@ -114,6 +134,17 @@ async function finalizePayment(payload: Record<string, unknown>) {
   if (!patch.paymentDate) throw new Error("Payment Date is required");
   if (!patch.paymentMethod) throw new Error("Payment Method is required");
   if (!patch.cashBankAccountId) throw new Error("Cash / Bank Account is required");
+
+  if (String(row.paymentType || "").toUpperCase() === "PAY") {
+    const funds = await cashBankAvailability(patch.cashBankAccountId);
+    if (amount > funds.balance + 0.001) {
+      throw new Error(`Insufficient funds in ${funds.label}. Available K${funds.balance.toFixed(2)}, payment K${amount.toFixed(2)}. Record funding/opening balance first or use a valid funded account.`);
+    }
+  } else {
+    // Receipts may increase a valid controlled cash/bank account from zero.
+    await cashBankAvailability(patch.cashBankAccountId);
+  }
+
   await updateRecord("Payments", "paymentId", paymentId, patch, "payment-final-save");
 
   const result = await callLegacy("post", { recordType: "payment", recordId: paymentId });
