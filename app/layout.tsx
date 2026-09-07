@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./busy-controls.css";
 import Link from "next/link";
 import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
 import LogoutButton from "@/app/components/logout-button";
