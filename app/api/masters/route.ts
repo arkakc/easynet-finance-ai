@@ -6,6 +6,7 @@ import {
   appendRecord,
   findRecords,
   listTable,
+  updateRecord,
 } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
@@ -58,6 +59,25 @@ function requireAdminSecret(secret?: string) {
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
 
+async function normalizedProject(parsed: z.infer<typeof projectSchema>) {
+  const customer = await findRecords("Customers", { customerId: parsed.customerId }, 1);
+  if (!customer.rows.length) throw new Error("Selected customer does not exist");
+
+  const calculatedTotal = Math.round((parsed.contractNet + parsed.gstAmount + Number.EPSILON) * 100) / 100;
+  if (parsed.contractTotal > 0 && Math.abs(parsed.contractTotal - calculatedTotal) > 0.01) {
+    throw new Error("Project contract total must equal contract net plus GST");
+  }
+  const startDate = parsed.startDate ? normalizeAccountingDate(parsed.startDate) : "";
+  const endDate = parsed.endDate ? normalizeAccountingDate(parsed.endDate) : "";
+  if (startDate && endDate && endDate < startDate) throw new Error("Project end date cannot be before start date");
+  return {
+    ...parsed,
+    startDate,
+    endDate,
+    contractTotal: parsed.contractTotal || calculatedTotal,
+  };
+}
+
 export async function GET() {
   try {
     const [customers, suppliers, projects] = await Promise.all([
@@ -85,61 +105,72 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       secret?: string;
       type?: "customer" | "supplier" | "project";
+      mode?: "create" | "update";
       record?: unknown;
     };
 
     requireAdminSecret(body.secret);
+    const mode = body.mode === "update" ? "update" : "create";
 
     if (body.type === "customer") {
       const parsed = customerSchema.parse(body.record || {});
-      const customerId = parsed.customerId || generatedId("CUS");
-      const duplicate = await findRecords("Customers", { customerId }, 1);
-      if (duplicate.rows.length) throw new Error(`Customer ID already exists: ${customerId}`);
+      if (mode === "update") {
+        if (!parsed.customerId) throw new Error("Customer ID is required for update");
+        const existing = await findRecords("Customers", { customerId: parsed.customerId }, 1);
+        if (!existing.rows.length) throw new Error("Customer not found");
+        const { customerId, ...patch } = parsed;
+        const result = await updateRecord("Customers", "customerId", customerId, patch, "master-data-ui:update");
+        return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
+      }
 
+      const customerId = generatedId("CUS");
       const result = await appendRecord(
         "Customers",
         { ...parsed, customerId, active: true },
         "master-data-ui",
       );
-      return NextResponse.json({ ok: true, type: body.type, row: result.row });
+      return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
     }
 
     if (body.type === "supplier") {
       const parsed = supplierSchema.parse(body.record || {});
-      const supplierId = parsed.supplierId || generatedId("SUP");
-      const duplicate = await findRecords("Suppliers", { supplierId }, 1);
-      if (duplicate.rows.length) throw new Error(`Supplier ID already exists: ${supplierId}`);
+      if (mode === "update") {
+        if (!parsed.supplierId) throw new Error("Supplier ID is required for update");
+        const existing = await findRecords("Suppliers", { supplierId: parsed.supplierId }, 1);
+        if (!existing.rows.length) throw new Error("Supplier not found");
+        const { supplierId, ...patch } = parsed;
+        const result = await updateRecord("Suppliers", "supplierId", supplierId, patch, "master-data-ui:update");
+        return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
+      }
 
+      const supplierId = generatedId("SUP");
       const result = await appendRecord(
         "Suppliers",
         { ...parsed, supplierId, active: true },
         "master-data-ui",
       );
-      return NextResponse.json({ ok: true, type: body.type, row: result.row });
+      return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
     }
 
     if (body.type === "project") {
       const parsed = projectSchema.parse(body.record || {});
-      const projectId = parsed.projectId || generatedId("PJ");
-      const customer = await findRecords("Customers", { customerId: parsed.customerId }, 1);
-      if (!customer.rows.length) throw new Error("Selected customer does not exist");
-      const duplicate = await findRecords("Projects", { projectId }, 1);
-      if (duplicate.rows.length) throw new Error(`Project ID already exists: ${projectId}`);
-
-      const calculatedTotal = Math.round((parsed.contractNet + parsed.gstAmount + Number.EPSILON) * 100) / 100;
-      if (parsed.contractTotal > 0 && Math.abs(parsed.contractTotal - calculatedTotal) > 0.01) {
-        throw new Error("Project contract total must equal contract net plus GST");
+      const normalized = await normalizedProject(parsed);
+      if (mode === "update") {
+        if (!parsed.projectId) throw new Error("Project ID is required for update");
+        const existing = await findRecords("Projects", { projectId: parsed.projectId }, 1);
+        if (!existing.rows.length) throw new Error("Project not found");
+        const { projectId, ...patch } = normalized;
+        const result = await updateRecord("Projects", "projectId", projectId, patch, "master-data-ui:update");
+        return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
       }
-      const startDate = parsed.startDate ? normalizeAccountingDate(parsed.startDate) : "";
-      const endDate = parsed.endDate ? normalizeAccountingDate(parsed.endDate) : "";
-      if (startDate && endDate && endDate < startDate) throw new Error("Project end date cannot be before start date");
-      const contractTotal = parsed.contractTotal || calculatedTotal;
+
+      const projectId = generatedId("PJ");
       const result = await appendRecord(
         "Projects",
-        { ...parsed, projectId, startDate, endDate, contractTotal },
+        { ...normalized, projectId },
         "master-data-ui",
       );
-      return NextResponse.json({ ok: true, type: body.type, row: result.row });
+      return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
     }
 
     return NextResponse.json({ ok: false, error: "Unsupported master-data type" }, { status: 400 });
