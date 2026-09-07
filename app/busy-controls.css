@@ -1,0 +1,17 @@
+button:disabled,
+.button-link[aria-disabled="true"] {
+  opacity: 1;
+  cursor: not-allowed;
+  background: #cbd5e1 !important;
+  color: #64748b !important;
+  border-color: #cbd5e1 !important;
+  pointer-events: none;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+}
