@@ -64,7 +64,9 @@ export function emptyTransactionLine(): TransactionDraftLine {
 }
 
 export default function TransactionItemLines({ lines, items, supplierQuotation = false, onChange }: Props) {
-  const datalistId = supplierQuotation ? "supplier-quotation-item-master" : "transaction-item-master";
+  const salesQuotation = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
+  const temporaryQuotation = supplierQuotation || salesQuotation;
+  const datalistId = temporaryQuotation ? "quotation-item-master" : "transaction-item-master";
 
   function patchLine(index: number, patch: Partial<TransactionDraftLine>) {
     onChange(lines.map((line, rowIndex) => rowIndex === index ? { ...line, ...patch } : line));
@@ -128,8 +130,8 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
           {lines.map((line, index) => {
             const linked = line.itemId ? items.find((item) => String(item.itemId || item.itemCode) === line.itemId) : null;
             const movingAverage = linked ? Number(linked.defaultRate || 0) : 0;
-            const temporary = supplierQuotation && !linked;
-            const pendingCreate = !supplierQuotation && !linked && line.itemName.trim();
+            const temporary = temporaryQuotation && !linked;
+            const pendingCreate = !temporaryQuotation && !linked && line.itemName.trim();
 
             return <tr key={index}>
               <td>
@@ -137,12 +139,12 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
                   list={datalistId}
                   value={line.itemInput}
                   onChange={(event) => changeItem(index, event.target.value)}
-                  placeholder={supplierQuotation ? "Search Item Master or type supplier item" : "Search Item Master or type new item"}
+                  placeholder={temporaryQuotation ? "Search Item Master or type quotation item" : "Search Item Master or type new item"}
                   autoComplete="off"
                   required
                 />
                 <span className="small" style={{ display: "block", marginTop: 6 }}>
-                  {linked ? "Linked to Item Master" : temporary ? "Temporary Supplier Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
+                  {linked ? "Linked to Item Master" : temporary ? "Temporary Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
                 </span>
               </td>
               <td>
@@ -157,7 +159,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
                   readOnly={Boolean(linked)}
                   required
                 />
-                {!linked && !supplierQuotation && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }}>
+                {!linked && !temporaryQuotation && <select value={line.itemType} onChange={(event) => patchLine(index, { itemType: event.target.value })} style={{ marginTop: 6 }}>
                   <option value="STOCK">Stock Item</option>
                   <option value="SERVICE">Service Item</option>
                   <option value="NON_STOCK">Non-Stock Item</option>
@@ -177,7 +179,7 @@ export default function TransactionItemLines({ lines, items, supplierQuotation =
 
     <div className="button-row" style={{ marginTop: 12 }}>
       <button type="button" className="secondary" onClick={addLine}>Add Line</button>
-      {supplierQuotation && <span className="small">Supplier Quotation allows temporary free-text items. They are only created in Item Master if the quotation is later converted to a Purchase Order.</span>}
+      {temporaryQuotation && <span className="small">Quotation allows temporary free-text items. Temporary rows are not saved to Item Master until the quotation is converted to the next operational document.</span>}
     </div>
   </>;
 }
