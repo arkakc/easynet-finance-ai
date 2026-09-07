@@ -142,7 +142,7 @@ export default function TransactionsWorkspaceV4() {
     try {
       const response = await fetch("/api/stock", { cache: "no-store" }); const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Purchase receipt status load failed");
-      const itemMap = new Map((body.items || []).map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
+      const itemMap = new Map<string, any>((body.items || []).map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
       const movements = Array.isArray(body.movements) ? body.movements : [];
       const poLines = Array.isArray(body.poLines) ? body.poLines : [];
       const result: Record<string, ReceiptState> = {};
