@@ -13,14 +13,12 @@ export async function GET(request: Request) {
     if (!invoice) return NextResponse.json({ ok: false, error: "Sales Invoice not found" }, { status: 404 });
 
     const status = String(invoice.status || "").toUpperCase();
-    if (status !== "APPROVED") {
-      return NextResponse.json({ ok: false, error: `Sales Invoice must be APPROVED before creating a Payment Entry. Current status: ${status || "UNKNOWN"}` }, { status: 400 });
+    if (!["POSTED", "PARTLY_PAID", "APPROVED"].includes(status)) {
+      return NextResponse.json({ ok: false, error: `Sales Invoice must be approved and accounting-posted before creating a Payment Entry. Current status: ${status || "UNKNOWN"}` }, { status: 400 });
     }
 
     const outstandingAmount = Number(invoice.outstandingAmount ?? invoice.totalAmount ?? 0);
-    if (!(outstandingAmount > 0)) {
-      return NextResponse.json({ ok: false, error: "Sales Invoice has no outstanding amount" }, { status: 400 });
-    }
+    if (!(outstandingAmount > 0)) return NextResponse.json({ ok: false, error: "Sales Invoice has no outstanding amount" }, { status: 400 });
 
     return NextResponse.json({
       ok: true,
