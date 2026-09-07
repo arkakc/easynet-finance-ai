@@ -1,5 +1,5 @@
-import TransactionsWorkspaceV3 from "@/app/components/transactions-workspace-v3";
+import TransactionsWorkspaceV4 from "@/app/components/transactions-workspace-v4";
 
 export default function TransactionsPage() {
-  return <TransactionsWorkspaceV3 />;
+  return <TransactionsWorkspaceV4 />;
 }
