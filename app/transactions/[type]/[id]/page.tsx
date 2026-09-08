@@ -135,6 +135,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
   const itemMap=new Map((itemResult.rows||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item]));
   const rowStatus=String(record.status||"DRAFT").toUpperCase();
+  const publicStatus=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)?"APPROVED":rowStatus;
   let title=config.title;
   if(isSupplierQuotation)title="Supplier Quotation";
   if(isCreditNote)title="Sales Credit Note / Return";
@@ -158,6 +159,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   const hidden=new Set([config.idField,config.numberField,"createdAt","updatedAt","sourceDocumentId","againstDocumentId","againstDocumentType"]);
   const fields=Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined);
   const fieldDisplay=(key:string,value:unknown)=>{
+    if(key==="status"&&type==="invoice"&&!isCreditNote)return publicStatus;
     if(key==="customerId")return named(value,customerMap);
     if(key==="supplierId")return named(value,supplierMap);
     if(key==="partyId")return String(record.partyType)==="Customer"?named(value,customerMap):String(record.partyType)==="Supplier"?named(value,supplierMap):String(value||"");
@@ -174,6 +176,10 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   const projectName=String(projectMap.get(String(record.projectId||""))||record.projectId||"");
   const supplierBillPoId=type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
   const paymentPoId=type==="payment"&&String(record.partyType||"")==="Supplier"?(sourceMarkerFromPayment(record,"PO")||String(record.sourceDocumentId||"")):"";
+  const salesInvoiceOutstanding=Number(record.outstandingAmount??record.totalAmount??0);
+  const salesInvoiceSettlementReady=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)&&salesInvoiceOutstanding>0.001;
+  const salesInvoicePaid=type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
+  const paymentFinalizationReady=type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
@@ -186,7 +192,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     <section className="document-sheet">
       <header className="document-header">
         <div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div>
-        <div className={`status-pill status-${String(record.status||"draft").toLowerCase()}`}>{record.status||"DRAFT"}</div>
+        <div className={`status-pill status-${publicStatus.toLowerCase()}`}>{publicStatus}</div>
       </header>
       {previous&&<div className="document-meta" style={{marginBottom:20}}>
         <div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>
@@ -217,7 +223,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
       <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
     </section>
 
-    <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
+    <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={rowStatus}/>
 
     {type==="quote"&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection
       title="Sales Quotation Fulfilment"
@@ -225,11 +231,18 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
       buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Invoice":"Open Sales Fulfilment Actions"}
     ><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
 
+    {salesInvoiceSettlementReady&&<section className="conversion-box no-print" style={{marginTop:16}}>
+      <div className="form-title-row"><div><strong>Sales Invoice Settlement</strong><p className="small">Invoice is approved and accounting-posted. Create or receive the customer payment when needed.</p></div><span className="auto-badge">APPROVED</span></div>
+      <div className="button-row" style={{marginTop:12}}><Link prefetch={false} className="button-link" href={`/transactions?module=sales&tab=salesPayment&mode=create&sourceInvoice=${encodeURIComponent(id)}`}>Create / Receive Customer Payment</Link></div>
+    </section>}
+
+    {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
+
     {type==="invoice"&&<LazyDocumentSection
-      title={isCreditNote?"Credit Note / Refund Actions":"Sales Invoice Settlement Actions"}
-      description="Linked receipts, advances, returns, credit notes and refunds are loaded on demand."
-      buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Payment / Return Actions"}
-    ><SalesInvoiceCycle invoiceId={id}/></LazyDocumentSection>}
+      title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"}
+      description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."}
+      buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}
+    ><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
 
     {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<LazyDocumentSection
       title="Supplier Quotation Conversion"
@@ -245,7 +258,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
       {String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={Number(record.totalAmount||0)}/>} 
       {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
       <PoPartialSupplyClose poId={id} poNumber={number}/>
-      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+      <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
     </LazyDocumentSection>}
 
     {type==="supplierBill"&&<LazyDocumentSection
@@ -255,19 +268,20 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     >
       {supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={Number(record.totalAmount||0)} billOutstanding={Number(record.outstandingAmount??record.totalAmount??0)}/>} 
       {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
-      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+      <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
     </LazyDocumentSection>}
 
-    {type==="payment"&&<LazyDocumentSection
-      title="Payment / Receipt Finalization"
-      description="Settlement validation, journal finalization and linked advance history are loaded only when requested."
-      buttonLabel="Open Payment / Receipt Actions"
+    {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
+
+    {type==="payment"&&Boolean(String(record.journalId||"").trim())&&<LazyDocumentSection
+      title="Payment / Receipt Follow-up"
+      description="Linked advance history and downstream references are loaded only when requested."
+      buttonLabel="Open Payment / Receipt Follow-up"
     >
-      <PaymentFinalSave record={record}/>
       {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>} 
-      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+      <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
     </LazyDocumentSection>}
 
-    {type==="expense"&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
+    {type==="expense"&&<DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>} 
   </div>;
 }
