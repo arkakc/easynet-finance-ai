@@ -9,6 +9,8 @@ import PaymentFinalSave from "@/app/components/payment-final-save";
 import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-readiness";
 import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
+import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
+import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 
 const CONFIG: Record<string,{table:string;idField:string;numberField:string;lineTable?:string;lineIdField?:string;permission:Permission;title:string}>={
   quote:{table:"Quotes",idField:"quoteId",numberField:"quoteNumber",lineTable:"QuoteLines",lineIdField:"quoteId",permission:"sales.read",title:"Sales Quotation"},
@@ -143,7 +145,7 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   }
 
   const previous=previousLink(type,record);
-  const shouldResolveConverted=["CONVERTED","BILL_CREATED","BILLED","PAID"].includes(rowStatus)||isSupplierQuotation;
+  const shouldResolveConverted=["CONVERTED","BILL_CREATED","BILLED","PAID","CLOSED"].includes(rowStatus)||isSupplierQuotation;
   const converted=shouldResolveConverted?await resolveConverted(type,id,number):null;
 
   const query=await searchParams;
@@ -170,9 +172,12 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
 
   const editType=type==="invoice"?"invoice":type;
   const canEdit=rowStatus==="DRAFT"&&!String(record.journalId||"").trim();
-  const realApprovedPo=type==="purchaseOrder"&&!isSupplierQuotation&&APPROVED_PO_LIFECYCLE.has(rowStatus);
+  const realPo=type==="purchaseOrder"&&!isSupplierQuotation;
+  const realApprovedPo=realPo&&APPROVED_PO_LIFECYCLE.has(rowStatus);
   const supplierName=String(supplierMap.get(String(record.supplierId||""))||record.supplierId||"");
   const projectName=String(projectMap.get(String(record.projectId||""))||record.projectId||"");
+  const supplierBillPoId=type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
+  const paymentPoId=type==="payment"&&String(record.partyType||"")==="Supplier"?poReferenceFromPayment(record):"";
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
@@ -220,7 +225,11 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     {type==="payment"&&<PaymentFinalSave record={record}/>}
     {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<SupplierQuoteItemReadiness supplierQuoteId={id}/>} 
     {!isSupplierQuotation&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
+    {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={Number(record.totalAmount||0)}/>} 
     {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
-    {type==="supplierBill"&&String(record.poId||record.sourceDocumentId||"")&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={String(record.poId||record.sourceDocumentId||"")} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
+    {realPo&&<PoPartialSupplyClose poId={id} poNumber={number}/>} 
+    {type==="supplierBill"&&supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={Number(record.totalAmount||0)} billOutstanding={Number(record.outstandingAmount??record.totalAmount??0)}/>} 
+    {type==="supplierBill"&&supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
+    {type==="payment"&&paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>} 
   </div>;
 }
