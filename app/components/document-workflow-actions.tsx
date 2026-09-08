@@ -43,6 +43,27 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
     }
   }
 
+  if (recordType === "invoice" && !controlledCreditNote && ["POSTED", "PARTLY_PAID"].includes(current)) {
+    return (
+      <section className="panel no-print" style={{ marginTop: 16 }}>
+        <div className="form-title-row">
+          <div>
+            <strong>Sales Invoice → Customer Settlement</strong>
+            <p className="small">The invoice is posted. Create the customer receipt directly; advance allocation and return controls remain available on demand below.</p>
+          </div>
+          <span className="auto-badge">{current}</span>
+        </div>
+        <div className="button-row" style={{ marginTop: 12 }}>
+          <Link prefetch={false} className="button-link" href={`/transactions?module=sales&tab=salesPayment&mode=create&sourceInvoice=${encodeURIComponent(recordId)}`}>Create / Receive Customer Payment</Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (recordType === "invoice" && !controlledCreditNote && current === "PAID") {
+    return <div className="status-banner no-print" style={{ marginTop: 16 }}>Sales Invoice is fully settled. Additional return / credit actions are available on demand below.</div>;
+  }
+
   if (current !== "DRAFT") return null;
 
   return (
