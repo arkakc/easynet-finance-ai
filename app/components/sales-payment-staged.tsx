@@ -1,5 +1,5 @@
-import SalesPaymentStagedV2 from "@/app/components/sales-payment-staged-v2";
+import SalesPaymentStagedV3 from "@/app/components/sales-payment-staged-v3";
 
 export default function SalesPaymentStaged() {
-  return <SalesPaymentStagedV2 />;
+  return <SalesPaymentStagedV3 />;
 }
