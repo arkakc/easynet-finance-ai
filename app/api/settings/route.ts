@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { requirePermission } from "@/lib/auth";
 import { appendRecord, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 
 const settingSchema = z.object({
@@ -25,10 +26,15 @@ function requireSecret(secret?: string) {
 
 export async function GET() {
   try {
+    await requirePermission("settings.manage");
     const result = await listTable("Settings", 500, 0);
     return NextResponse.json({ ok: true, settings: result.rows });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Settings read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Settings read failed";
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    );
   }
 }
 
