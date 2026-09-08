@@ -13,7 +13,7 @@ function safeInternalPath(value: string) {
 }
 
 function destination(target: CreateTarget) {
-  if (target === "item") return "/stock?mode=newItem";
+  if (target === "item") return "/stock/new-item";
   return `/masters?tab=${target}`;
 }
 
@@ -86,7 +86,7 @@ export function FlowReturnPanel({ savedLabel = "" }: { savedLabel?: string }) {
     <div className="form-title-row">
       <div>
         <h3 style={{ margin: 0 }}>{savedLabel ? `${savedLabel} saved — continue your flow` : "Opened from an active document flow"}</h3>
-        <p className="small" style={{ marginTop: 6 }}>The original document tab can stay open while you create this supporting master record. Return to it after saving and its master-data options will refresh automatically.</p>
+        <p className="small" style={{ marginTop: 6 }}>The original document tab can stay open while you create this supporting master record. Return to it after saving; flow-aware screens refresh their master-data options without restarting the document.</p>
       </div>
       <a className="button-link" href={returnTo}>← Return to {returnLabel}</a>
     </div>
