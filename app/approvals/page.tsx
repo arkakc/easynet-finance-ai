@@ -13,10 +13,19 @@ type PendingRow = {
   party: string;
   project: string;
   date: string;
+  createdAt?: string;
   amount: number | string;
   href: string;
   approvalRecordType: ApprovalRecordType;
 };
+
+function createdLabel(row: PendingRow) {
+  const value = row.createdAt || row.date || "";
+  if (!value) return "—";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-PG", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+}
 
 export default function ApprovalsPage() {
   const [pending, setPending] = useState<PendingRow[]>([]);
@@ -57,7 +66,7 @@ export default function ApprovalsPage() {
 
   const sales = pending.filter((row) => row.module === "Sales");
   const purchase = pending.filter((row) => row.module === "Purchase");
-  const table = (title: string, rows: PendingRow[]) => <section className="panel table-wrap"><h3>{title}</h3><table className="data-table"><thead><tr><th>Document</th><th>Type</th><th>Party</th><th>Project</th><th>Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.documentType}-${row.recordId}`}><td><Link href={row.href}><strong>{row.documentNo}</strong></Link></td><td>{row.documentType}</td><td>{row.party || "—"}</td><td>{row.project || "—"}</td><td>{row.date || "—"}</td><td>K{Number(row.amount || 0).toFixed(2)}</td><td><strong>DRAFT</strong></td><td><div className="button-row"><Link className="button-link secondary-link" href={row.href}>Open Document</Link><button type="button" onClick={() => decide(row, "APPROVE")}>Approve</button><button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>Cancel</button></div></td></tr>)}{!rows.length && <tr><td colSpan={8}>No DRAFT documents pending approval.</td></tr>}</tbody></table></section>;
+  const table = (title: string, rows: PendingRow[]) => <section className="panel table-wrap"><div className="form-title-row"><h3>{title}</h3><span className="auto-badge">Newest created first</span></div><table className="data-table"><thead><tr><th>Document</th><th>Type</th><th>Party</th><th>Project</th><th>Created</th><th>Document Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.documentType}-${row.recordId}`}><td><Link href={row.href}><strong>{row.documentNo}</strong></Link></td><td>{row.documentType}</td><td>{row.party || "—"}</td><td>{row.project || "—"}</td><td>{createdLabel(row)}</td><td>{row.date || "—"}</td><td>K{Number(row.amount || 0).toFixed(2)}</td><td><strong>DRAFT</strong></td><td><div className="button-row"><Link className="button-link secondary-link" href={row.href}>Open Document</Link><button type="button" onClick={() => decide(row, "APPROVE")}>Approve</button><button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>Cancel</button></div></td></tr>)}{!rows.length && <tr><td colSpan={9}>No DRAFT documents pending approval.</td></tr>}</tbody></table></section>;
 
-  return <><h2>Pending Approval Queue</h2><p className="small">Workflow: DRAFT → APPROVED → POSTED. Only DRAFT documents are listed here for approval.</p>{message && <section className="panel"><strong>Status:</strong> {message}</section>}{loading ? <section className="panel">Loading pending approvals…</section> : <>{table(`Sales — Pending (${sales.length})`, sales)}{table(`Purchase — Pending (${purchase.length})`, purchase)}</>}</>;
+  return <><h2>Pending Approval Queue</h2><p className="small">Workflow: DRAFT → APPROVED → POSTED. Only DRAFT documents are listed here for approval; newest-created documents appear first.</p>{message && <section className="panel"><strong>Status:</strong> {message}</section>}{loading ? <section className="panel">Loading pending approvals…</section> : <>{table(`Sales — Pending (${sales.length})`, sales)}{table(`Purchase — Pending (${purchase.length})`, purchase)}</>}</>;
 }
