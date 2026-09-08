@@ -271,10 +271,11 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
   expenseTotal = round2(expenseTotal);
 
   // A source document is accounting-posted only when a journal reference exists.
-  // Workflow labels such as APPROVED/CONVERTED are not accounting truth by themselves.
-  const postedInvoices = invoices.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && status(r.status) !== 'CANCELLED'; });
-  const postedBills = bills.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && status(r.status) !== 'CANCELLED'; });
-  const postedExpenses = expenses.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && status(r.status) !== 'CANCELLED'; });
+  // Cancelled or reversed documents never contribute to materialized reporting.
+  const excludedStatuses = ['CANCELLED','REVERSED'];
+  const postedInvoices = invoices.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
+  const postedBills = bills.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
+  const postedExpenses = expenses.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
   const activeLoan = loans.find(function(r) { return status(r.status) === 'ACTIVE'; }) || null;
   const gstStatus = String((settings.find(function(r) { return String(r.key) === 'gst_status'; }) || {}).value || 'UNVERIFIED');
 
@@ -290,7 +291,7 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
   // Supplier quotations share the PurchaseOrders storage table, but are not commitments.
   const poCommitments = round2(pos.filter(function(r) {
     const number = String(r.poNumber || '');
-    return number.indexOf('SUPQ-') !== 0 && ['CANCELLED','BILLED'].indexOf(status(r.status)) < 0;
+    return number.indexOf('SUPQ-') !== 0 && ['CANCELLED','REVERSED','BILLED'].indexOf(status(r.status)) < 0;
   }).reduce(function(sum, r) { return sum + n(r.totalAmount); }, 0));
 
   const draftApprovals =
