@@ -48,8 +48,11 @@ export async function POST(request: Request) {
     if (input.partyType === "Customer") {
       if (!["APPROVED", "PART_INVOICED"].includes(status)) throw new Error("Customer advance can be created only from an APPROVED or PART_INVOICED Sales Quotation");
     } else {
-      if (!["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED", "BILL_CREATED", "BILLED", "CLOSED_PARTIAL"].includes(status)) {
-        throw new Error("Supplier advance requires an approved Purchase Order lifecycle");
+      // Once billing has started, settlement should be made against Accounts Payable,
+      // not recorded as a new prepayment. PART_BILLED remains allowed only because
+      // part of the order may still be awaiting supply/invoice.
+      if (!["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED"].includes(status)) {
+        throw new Error("Supplier advance can be created only before the Purchase Order is fully billed/closed. Use Supplier Payment against the posted Supplier Invoice after billing.");
       }
     }
 
