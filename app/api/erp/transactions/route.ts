@@ -4,7 +4,8 @@ import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
-import { postJournal } from "@/lib/accounting/posting";
+import { postJournal, receiptPosting, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { synchronizeSettlement } from "@/lib/accounting/advance-allocation";
 import { round2 } from "@/lib/accounting/inventory";
 
@@ -161,6 +162,51 @@ async function finalizeCustomerRefund(row: any, patch: { paymentDate: string; am
   return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, refund: true, creditNoteId };
 }
 
+async function finalizeStandardPayment(row: any, patch: { paymentDate: string; amount: number; paymentMethod: string; cashBankAccountId: string; reference: string }) {
+  await ensureAccountingInfrastructure();
+  const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
+  const partyType = String(row.partyType || "");
+  if (receive && partyType !== "Customer") throw new Error("Receive payments must use a Customer");
+  if (!receive && partyType !== "Supplier") throw new Error("Supplier payments must use a Supplier");
+
+  const againstDocumentId = String(row.againstDocumentId || "").trim();
+  const advance = !againstDocumentId;
+  if (!advance) {
+    if (receive) {
+      const invoice = (await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1)).rows[0];
+      if (!invoice) throw new Error("Against Sales Invoice not found");
+      if (String(invoice.customerId || "") !== String(row.partyId || "")) throw new Error("Payment customer does not match the Sales Invoice customer");
+      if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
+      if (patch.amount > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds Sales Invoice outstanding amount");
+      if (String(row.againstDocumentType || "") && !String(row.againstDocumentType || "").toLowerCase().includes("sales invoice")) throw new Error("Customer receipt has an invalid against-document type");
+    } else {
+      const bill = (await findRecords<any>("SupplierBills", { billId: againstDocumentId }, 1)).rows[0];
+      if (!bill) throw new Error("Against Supplier Invoice not found");
+      if (String(bill.supplierId || "") !== String(row.partyId || "")) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
+      if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
+      if (patch.amount > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds Supplier Invoice outstanding amount");
+      const againstType = String(row.againstDocumentType || "").toLowerCase();
+      if (againstType && !againstType.includes("supplier invoice") && !againstType.includes("supplier bill")) throw new Error("Supplier payment has an invalid against-document type");
+    }
+  }
+
+  const lines = receive
+    ? receiptPosting({ amount: patch.amount, customerId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance })
+    : supplierPaymentPosting({ amount: patch.amount, supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance });
+  const journal = await postJournal({
+    postingDate: patch.paymentDate,
+    documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
+    documentId: row.paymentId,
+    documentNumber: String(row.paymentNumber || row.paymentId),
+    reference: patch.reference || String(row.reference || row.paymentNumber || row.paymentId),
+    projectId: row.projectId || "",
+    lines,
+  });
+  await updateRecord("Payments", "paymentId", row.paymentId, { ...patch, status: "POSTED", journalId: journal.journalId }, "payment-final-save:standard");
+  if (!advance) await synchronizeSettlement(receive ? "Customer" : "Supplier", againstDocumentId);
+  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, advance, finalized: true };
+}
+
 async function finalizePayment(payload: Record<string, unknown>) {
   const paymentId = String(payload.paymentId || "").trim();
   if (!paymentId) throw new Error("Payment Entry is required");
@@ -202,26 +248,7 @@ async function finalizePayment(payload: Record<string, unknown>) {
     return finalizeCustomerRefund(row, patch);
   }
 
-  await updateRecord("Payments", "paymentId", paymentId, patch, "payment-final-save");
-  const result = await callLegacy("post", { recordType: "payment", recordId: paymentId });
-  const posted = (await findRecords<any>("Payments", { paymentId }, 1)).rows[0];
-
-  const againstDocumentId = String(posted?.againstDocumentId || row.againstDocumentId || "").trim();
-  if (againstDocumentId) {
-    if (partyType === "Customer" && String(row.paymentType || "").toUpperCase() === "RECEIVE") {
-      await synchronizeSettlement("Customer", againstDocumentId);
-    } else if (partyType === "Supplier" && String(row.paymentType || "").toUpperCase() === "PAY") {
-      await synchronizeSettlement("Supplier", againstDocumentId);
-    }
-  }
-
-  return {
-    recordId: paymentId,
-    status: String(posted?.status || result?.status || "POSTED"),
-    journalId: posted?.journalId || result?.journalId || "",
-    advance: Boolean(result?.advance),
-    finalized: true,
-  };
+  return finalizeStandardPayment(row, patch);
 }
 
 async function allocateAdvance(payload: Record<string, unknown>) {
