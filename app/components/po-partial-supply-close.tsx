@@ -54,9 +54,9 @@ export default function PoPartialSupplyClose({ poId, poNumber }: { poId: string;
   async function closeAndCreate() {
     if (!state?.hasPartialFulfillment || busy) return;
     if (remarks.trim().length < 5) { setMessage("Enter a closure remark explaining why the supplier cannot complete the remaining quantity."); return; }
-    if (!window.confirm(`Close ${poNumber} and create a new DRAFT Purchase Order for only the remaining quantity?`)) return;
+    if (!window.confirm(`Close the remaining quantity on ${poNumber} and create a new DRAFT Purchase Order for only that balance?`)) return;
     setBusy("close");
-    setMessage("Closing old Purchase Order and creating remaining-quantity Purchase Order…");
+    setMessage("Closing remaining quantity and creating replacement Purchase Order…");
     try {
       const response = await fetch("/api/erp/po-close-transfer", {
         method: "POST",
@@ -66,7 +66,7 @@ export default function PoPartialSupplyClose({ poId, poNumber }: { poId: string;
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Purchase Order partial-supply close failed");
       setState(body.state as State);
-      setMessage(`Purchase Order closed. Remaining quantity moved to ${body.state?.replacement?.poNumber || body.state?.replacement?.poId || "new draft PO"}. Review the new supplier/quantities before approval.`);
+      setMessage(`Purchase Order marked CLOSED_PARTIAL. Remaining quantity moved to ${body.state?.replacement?.poNumber || body.state?.replacement?.poId || "new draft PO"}. Review the new supplier/quantities before approval.`);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Purchase Order partial-supply close failed");
@@ -95,16 +95,16 @@ export default function PoPartialSupplyClose({ poId, poNumber }: { poId: string;
 
   if (loading) return null;
   if (!state) return message ? <section className="panel status-banner no-print" style={{ marginTop: 20 }}>{message}</section> : null;
-  const closed = state.status === "CLOSED";
+  const closed = ["CLOSED", "CLOSED_PARTIAL"].includes(String(state.status || "").toUpperCase());
   if (!closed && !state.hasPartialFulfillment) return null;
 
   return <section className="panel no-print" style={{ marginTop: 20 }}>
     <div className="form-title-row">
       <div>
         <h3>{closed ? "Purchase Order Closed for Partial Supply" : "Supplier Cannot Complete Remaining PO Quantity"}</h3>
-        <p className="small">Use this only when part of the PO has already been fulfilled and the supplier confirms the remaining quantity will not be supplied. The old PO is closed with an audit remark; a new DRAFT PO is created for only the unfulfilled balance.</p>
+        <p className="small">Use this only when part of the PO has already been fulfilled and the supplier confirms the remaining quantity will not be supplied. The old PO becomes CLOSED_PARTIAL with an audit remark; a new DRAFT PO is created for only the unfulfilled balance.</p>
       </div>
-      <span className="auto-badge">{closed ? "CLOSED" : `Remaining Qty ${qty(state.remainingQty)}`}</span>
+      <span className="auto-badge">{closed ? "CLOSED_PARTIAL" : `Remaining Qty ${qty(state.remainingQty)}`}</span>
     </div>
 
     {message && <div className="status-banner" style={{ marginTop: 12 }}>{message}</div>}
@@ -128,7 +128,7 @@ export default function PoPartialSupplyClose({ poId, poNumber }: { poId: string;
     {!closed && <div className="form-grid" style={{ marginTop: 18 }}>
       <label className="form-wide">Closure Remarks<textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} rows={3} maxLength={500} placeholder="Example: Supplier confirmed remaining 4 units are unavailable and cannot be supplied. Move remaining quantity to a new PO." disabled={Boolean(busy)} /></label>
       <div className="form-wide status-banner">The replacement PO is created as <strong>DRAFT</strong>. Review supplier, quantities and commercial terms before approval. Existing receipts, invoices and supplier advances remain linked to the old PO for audit/accounting history.</div>
-      <div className="form-wide button-row"><button type="button" disabled={Boolean(busy) || remarks.trim().length < 5} onClick={() => void closeAndCreate()}>{busy === "close" ? "Closing & Creating…" : "Close Old PO & Create Remaining PO"}</button></div>
+      <div className="form-wide button-row"><button type="button" disabled={Boolean(busy) || remarks.trim().length < 5} onClick={() => void closeAndCreate()}>{busy === "close" ? "Closing & Creating…" : "Close Remaining Qty & Create Replacement PO"}</button></div>
     </div>}
 
     {closed && <>
