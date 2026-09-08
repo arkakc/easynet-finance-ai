@@ -21,6 +21,7 @@ const aiSchema = z.object({
   reason: z.string().trim().min(1).max(280),
 });
 
+type Suggestion = z.infer<typeof aiSchema> & { source: "AI" | "RULE_FALLBACK" };
 type Account = {
   accountId: string;
   accountCode?: string;
@@ -34,7 +35,7 @@ function active(row: Account) {
   return !["false", "0", "no", "inactive"].includes(String(row.active ?? "true").trim().toLowerCase());
 }
 
-function heuristic(itemName: string, itemType: "STOCK" | "SERVICE" | "NON_STOCK") {
+function heuristic(itemName: string, itemType: "STOCK" | "SERVICE" | "NON_STOCK"): Suggestion {
   const text = itemName.toLowerCase();
   let revenueAccountId = itemType === "SERVICE" ? "ACC-4100" : "ACC-4200";
   let costAccountId = itemType === "SERVICE" ? "ACC-5200" : "ACC-5100";
@@ -80,7 +81,7 @@ function heuristic(itemName: string, itemType: "STOCK" | "SERVICE" | "NON_STOCK"
     reason = "Service item default";
   }
 
-  return { revenueAccountId, costAccountId, confidence: 0.55, reason, source: "RULE_FALLBACK" as const };
+  return { revenueAccountId, costAccountId, confidence: 0.55, reason, source: "RULE_FALLBACK" };
 }
 
 function accountLabel(account: Account | undefined, id: string) {
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
     const expense = leaf.filter((row) => String(row.accountType || "").toLowerCase() === "expense");
     const byId = new Map(rows.map((row) => [String(row.accountId || ""), row]));
 
-    let suggestion = heuristic(input.itemName, input.itemType);
+    let suggestion: Suggestion = heuristic(input.itemName, input.itemType);
 
     if (env.OPENAI_API_KEY && income.length && expense.length) {
       try {
@@ -131,7 +132,7 @@ export async function POST(request: Request) {
         const validRevenue = income.some((row) => String(row.accountId) === parsed.revenueAccountId);
         const validCost = expense.some((row) => String(row.accountId) === parsed.costAccountId);
         if (validRevenue && validCost) {
-          suggestion = { ...parsed, source: "AI" as const };
+          suggestion = { ...parsed, source: "AI" };
         }
       } catch {
         // AI failure must never block item creation. Controlled rule fallback remains available.
