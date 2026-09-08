@@ -1,5 +1,5 @@
-import StockWorkspaceV5 from "@/app/components/stock-workspace-v5";
+import StockWorkspaceV6 from "@/app/components/stock-workspace-v6";
 
 export default function StockPage() {
-  return <StockWorkspaceV5 />;
+  return <StockWorkspaceV6 />;
 }
