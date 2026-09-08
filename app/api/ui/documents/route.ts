@@ -7,8 +7,13 @@ export async function GET(request: NextRequest) {
     await requirePermission("accounts.read");
     const documentId = String(request.nextUrl.searchParams.get("documentId") || "").trim();
     if (documentId) {
-      const lines = await findRecords("DocumentLines", { documentId }, 500);
-      return NextResponse.json({ ok: true, documentId, lines: lines.rows });
+      const [document, lines] = await Promise.all([
+        findRecords("Documents", { documentId }, 1),
+        findRecords("DocumentLines", { documentId }, 500),
+      ]);
+      const record = document.rows[0];
+      if (!record) return NextResponse.json({ ok: false, error: "Document not found" }, { status: 404 });
+      return NextResponse.json({ ok: true, documentId, document: record, lines: lines.rows });
     }
     const documents = await listTable("Documents", 500, 0);
     return NextResponse.json({ ok: true, documents: documents.rows });
