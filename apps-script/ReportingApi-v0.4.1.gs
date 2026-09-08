@@ -250,7 +250,11 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
   const docs = rows(documentDb, 'Documents');
 
   const accountType = {};
-  accounts.forEach(function(a) { accountType[String(a.accountId)] = String(a.accountType || ''); });
+  const accountCode = {};
+  accounts.forEach(function(a) {
+    accountType[String(a.accountId)] = String(a.accountType || '');
+    accountCode[String(a.accountId)] = String(a.accountCode || '');
+  });
 
   const balanceFor = function(ids) {
     const set = {};
@@ -276,6 +280,16 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
   const postedInvoices = invoices.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
   const postedBills = bills.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
   const postedExpenses = expenses.filter(function(r) { return Boolean(String(r.journalId || '').trim()) && excludedStatuses.indexOf(status(r.status)) < 0; });
+  // Credit Notes are stored as positive source-document amounts for audit/readability,
+  // but they are negative sales in reporting. GL remains the primary accounting truth.
+  const signedSalesInvoices = postedInvoices.map(function(r) {
+    if (String(r.invoiceNumber || '').toUpperCase().indexOf('CN-') !== 0) return r;
+    return Object.assign({}, r, {
+      netAmount: -n(r.netAmount),
+      gstAmount: -n(r.gstAmount),
+      totalAmount: -n(r.totalAmount)
+    });
+  });
   const activeLoan = loans.find(function(r) { return status(r.status) === 'ACTIVE'; }) || null;
   const gstStatus = String((settings.find(function(r) { return String(r.key) === 'gst_status'; }) || {}).value || 'UNVERIFIED');
 
@@ -399,6 +413,8 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
     });
   };
 
+  // Project profitability is derived from posted GL, not source purchase documents.
+  // This avoids treating inventory purchases as project expense before COGS/adjustment is actually recognized.
   const projectMap = {};
   const ensureProject = function(id) {
     const key = String(id || '');
@@ -406,18 +422,20 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
     if (!projectMap[key]) projectMap[key] = { projectId: key, revenue: 0, purchaseCost: 0, expenseCost: 0, updatedAt: nowIso };
     return projectMap[key];
   };
-
-  postedInvoices.forEach(function(r) {
-    const project = ensureProject(r.projectId);
-    if (project) project.revenue += n(r.netAmount);
-  });
-  postedBills.forEach(function(r) {
-    const project = ensureProject(r.projectId);
-    if (project) project.purchaseCost += n(r.netAmount);
-  });
-  postedExpenses.forEach(function(r) {
-    const project = ensureProject(r.projectId);
-    if (project) project.expenseCost += n(r.netAmount);
+  journalLines.forEach(function(line) {
+    const project = ensureProject(line.projectId);
+    if (!project) return;
+    const accountId = String(line.accountId || '');
+    const type = accountType[accountId];
+    const code = accountCode[accountId] || '';
+    if (type === 'Income') {
+      project.revenue += n(line.credit) - n(line.debit);
+      return;
+    }
+    if (type !== 'Expense') return;
+    const expense = n(line.debit) - n(line.credit);
+    if (String(code).indexOf('5') === 0) project.purchaseCost += expense;
+    else project.expenseCost += expense;
   });
 
   const projectRows = Object.keys(projectMap).map(function(key) {
@@ -430,7 +448,7 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
     return project;
   });
 
-  const salesRows = groupDaily(postedInvoices, 'invoiceDate');
+  const salesRows = groupDaily(signedSalesInvoices, 'invoiceDate');
   const purchaseRows = groupDaily(postedBills, 'billDate');
   const arRows = aging(postedInvoices, 'customerId');
   const apRows = aging(postedBills, 'supplierId');
