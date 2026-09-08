@@ -21,9 +21,11 @@ function enhanceDocumentLists() {
       const documentLink = cells[idIndex].querySelector<HTMLAnchorElement>('a[href^="/transactions/"]');
       if (!documentLink) continue;
 
-      const path = new URL(documentLink.href, window.location.origin).pathname;
+      const url = new URL(documentLink.href, window.location.origin);
+      const path = url.pathname;
+      const isSalesInvoice = path.startsWith("/transactions/invoice/");
       const currentLabel = (documentLink.textContent || "").trim();
-      if (path.startsWith("/transactions/invoice/") && currentLabel.toUpperCase().startsWith("CN-") && row.dataset.creditNoteLabeled !== "1") {
+      if (isSalesInvoice && currentLabel.toUpperCase().startsWith("CN-") && row.dataset.creditNoteLabeled !== "1") {
         documentLink.textContent = `Credit Note / Return · ${currentLabel}`;
         row.dataset.creditNoteLabeled = "1";
       }
@@ -49,6 +51,18 @@ function enhanceDocumentLists() {
         locked.textContent = row.dataset.creditNoteLabeled === "1" ? "Controlled Credit Note" : "Edit Locked";
         locked.setAttribute("data-list-edit", "1");
         holder.appendChild(locked);
+      }
+
+      if (isSalesInvoice && row.dataset.creditNoteLabeled !== "1" && ["POSTED", "PARTLY_PAID"].includes(status)) {
+        const invoiceId = decodeURIComponent(path.split("/").filter(Boolean).pop() || "");
+        if (invoiceId) {
+          const payment = document.createElement("a");
+          payment.href = `/transactions?module=sales&tab=salesPayment&mode=create&sourceInvoice=${encodeURIComponent(invoiceId)}`;
+          payment.textContent = "Receive Payment";
+          payment.className = "button-link";
+          payment.setAttribute("data-sales-payment", "1");
+          holder.appendChild(payment);
+        }
       }
       row.dataset.editEnhanced = "1";
     }
