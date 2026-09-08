@@ -3,6 +3,8 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { POST as legacyTransactionPost } from "@/app/api/transactions/route";
+import { assertCustomerCreditPolicy } from "@/lib/accounting/customer-credit-control";
+import { isCreditNote, postSalesCreditNote } from "@/lib/accounting/sales-return";
 
 const actionSchema = z.object({
   recordType: z.enum(["quote", "invoice", "purchaseOrder", "supplierBill", "payment", "expense"]),
@@ -13,7 +15,7 @@ const actionSchema = z.object({
 
 const CONFIG = {
   quote: { table: "Quotes", idField: "quoteId", label: "Sales Quotation" },
-  invoice: { table: "Invoices", idField: "invoiceId", label: "Sales Invoice" },
+  invoice: { table: "Invoices", idField: "invoiceId", label: "Sales Invoice / Credit Note" },
   purchaseOrder: { table: "PurchaseOrders", idField: "poId", label: "Purchase Document" },
   supplierBill: { table: "SupplierBills", idField: "billId", label: "Supplier Invoice" },
   payment: { table: "Payments", idField: "paymentId", label: "Payment Entry / Receipt" },
@@ -53,7 +55,7 @@ export async function GET() {
     ]);
     const pending = [
       ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
-      ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
+      ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: isCreditNote(r) ? "Sales Credit Note / Return" : "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
       ...purchaseOrders.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: String(r.poNumber || "").startsWith("SUPQ-") ? "Supplier Quotation" : "Purchase Order", documentNo: r.poNumber || r.poId, recordId: r.poId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.poDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/purchaseOrder/${r.poId}`, approvalRecordType: "purchaseOrder" })),
       ...supplierBills.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Supplier Invoice", documentNo: r.billNumber || r.billId, recordId: r.billId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.billDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/supplierBill/${r.billId}`, approvalRecordType: "supplierBill" })),
       ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", createdAt: r.createdAt || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
@@ -82,10 +84,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, recordType: input.recordType, recordId: input.recordId, previousStatus: current, status: "CANCELLED", row: cancelled.row });
     }
 
-    if (input.recordType === "invoice") await assertSalesInvoiceStockPolicy(row);
+    const creditNote = input.recordType === "invoice" && isCreditNote(row);
+    if (input.recordType === "invoice" && !creditNote) {
+      await assertCustomerCreditPolicy(row);
+      await assertSalesInvoiceStockPolicy(row);
+    }
+
     await updateRecord(config.table, config.idField, input.recordId, { status: "APPROVED" }, `finance-controller:${input.note || "approve"}`);
 
-    if (ACCOUNTING_TYPES.has(input.recordType)) {
+    if (creditNote) {
+      try {
+        const approvedCredit = (await findRecords<any>("Invoices", { invoiceId: input.recordId }, 1)).rows[0];
+        await postSalesCreditNote(approvedCredit);
+      } catch (error) {
+        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:credit-note-posting-rollback");
+        throw error;
+      }
+    } else if (ACCOUNTING_TYPES.has(input.recordType)) {
       const internalRequest = new Request(request.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
