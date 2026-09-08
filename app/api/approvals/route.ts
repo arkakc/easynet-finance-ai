@@ -20,7 +20,6 @@ const CONFIG = {
   expense: { table: "Expenses", idField: "expenseId", label: "Expense" },
 } as const;
 
-// Payments are authorization-only at approval. Their GL effect is created by Final Save.
 const ACCOUNTING_TYPES = new Set(["invoice", "supplierBill", "expense"]);
 
 function requireSecret(secret?: string) {
@@ -29,6 +28,7 @@ function requireSecret(secret?: string) {
 }
 const isDraft = (value: unknown) => String(value || "").trim().toUpperCase() === "DRAFT";
 const explicitlyFalse = (value: unknown) => ["false", "0", "no", "off"].includes(String(value ?? "").trim().toLowerCase());
+const createdValue = (value: unknown) => { const time = new Date(String(value || "")).getTime(); return Number.isFinite(time) ? time : 0; };
 
 async function assertSalesInvoiceStockPolicy(invoice: any) {
   const [lines, items] = await Promise.all([
@@ -40,7 +40,6 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
   if (hasStock && explicitlyFalse(invoice.updateStock)) {
     throw new Error("Stock Sales Invoice cannot be approved with Update Stock disabled while Delivery Note is not enabled. Enable Update Stock so Moving Average COGS and Inventory are posted together.");
   }
-  // Blank is treated as true for legacy/direct invoices created before the 0.5 field existed.
   if (hasStock && String(invoice.updateStock ?? "").trim() === "") {
     await updateRecord("Invoices", "invoiceId", invoice.invoiceId, { updateStock: true }, "finance-controller:stock-policy-default");
   }
@@ -53,13 +52,13 @@ export async function GET() {
       listTable<any>("SupplierBills", 500, 0), listTable<any>("Payments", 500, 0), listTable<any>("Expenses", 500, 0),
     ]);
     const pending = [
-      ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
-      ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
-      ...purchaseOrders.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: String(r.poNumber || "").startsWith("SUPQ-") ? "Supplier Quotation" : "Purchase Order", documentNo: r.poNumber || r.poId, recordId: r.poId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.poDate || "", amount: r.totalAmount || 0, href: `/transactions/purchaseOrder/${r.poId}`, approvalRecordType: "purchaseOrder" })),
-      ...supplierBills.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Supplier Invoice", documentNo: r.billNumber || r.billId, recordId: r.billId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.billDate || "", amount: r.totalAmount || 0, href: `/transactions/supplierBill/${r.billId}`, approvalRecordType: "supplierBill" })),
-      ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
-      ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
-    ];
+      ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
+      ...invoices.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Invoice", documentNo: r.invoiceNumber || r.invoiceId, recordId: r.invoiceId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.invoiceDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/invoice/${r.invoiceId}`, approvalRecordType: "invoice" })),
+      ...purchaseOrders.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: String(r.poNumber || "").startsWith("SUPQ-") ? "Supplier Quotation" : "Purchase Order", documentNo: r.poNumber || r.poId, recordId: r.poId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.poDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/purchaseOrder/${r.poId}`, approvalRecordType: "purchaseOrder" })),
+      ...supplierBills.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Supplier Invoice", documentNo: r.billNumber || r.billId, recordId: r.billId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.billDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/supplierBill/${r.billId}`, approvalRecordType: "supplierBill" })),
+      ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", createdAt: r.createdAt || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
+      ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
+    ].sort((a, b) => createdValue(b.createdAt || b.date) - createdValue(a.createdAt || a.date));
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Approval queue load failed" }, { status: 500 });
