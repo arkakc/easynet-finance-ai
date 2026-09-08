@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { FlowCreateLink, useFlowDataRefresh } from "@/app/components/flow-navigation";
 
 export type TransactionItemMaster = {
   itemId: string;
@@ -77,6 +79,20 @@ export default function TransactionItemLines({
   disabled = false,
   onChange,
 }: Props) {
+  const [liveItems, setLiveItems] = useState<TransactionItemMaster[]>(items);
+  useEffect(() => setLiveItems(items), [items]);
+
+  const refreshItems = useCallback(async () => {
+    try {
+      const response = await fetch("/api/stock?scope=items", { cache: "no-store" });
+      const body = await response.json();
+      if (response.ok && body.ok && Array.isArray(body.items)) setLiveItems(body.items);
+    } catch {
+      // Keep the current choices if a background refresh fails.
+    }
+  }, []);
+  useFlowDataRefresh(() => { void refreshItems(); });
+
   const salesQuotationFromUrl = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
   const temporaryQuotation = !masterOnly && (temporaryQuotationProp ?? (supplierQuotation || salesQuotationFromUrl));
   const datalistId = temporaryQuotation ? "quotation-item-master" : masterOnly ? "draft-document-item-master" : "transaction-item-master";
@@ -88,7 +104,7 @@ export default function TransactionItemLines({
 
   function changeItem(index: number, value: string) {
     if (disabled) return;
-    const match = resolveItem(items, value);
+    const match = resolveItem(liveItems, value);
     if (match) {
       patchLine(index, {
         itemId: String(match.itemId || match.itemCode),
@@ -125,7 +141,7 @@ export default function TransactionItemLines({
 
   return <>
     <datalist id={datalistId}>
-      {items.map((item) => <option key={item.itemId || item.itemCode} value={itemDisplay(item)} />)}
+      {liveItems.map((item) => <option key={item.itemId || item.itemCode} value={itemDisplay(item)} />)}
     </datalist>
 
     <div className="table-wrap">
@@ -145,7 +161,7 @@ export default function TransactionItemLines({
         </thead>
         <tbody>
           {lines.map((line, index) => {
-            const linked = line.itemId ? items.find((item) => String(item.itemId || item.itemCode) === line.itemId) : null;
+            const linked = line.itemId ? liveItems.find((item) => String(item.itemId || item.itemCode) === line.itemId) : null;
             const movingAverage = linked ? Number(linked.defaultRate || 0) : 0;
             const temporary = temporaryQuotation && !linked;
             const pendingCreate = !masterOnly && !temporaryQuotation && !linked && line.itemName.trim();
@@ -198,8 +214,9 @@ export default function TransactionItemLines({
 
     <div className="button-row" style={{ marginTop: 12 }}>
       <button type="button" className="secondary" onClick={addLine} disabled={disabled}>Add Line</button>
+      {!temporaryQuotation && <FlowCreateLink target="item" label="Create New Item in New Tab" returnLabel={masterOnly ? "Draft Document" : "Current Transaction"} />}
       {temporaryQuotation && <span className="small">Quotation allows temporary free-text items. Temporary rows are not saved to Item Master until the quotation is converted to the next operational document.</span>}
-      {masterOnly && <span className="small">Operational draft lines must remain linked to Item Master.</span>}
+      {masterOnly && <span className="small">Operational draft lines must remain linked to Item Master. A newly created Item appears here when you return to this tab.</span>}
     </div>
   </>;
 }
