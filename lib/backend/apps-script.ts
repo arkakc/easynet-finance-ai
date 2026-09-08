@@ -28,8 +28,10 @@ type JournalBundle = {
 type ServiceConfig = { url: string; token: string; source: "split" | "legacy" };
 
 const RETRYABLE_STATUS = new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
-const RETRY_DELAYS_MS = [0, 250, 700, 1400];
+const RETRY_DELAYS_MS = [0, 250];
 const READ_ONLY_ACTIONS = new Set<BackendAction>(["health", "bootstrapStatus", "list", "find"]);
+const READ_TIMEOUT_MS = 12_000;
+const READ_CACHE_TTL_MS = 4_000;
 
 const DOCUMENT_TABLES = new Set(["Documents", "DocumentLines"]);
 const REPORTING_TABLES = new Set([
@@ -56,7 +58,7 @@ const TABLE_ID_FIELDS: Record<string, string> = {
   Invoices: "invoiceId",
   InvoiceLines: "invoiceLineId",
   SupplierBills: "billId",
-  SupplierBillLines: "billLineId",
+  SupplierBillLines: "supplierBillLineId",
   Payments: "paymentId",
   Expenses: "expenseId",
   Loans: "loanId",
@@ -81,6 +83,9 @@ const writeQueues: Record<BackendService, Promise<void>> = {
   reporting: Promise.resolve(),
   document: Promise.resolve(),
 };
+
+const readCache = new Map<string, { storedAt: number; value: BackendEnvelope<any> }>();
+const readInflight = new Map<string, Promise<BackendEnvelope<any>>>();
 
 async function queuedWrite<T>(service: BackendService, task: () => Promise<T>): Promise<T> {
   const previous = writeQueues[service];
@@ -156,6 +161,9 @@ function serviceFor(action: BackendAction, payload: Record<string, unknown>): Ba
 
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function safeSnippet(value: string, max = 220) { return value.replace(/\s+/g, " ").trim().slice(0, max); }
+function readKey(service: BackendService, action: BackendAction, payload: Record<string, unknown>) {
+  return `${service}:${action}:${JSON.stringify(payload)}`;
+}
 
 async function executeBackend<T>(
   service: BackendService,
@@ -175,6 +183,7 @@ async function executeBackend<T>(
         body: JSON.stringify({ token: config.token, action, payload }),
         cache: "no-store",
         redirect: "follow",
+        signal: READ_ONLY_ACTIONS.has(action) ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined,
       });
       const raw = await response.text();
       if (!response.ok) {
@@ -213,8 +222,27 @@ export async function callBackend<T = unknown>(
   explicitService?: BackendService,
 ): Promise<BackendEnvelope<T>> {
   const service = explicitService || serviceFor(action, payload);
-  if (READ_ONLY_ACTIONS.has(action)) return executeBackend<T>(service, action, payload);
-  return queuedWrite(service, () => executeBackend<T>(service, action, payload));
+  if (READ_ONLY_ACTIONS.has(action)) {
+    const key = readKey(service, action, payload);
+    const cached = readCache.get(key);
+    if (cached && Date.now() - cached.storedAt <= READ_CACHE_TTL_MS) return cached.value as BackendEnvelope<T>;
+    const existing = readInflight.get(key);
+    if (existing) return existing as Promise<BackendEnvelope<T>>;
+
+    const task = executeBackend<T>(service, action, payload);
+    readInflight.set(key, task as Promise<BackendEnvelope<any>>);
+    try {
+      const value = await task;
+      readCache.set(key, { storedAt: Date.now(), value });
+      return value;
+    } finally {
+      readInflight.delete(key);
+    }
+  }
+
+  const result = await queuedWrite(service, () => executeBackend<T>(service, action, payload));
+  readCache.clear();
+  return result;
 }
 
 export async function backendHealth(service: BackendService = "core") {
@@ -234,7 +262,7 @@ export async function backendHealthAll() {
   return Object.fromEntries(entries) as Record<BackendService, { ok: boolean; version?: string; error?: string }>;
 }
 
-const PROTOCOL_RETRY_DELAYS_MS = [0, 180, 450, 900];
+const PROTOCOL_RETRY_DELAYS_MS = [0, 200];
 
 async function readRowsWithProtocolRetry<T>(
   action: "list" | "find",
