@@ -93,7 +93,9 @@ function accountLabel(account: Account | undefined, id: string) {
 
 export async function POST(request: Request) {
   try {
-    await requirePermission("purchase.write");
+    // Read-only classifier used by both Sales and Purchase item-materialization flows.
+    // Actual Item Master writes remain protected by their respective sales.write / purchase.write routes.
+    await requirePermission("dashboard.read");
     const input = requestSchema.parse(await request.json());
     const result = await listTable<Account>("Accounts", 500, 0);
     const rows = result.rows || [];
@@ -131,9 +133,7 @@ export async function POST(request: Request) {
         const parsed = aiSchema.parse(response.output_parsed);
         const validRevenue = income.some((row) => String(row.accountId) === parsed.revenueAccountId);
         const validCost = expense.some((row) => String(row.accountId) === parsed.costAccountId);
-        if (validRevenue && validCost) {
-          suggestion = { ...parsed, source: "AI" };
-        }
+        if (validRevenue && validCost) suggestion = { ...parsed, source: "AI" };
       } catch {
         // AI failure must never block item creation. Controlled rule fallback remains available.
       }
