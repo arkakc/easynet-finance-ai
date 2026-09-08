@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlowCreateLink, FlowReturnPanel, notifyFlowDataChanged, useFlowDataRefresh } from "@/app/components/flow-navigation";
 
 type Customer = { customerId:string; customerName:string; contactPerson?:string; phone?:string; email?:string; address?:string; taxId?:string; creditTermsDays?:number|string; creditLimit?:number|string };
@@ -13,26 +13,51 @@ const emptyData:Data={customers:[],suppliers:[],projects:[]};
 export default function MastersWorkspaceV2(){
   const[data,setData]=useState<Data>(emptyData); const[loading,setLoading]=useState(true); const[message,setMessage]=useState(""); const[tab,setTab]=useState<Tab>("customer"); const[savingType,setSavingType]=useState<Tab|"">(""); const[lastSavedLabel,setLastSavedLabel]=useState("");
   const[editingCustomer,setEditingCustomer]=useState<Customer|null>(null); const[editingSupplier,setEditingSupplier]=useState<Supplier|null>(null); const[editingProject,setEditingProject]=useState<Project|null>(null);
+  const loadedScopes=useRef(new Set<Tab>());
   const busy=Boolean(savingType);
   const customerOptions=useMemo(()=>[...data.customers].sort((a,b)=>a.customerName.localeCompare(b.customerName)),[data.customers]);
 
-  const loadData=useCallback(async(showLoading=true)=>{if(showLoading)setLoading(true);try{const response=await fetch("/api/masters",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Failed to load master data");setData({customers:body.customers||[],suppliers:body.suppliers||[],projects:body.projects||[]});}catch(error){setMessage(error instanceof Error?error.message:"Master-data load failed");}finally{if(showLoading)setLoading(false);}},[]);
-  useEffect(()=>{const params=new URLSearchParams(window.location.search);const requested=params.get("tab");if(requested==="supplier"||requested==="project"||requested==="customer")setTab(requested);void loadData();},[loadData]);
-  useFlowDataRefresh(()=>{void loadData(false);});
+  const loadData=useCallback(async(scope:Tab,showLoading=true,force=false)=>{
+    if(loadedScopes.current.has(scope)&&!force){if(showLoading)setLoading(false);return;}
+    if(showLoading)setLoading(true);
+    try{
+      const response=await fetch(`/api/masters/scoped?scope=${encodeURIComponent(scope)}`,{cache:"no-store"});
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Failed to load master data");
+      setData(current=>({
+        customers:Array.isArray(body.customers)?body.customers:current.customers,
+        suppliers:Array.isArray(body.suppliers)?body.suppliers:current.suppliers,
+        projects:Array.isArray(body.projects)?body.projects:current.projects,
+      }));
+      loadedScopes.current.add(scope);
+    }catch(error){setMessage(error instanceof Error?error.message:"Master-data load failed");}
+    finally{if(showLoading)setLoading(false);}
+  },[]);
+
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    const requested=params.get("tab");
+    const initial:Tab=requested==="supplier"||requested==="project"||requested==="customer"?requested:"customer";
+    setTab(initial);
+    const frame=window.requestAnimationFrame(()=>{void loadData(initial,true);});
+    return()=>window.cancelAnimationFrame(frame);
+  },[loadData]);
+  useFlowDataRefresh(()=>{loadedScopes.current.delete(tab);void loadData(tab,false,true);});
 
   async function submitRecord(type:Tab,record:Record<string,unknown>,mode:"create"|"update"){
     if(busy)return false;setSavingType(type);setMessage("Saving...");setLastSavedLabel("");
-    try{const response=await fetch("/api/erp/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target:"masters",body:{type,mode,record}})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Save failed");const label=type==="customer"?"Customer":type==="supplier"?"Supplier":"Project";const row=body.row||body.result?.row||{};const id=String(row.customerId||row.supplierId||row.projectId||"");setMessage(`${label} saved successfully${id?` · ${id}`:""}.`);setLastSavedLabel(label);notifyFlowDataChanged(type,id);await loadData(false);return true;}catch(error){setMessage(error instanceof Error?error.message:"Save failed");return false;}finally{setSavingType("");}}
+    try{const response=await fetch("/api/erp/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target:"masters",body:{type,mode,record}})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Save failed");const label=type==="customer"?"Customer":type==="supplier"?"Supplier":"Project";const row=body.row||body.result?.row||{};const id=String(row.customerId||row.supplierId||row.projectId||"");setMessage(`${label} saved successfully${id?` · ${id}`:""}.`);setLastSavedLabel(label);notifyFlowDataChanged(type,id);loadedScopes.current.delete(type);await loadData(type,false,true);return true;}catch(error){setMessage(error instanceof Error?error.message:"Save failed");return false;}finally{setSavingType("");}}
   async function submitCustomer(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;const record=Object.fromEntries(new FormData(form).entries());const mode=editingCustomer?"update":"create";if(editingCustomer)record.customerId=editingCustomer.customerId;const ok=await submitRecord("customer",record,mode);if(ok){setEditingCustomer(null);form.reset();}}
   async function submitSupplier(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;const record=Object.fromEntries(new FormData(form).entries());const mode=editingSupplier?"update":"create";if(editingSupplier)record.supplierId=editingSupplier.supplierId;const ok=await submitRecord("supplier",record,mode);if(ok){setEditingSupplier(null);form.reset();}}
   async function submitProject(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;const record=Object.fromEntries(new FormData(form).entries());const mode=editingProject?"update":"create";if(editingProject)record.projectId=editingProject.projectId;const ok=await submitRecord("project",record,mode);if(ok){setEditingProject(null);form.reset();}}
-  function switchTab(next:Tab){if(busy)return;setTab(next);setMessage("");setLastSavedLabel("");const params=new URLSearchParams(window.location.search);params.set("tab",next);window.history.replaceState(window.history.state,"",`${window.location.pathname}?${params.toString()}`);}
+  function switchTab(next:Tab){if(busy)return;setTab(next);setMessage("");setLastSavedLabel("");setLoading(!loadedScopes.current.has(next));const params=new URLSearchParams(window.location.search);params.set("tab",next);window.history.replaceState(window.history.state,"",`${window.location.pathname}?${params.toString()}`);if(!loadedScopes.current.has(next))window.requestAnimationFrame(()=>{void loadData(next,true);});}
 
   return <>
-    <h2>Business Masters</h2><p className="small">Customer, Supplier and Project IDs are system-generated and cannot be manually changed.</p>
+    <h2>Business Masters</h2><p className="small">UI loads immediately. Customer, Supplier and Project values are fetched only for the tab you open.</p>
     <FlowReturnPanel savedLabel={lastSavedLabel}/>
     <div className="tabs"><button disabled={busy} className={tab==="customer"?"tab active":"tab"} onClick={()=>switchTab("customer")}>Customers</button><button disabled={busy} className={tab==="supplier"?"tab active":"tab"} onClick={()=>switchTab("supplier")}>Suppliers</button><button disabled={busy} className={tab==="project"?"tab active":"tab"} onClick={()=>switchTab("project")}>Projects</button></div>
     {message&&<section className="panel"><strong>Status:</strong> {message}</section>}
+    {loading&&<section className="panel"><strong>Loading live {tab} data…</strong></section>}
 
     {tab==="customer"&&<><form key={editingCustomer?.customerId||"new-customer"} className="panel form-grid" onSubmit={submitCustomer}><h3 className="form-title">{editingCustomer?"Edit Customer":"New Customer"}</h3><label>Customer ID<input value={editingCustomer?.customerId||"Auto-generated on save"} readOnly disabled/></label><label>Customer Name<input name="customerName" required defaultValue={editingCustomer?.customerName||""} disabled={busy}/></label><label>Contact Person<input name="contactPerson" defaultValue={editingCustomer?.contactPerson||""} disabled={busy}/></label><label>Phone<input name="phone" defaultValue={editingCustomer?.phone||""} disabled={busy}/></label><label>Email<input name="email" type="email" defaultValue={editingCustomer?.email||""} disabled={busy}/></label><label>Tax ID<input name="taxId" defaultValue={editingCustomer?.taxId||""} disabled={busy}/></label><label>Credit Terms (days)<input name="creditTermsDays" type="number" min="0" defaultValue={editingCustomer?.creditTermsDays??0} disabled={busy}/></label><label>Credit Limit<input name="creditLimit" type="number" min="0" step="0.01" defaultValue={editingCustomer?.creditLimit??0} disabled={busy}/></label><label className="form-wide">Address<textarea name="address" rows={2} defaultValue={editingCustomer?.address||""} disabled={busy}/></label><div className="form-wide button-row"><button type="submit" disabled={busy}>{savingType==="customer"?"Saving...":editingCustomer?"Save Changes":"Save Customer"}</button>{editingCustomer&&<button type="button" className="secondary" disabled={busy} onClick={()=>setEditingCustomer(null)}>Cancel Edit</button>}</div></form><section className="panel table-wrap"><table className="data-table"><thead><tr><th>ID</th><th>Customer</th><th>Contact</th><th>Phone</th><th>Email</th><th>Terms</th><th>Limit</th><th>Action</th></tr></thead><tbody>{data.customers.map(row=><tr key={row.customerId}><td>{row.customerId}</td><td>{row.customerName}</td><td>{row.contactPerson||"—"}</td><td>{row.phone||"—"}</td><td>{row.email||"—"}</td><td>{row.creditTermsDays||0} days</td><td>{row.creditLimit||0}</td><td><button type="button" className="secondary" disabled={busy} onClick={()=>setEditingCustomer(row)}>Edit</button></td></tr>)}{!loading&&!data.customers.length&&<tr><td colSpan={8}>No customers found.</td></tr>}</tbody></table></section></>}
 
