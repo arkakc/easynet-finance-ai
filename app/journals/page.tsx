@@ -3,12 +3,23 @@ import { listTable } from "@/lib/backend/apps-script";
 
 export const dynamic = "force-dynamic";
 
-type Header = { journalId: string; postingDate: string; documentType: string; documentNumber: string; reference: string; projectId: string; status: string; approvedBy: string; postedAt: string };
+type Header = { journalId: string; postingDate: string; documentType: string; documentNumber: string; reference: string; projectId: string; status: string; approvedBy: string; postedAt: string; createdAt?: string };
 type Line = { journalLineId: string; journalId: string; lineNo: number | string; accountId: string; customerId: string; supplierId: string; projectId: string; debit: number | string; credit: number | string; description: string };
 type Account = { accountId: string; accountCode: string; accountName: string };
 
 const n = (value: unknown) => Number(value || 0);
 const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
+const createdValue = (row: Header) => {
+  const value = row.createdAt || row.postedAt || row.postingDate || "";
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+const createdLabel = (row: Header) => {
+  const value = row.createdAt || row.postedAt || "";
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? new Intl.DateTimeFormat("en-PG", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date) : String(value);
+};
 
 export default async function JournalsPage() {
   let headers: Header[] = [];
@@ -29,12 +40,12 @@ export default async function JournalsPage() {
   }
 
   const account = new Map(accounts.map((row) => [row.accountId, `${row.accountCode} — ${row.accountName}`]));
-  headers.sort((a, b) => String(b.postingDate).localeCompare(String(a.postingDate)));
+  headers.sort((a, b) => createdValue(b) - createdValue(a));
 
   return (
     <>
       <h2>Posted Journals</h2>
-      <p className="small">Read-only accounting ledger. Posted journals are not edited or deleted; corrections must use reversal and corrected entries.</p>
+      <p className="small">Read-only accounting ledger · newest created/posted journals first. Posted journals are not edited or deleted; corrections must use reversal and corrected entries.</p>
       {error && <section className="panel"><strong>Backend warning:</strong> {error}</section>}
 
       {headers.map((header) => {
@@ -44,7 +55,7 @@ export default async function JournalsPage() {
         return (
           <section className="panel" key={header.journalId}>
             <div className="journal-head">
-              <div><strong>{header.journalId}</strong><br/><span className="small">{formatAccountingDate(header.postingDate)} · {header.documentType} · {header.documentNumber}</span></div>
+              <div><strong>{header.journalId}</strong><br/><span className="small">Created {createdLabel(header)} · Posting {formatAccountingDate(header.postingDate)} · {header.documentType} · {header.documentNumber}</span></div>
               <div><strong>{header.status}</strong><br/><span className="small">Approved by {header.approvedBy || "—"}</span></div>
             </div>
             <p>{header.reference}</p>
