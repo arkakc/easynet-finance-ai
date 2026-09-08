@@ -4,6 +4,9 @@ import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
+import { postJournal } from "@/lib/accounting/posting";
+import { synchronizeSettlement } from "@/lib/accounting/advance-allocation";
+import { round2 } from "@/lib/accounting/inventory";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
   createQuote: "sales.write",
@@ -109,6 +112,55 @@ async function callLegacy(action: string, payload: Record<string, unknown>) {
   return body.result;
 }
 
+async function creditNoteRefundable(creditNoteId: string, currentPaymentId: string) {
+  const [creditNoteResult, journalResult, linesResult, paymentsResult] = await Promise.all([
+    findRecords<any>("Invoices", { invoiceId: creditNoteId }, 1),
+    findRecords<any>("JournalHeaders", { documentType: "SALES_CREDIT_NOTE", documentId: creditNoteId }, 20),
+    listTable<any>("JournalLines", 500, 0),
+    findRecords<any>("Payments", { sourceDocumentId: creditNoteId }, 500),
+  ]);
+  const creditNote = creditNoteResult.rows[0];
+  if (!creditNote || !String(creditNote.invoiceNumber || "").toUpperCase().startsWith("CN-") || String(creditNote.status || "").toUpperCase() !== "POSTED") {
+    throw new Error("Posted Sales Credit Note not found for customer refund");
+  }
+  const journalIds = new Set((journalResult.rows || []).filter((row: any) => String(row.status || "").toUpperCase() === "POSTED").map((row: any) => String(row.journalId || "")));
+  const customerCredit = round2((linesResult.rows || [])
+    .filter((line: any) => journalIds.has(String(line.journalId || "")) && String(line.accountId || "") === "ACC-2150")
+    .reduce((sum: number, line: any) => sum + Number(line.credit || 0) - Number(line.debit || 0), 0));
+  const priorRefunds = round2((paymentsResult.rows || [])
+    .filter((row: any) => String(row.paymentId || "") !== currentPaymentId
+      && String(row.partyType || "") === "Customer"
+      && String(row.paymentType || "").toUpperCase() === "PAY"
+      && String(row.status || "").toUpperCase() === "POSTED"
+      && Boolean(row.journalId))
+    .reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
+  return { creditNote, refundable: round2(Math.max(0, customerCredit - priorRefunds)) };
+}
+
+async function finalizeCustomerRefund(row: any, patch: { paymentDate: string; amount: number; paymentMethod: string; cashBankAccountId: string; reference: string }) {
+  const creditNoteId = String(row.sourceDocumentId || row.againstDocumentId || "").trim();
+  if (!creditNoteId || !String(row.reference || "").startsWith("CUSTOMER_REFUND|")) throw new Error("Customer PAY entries are allowed only through the controlled Sales Credit Note refund workflow");
+  const refundable = await creditNoteRefundable(creditNoteId, String(row.paymentId || ""));
+  if (String(refundable.creditNote.customerId || "") !== String(row.partyId || "")) throw new Error("Refund customer does not match Sales Credit Note customer");
+  if (patch.amount > refundable.refundable + 0.001) throw new Error(`Refund exceeds remaining refundable customer credit. Available K${refundable.refundable.toFixed(2)}`);
+
+  await updateRecord("Payments", "paymentId", row.paymentId, patch, "payment-final-save:customer-refund");
+  const journal = await postJournal({
+    postingDate: patch.paymentDate,
+    documentType: "CUSTOMER_REFUND",
+    documentId: row.paymentId,
+    documentNumber: String(row.paymentNumber || row.paymentId),
+    reference: patch.reference || `Customer refund against ${refundable.creditNote.invoiceNumber}`,
+    projectId: row.projectId || "",
+    lines: [
+      { accountId: "ACC-2150", debit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Refund customer credit / advance" },
+      { accountId: patch.cashBankAccountId, credit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Customer refund paid" },
+    ],
+  });
+  await updateRecord("Payments", "paymentId", row.paymentId, { status: "POSTED", journalId: journal.journalId }, "payment-final-save:customer-refund");
+  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, refund: true, creditNoteId };
+}
+
 async function finalizePayment(payload: Record<string, unknown>) {
   const paymentId = String(payload.paymentId || "").trim();
   if (!paymentId) throw new Error("Payment Entry is required");
@@ -135,7 +187,8 @@ async function finalizePayment(payload: Record<string, unknown>) {
   if (!patch.paymentMethod) throw new Error("Payment Method is required");
   if (!patch.cashBankAccountId) throw new Error("Cash / Bank Account is required");
 
-  if (String(row.paymentType || "").toUpperCase() === "PAY") {
+  const pay = String(row.paymentType || "").toUpperCase() === "PAY";
+  if (pay) {
     const funds = await cashBankAvailability(patch.cashBankAccountId);
     if (amount > funds.balance + 0.001) {
       throw new Error(`Insufficient funds in ${funds.label}. Available K${funds.balance.toFixed(2)}, payment K${amount.toFixed(2)}. Record funding/opening balance first or use a valid funded account.`);
@@ -145,10 +198,23 @@ async function finalizePayment(payload: Record<string, unknown>) {
     await cashBankAvailability(patch.cashBankAccountId);
   }
 
-  await updateRecord("Payments", "paymentId", paymentId, patch, "payment-final-save");
+  if (partyType === "Customer" && pay) {
+    return finalizeCustomerRefund(row, patch);
+  }
 
+  await updateRecord("Payments", "paymentId", paymentId, patch, "payment-final-save");
   const result = await callLegacy("post", { recordType: "payment", recordId: paymentId });
   const posted = (await findRecords<any>("Payments", { paymentId }, 1)).rows[0];
+
+  const againstDocumentId = String(posted?.againstDocumentId || row.againstDocumentId || "").trim();
+  if (againstDocumentId) {
+    if (partyType === "Customer" && String(row.paymentType || "").toUpperCase() === "RECEIVE") {
+      await synchronizeSettlement("Customer", againstDocumentId);
+    } else if (partyType === "Supplier" && String(row.paymentType || "").toUpperCase() === "PAY") {
+      await synchronizeSettlement("Supplier", againstDocumentId);
+    }
+  }
+
   return {
     recordId: paymentId,
     status: String(posted?.status || result?.status || "POSTED"),
