@@ -95,7 +95,7 @@ async function poToPartialBill(input: z.infer<typeof poSchema>) {
   const po = (await findRecords<any>("PurchaseOrders", { poId: input.poId }, 1)).rows[0];
   if (!po || String(po.poNumber || "").toUpperCase().startsWith("SUPQ-")) throw new Error("Purchase Order not found");
   const poStatus = String(po.status || "").toUpperCase();
-  const allowed = ["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"];
+  const allowed = ["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED", "CLOSED"];
   if (!allowed.includes(poStatus)) throw new Error("Purchase Order must be APPROVED before Supplier Invoice conversion");
 
   const existingBills = await findRecords<any>("SupplierBills", { poId: input.poId }, 500);
@@ -202,7 +202,7 @@ async function poToPartialBill(input: z.infer<typeof poSchema>) {
     billId,
     ...line,
   })), "conversion-ui");
-  if (!["PART_BILLED", "BILLED"].includes(poStatus)) await updateRecord("PurchaseOrders", "poId", input.poId, { status: "BILL_CREATED" }, "conversion-ui");
+  if (!["PART_BILLED", "BILLED", "CLOSED"].includes(poStatus)) await updateRecord("PurchaseOrders", "poId", input.poId, { status: "BILL_CREATED" }, "conversion-ui");
 
   return {
     ok: true,
