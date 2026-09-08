@@ -3,6 +3,41 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 
+function ensureOldestFirst(table: HTMLTableElement, idIndex: number) {
+  const tbody = table.tBodies.item(0);
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>(":scope > tr"));
+  const documentRows = rows.filter((row) => {
+    const cells = row.querySelectorAll<HTMLTableCellElement>("td");
+    return cells.length > idIndex && Boolean(cells[idIndex].querySelector<HTMLAnchorElement>('a[href^="/transactions/"]'));
+  });
+  if (documentRows.length < 2) {
+    const panel = table.closest(".panel");
+    const badge = panel?.querySelector<HTMLElement>(".auto-badge");
+    if (badge?.textContent?.includes("Newest first")) badge.textContent = badge.textContent.replace("Newest first", "Oldest first");
+    return;
+  }
+
+  const signature = documentRows
+    .map((row) => {
+      const cells = row.querySelectorAll<HTMLTableCellElement>("td");
+      return cells[idIndex].querySelector<HTMLAnchorElement>('a[href^="/transactions/"]')?.pathname || "";
+    })
+    .sort()
+    .join("|");
+
+  if (table.dataset.oldestFirstSignature !== signature) {
+    // The workspace renders newest-first internally. Reverse each freshly rendered
+    // document set once so the user-facing register remains chronological oldest-first.
+    documentRows.reverse().forEach((row) => tbody.appendChild(row));
+    table.dataset.oldestFirstSignature = signature;
+  }
+
+  const panel = table.closest(".panel");
+  const badge = panel?.querySelector<HTMLElement>(".auto-badge");
+  if (badge?.textContent?.includes("Newest first")) badge.textContent = badge.textContent.replace("Newest first", "Oldest first");
+}
+
 function enhanceDocumentLists() {
   const tables = Array.from(document.querySelectorAll<HTMLTableElement>("table.data-table"));
 
@@ -12,6 +47,8 @@ function enhanceDocumentLists() {
     const statusIndex = headers.findIndex((value) => value === "Status");
     const actionIndex = headers.findIndex((value) => value === "Action");
     if (idIndex < 0 || statusIndex < 0 || actionIndex < 0) continue;
+
+    ensureOldestFirst(table, idIndex);
 
     const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"));
     for (const row of rows) {
