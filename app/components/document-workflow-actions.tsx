@@ -11,6 +11,7 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const current = String(status || "DRAFT").toUpperCase();
+  const controlledCreditNote = recordType === "invoice" && String(recordId || "").toUpperCase().startsWith("CRN-");
 
   async function approve() {
     setBusy(true);
@@ -26,14 +27,14 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
               recordType,
               recordId,
               decision: "APPROVE",
-              note: "Document workflow",
+              note: controlledCreditNote ? "Controlled Sales Credit Note / Return" : "Document workflow",
             },
           },
         }),
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
-      setMessage("Document approved.");
+      setMessage(controlledCreditNote ? "Sales Credit Note / Return approved and posted." : "Document approved.");
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Approval failed");
@@ -47,9 +48,10 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
   return (
     <div className="no-print" style={{ marginTop: 16 }}>
       <div className="button-row">
-        {recordType === "invoice" && <Link prefetch={false} className="button-link secondary-link" href={`/transactions/invoice/${encodeURIComponent(recordId)}/edit`}>Edit Draft Sales Invoice</Link>}
+        {recordType === "invoice" && !controlledCreditNote && <Link prefetch={false} className="button-link secondary-link" href={`/transactions/invoice/${encodeURIComponent(recordId)}/edit`}>Edit Draft Sales Invoice</Link>}
+        {controlledCreditNote && <button type="button" disabled>Controlled Credit Note — Edit via Original Invoice Return Flow</button>}
         <button type="button" onClick={approve} disabled={busy}>
-          {busy ? "Approving…" : "Approve"}
+          {busy ? "Approving…" : controlledCreditNote ? "Approve Credit Note / Return" : "Approve"}
         </button>
       </div>
       {message && <div className="small" style={{ marginTop: 8 }}>{message}</div>}
