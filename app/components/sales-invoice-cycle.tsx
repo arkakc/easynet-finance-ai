@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Props={invoiceId:string;record:any};
+type Props={invoiceId:string;record?:any};
 type Payment={paymentId:string;paymentNumber?:string;paymentType?:string;partyType?:string;partyId?:string;projectId?:string;amount?:number|string;status?:string;journalId?:string;sourceDocumentId?:string;againstDocumentId?:string;reference?:string;createdAt?:string};
 type AllocationSummary={allocatedAmount:number;remainingAmount:number;allocations:Array<{milestone?:string;amount?:number|string}>};
 type CashBank={accountId:string;accountName:string;accountCode:string;balance:number};
@@ -16,19 +16,26 @@ function createdValue(row:any){const t=new Date(row.createdAt||"").getTime();ret
 
 export default function SalesInvoiceCycle({invoiceId,record}:Props){
   const router=useRouter();
-  const invoice=record;
-  const credit=isCreditNote(invoice);
-  const status=String(invoice?.status||"").toUpperCase();
-  const posted=["POSTED","PARTLY_PAID","PAID"].includes(status);
-  const outstanding=Number(invoice?.outstandingAmount??invoice?.totalAmount??0);
-  const sourceQuoteId=!credit?String(invoice?.sourceDocumentId||"").trim():"";
-
+  const[invoice,setInvoice]=useState<any|null>(record||null),[contextLoading,setContextLoading]=useState(!record);
   const[payments,setPayments]=useState<Payment[]>([]),[summaries,setSummaries]=useState<Record<string,AllocationSummary>>({}),[allocationAmounts,setAllocationAmounts]=useState<Record<string,string>>({});
   const[advancesLoaded,setAdvancesLoaded]=useState(false),[returnLoaded,setReturnLoaded]=useState(false),[refundLoaded,setRefundLoaded]=useState(false);
   const[returnData,setReturnData]=useState<any|null>(null),[returnQty,setReturnQty]=useState<Record<string,string>>({}),[returnReason,setReturnReason]=useState("");
   const[refundData,setRefundData]=useState<any|null>(null),[cashBank,setCashBank]=useState<CashBank[]>([]),[refundAmount,setRefundAmount]=useState(""),[refundMethod,setRefundMethod]=useState(""),[refundAccount,setRefundAccount]=useState(""),[refundReference,setRefundReference]=useState("");
   const[busy,setBusy]=useState(""),[message,setMessage]=useState("");
 
+  useEffect(()=>{
+    if(record){setInvoice(record);setContextLoading(false);return;}
+    let active=true;
+    setContextLoading(true);
+    void(async()=>{try{const response=await fetch(`/api/erp/sales-invoice-action-context?invoiceId=${encodeURIComponent(invoiceId)}`,{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Sales Invoice action context load failed");if(active)setInvoice(body.invoice);}catch(error){if(active)setMessage(error instanceof Error?error.message:"Sales Invoice action context load failed");}finally{if(active)setContextLoading(false);}})();
+    return()=>{active=false;};
+  },[invoiceId,record]);
+
+  const credit=isCreditNote(invoice);
+  const status=String(invoice?.status||"").toUpperCase();
+  const posted=["POSTED","PARTLY_PAID","PAID"].includes(status);
+  const outstanding=Number(invoice?.outstandingAmount??invoice?.totalAmount??0);
+  const sourceQuoteId=!credit?String(invoice?.sourceDocumentId||"").trim():"";
   const postedAdvances=payments.filter((row)=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));
   const totalAdvance=postedAdvances.reduce((sum,row)=>sum+Number(row.amount||0),0);
   const totalAllocated=Object.values(summaries).reduce((sum,row)=>sum+Number(row.allocatedAmount||0),0);
@@ -36,7 +43,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   const thisInvoiceAdvance=Object.values(summaries).reduce((sum,row)=>sum+(row.allocations||[]).filter((a)=>String(a.milestone||"")===invoiceId).reduce((s,a)=>s+Number(a.amount||0),0),0);
 
   async function loadAdvances(){
-    if(!sourceQuoteId||busy)return;
+    if(!invoice||!sourceQuoteId||busy)return;
     setBusy("advances");setMessage("Loading customer advances for this Sales Quotation…");
     try{
       const response=await fetch(`/api/erp/source-payments?sourceDocumentId=${encodeURIComponent(sourceQuoteId)}&partyType=Customer&partyId=${encodeURIComponent(String(invoice.customerId||""))}`,{cache:"no-store"});
@@ -55,7 +62,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   }
 
   async function loadReturn(){
-    if(!posted||credit||busy)return;
+    if(!invoice||!posted||credit||busy)return;
     setBusy("return-load");setMessage("Loading returnable quantities…");
     try{const response=await fetch(`/api/erp/sales-return?invoiceId=${encodeURIComponent(invoiceId)}`,{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Sales Return data load failed");setReturnData(body);setReturnQty(Object.fromEntries((body.lines||[]).map((line:any)=>[line.itemId,"0"])));setReturnLoaded(true);setMessage("");}
     catch(error){setMessage(error instanceof Error?error.message:"Sales Return data load failed");}
@@ -63,7 +70,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   }
 
   async function loadRefund(){
-    if(!credit||status!=="POSTED"||busy)return;
+    if(!invoice||!credit||status!=="POSTED"||busy)return;
     setBusy("refund-load");setMessage("Checking refundable customer credit…");
     try{
       const[refundR,refsR]=await Promise.all([fetch(`/api/erp/customer-refund?creditNoteId=${encodeURIComponent(invoiceId)}`,{cache:"no-store"}),fetch("/api/erp/reference-options",{cache:"no-store"})]);
@@ -76,11 +83,11 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   }
 
   async function allocate(payment:Payment){
-    if(busy)return;const summary=summaries[payment.paymentId];const amount=Number(allocationAmounts[payment.paymentId]||0);
+    if(!invoice||busy)return;const summary=summaries[payment.paymentId];const amount=Number(allocationAmounts[payment.paymentId]||0);
     if(!(amount>0)){setMessage("Allocation amount must be greater than zero.");return;}
     if(amount>Number(summary?.remainingAmount||0)+0.001||amount>outstanding+0.001){setMessage("Allocation exceeds available advance or invoice outstanding.");return;}
     setBusy(`alloc:${payment.paymentId}`);setMessage("Adjusting Customer Advance against Sales Invoice…");
-    try{const response=await fetch("/api/erp/advance-allocation",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paymentId:payment.paymentId,partyType:"Customer",againstDocumentType:"Sales Invoice",againstDocumentId:invoiceId,amount,allocationDate:localDate()})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Customer advance allocation failed");setMessage(`Advance ${payment.paymentNumber||payment.paymentId} allocated ${money(body.result.allocatedAmount)}. Remaining advance ${money(body.result.remainingAdvance)}; invoice outstanding ${money(body.result.documentOutstanding)}.`);await loadAdvances();router.refresh();}
+    try{const response=await fetch("/api/erp/advance-allocation",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paymentId:payment.paymentId,partyType:"Customer",againstDocumentType:"Sales Invoice",againstDocumentId:invoiceId,amount,allocationDate:localDate()})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Customer advance allocation failed");setMessage(`Advance ${payment.paymentNumber||payment.paymentId} allocated ${money(body.result.allocatedAmount)}. Remaining advance ${money(body.result.remainingAdvance)}; invoice outstanding ${money(body.result.documentOutstanding)}.`);setBusy("");await loadAdvances();router.refresh();return;}
     catch(error){setMessage(error instanceof Error?error.message:"Advance allocation failed");}finally{setBusy("");}
   }
 
@@ -101,6 +108,9 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
     try{const response=await fetch("/api/erp/customer-refund",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({creditNoteId:invoiceId,paymentDate:localDate(),amount,paymentMethod:refundMethod,cashBankAccountId:refundAccount,reference:refundReference})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Customer refund draft failed");router.push(`/transactions/payment/${encodeURIComponent(body.payment.paymentId)}?returnModule=sales&returnTab=salesInvoice&returnMode=list`);router.refresh();}
     catch(error){setMessage(error instanceof Error?error.message:"Customer refund draft failed");}finally{setBusy("");}
   }
+
+  if(contextLoading)return <section className="conversion-box no-print"><strong>Sales Invoice Actions</strong><p className="small">Loading this Sales Invoice only…</p></section>;
+  if(!invoice)return <section className="conversion-box no-print"><strong>Sales Invoice Actions</strong>{message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}</section>;
 
   return <section className="conversion-box no-print">
     <div className="form-title-row"><div><strong>{credit?"Sales Credit Note / Return Actions":"Sales Invoice Additional Actions"}</strong><p className="small">Nothing below is fetched automatically. Load only the advance, return or refund workflow you need.</p></div><span className="auto-badge">{status||"DRAFT"}</span></div>
