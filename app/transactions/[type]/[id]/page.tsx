@@ -11,6 +11,8 @@ import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
+import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
+import SalesInvoiceCycle from "@/app/components/sales-invoice-cycle";
 
 const CONFIG: Record<string,{table:string;idField:string;numberField:string;lineTable?:string;lineIdField?:string;permission:Permission;title:string}>={
   quote:{table:"Quotes",idField:"quoteId",numberField:"quoteNumber",lineTable:"QuoteLines",lineIdField:"quoteId",permission:"sales.read",title:"Sales Quotation"},
@@ -21,13 +23,13 @@ const CONFIG: Record<string,{table:string;idField:string;numberField:string;line
   expense:{table:"Expenses",idField:"expenseId",numberField:"expenseNumber",permission:"purchase.read",title:"Expense"},
 };
 
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account"};
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
 const VALID_MODES=new Set(["menu","create","list"]);
 const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
-const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED"]);
+const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED","CLOSED_PARTIAL"]);
 
 function display(key:string,value:unknown){if(moneyFields.has(key))return `K${Number(value||0).toFixed(2)}`;return String(value??"")}
 function href(type:string,id:string){return `/transactions/${type==="supplierQuote"?"purchaseOrder":type}/${encodeURIComponent(id)}`;}
@@ -40,38 +42,52 @@ function named(id: unknown, map: Map<string,string>) {
   return name&&name!==key?`${name} (${key})`:key;
 }
 
-function poReferenceFromPayment(record:any){
+function sourceMarkerFromPayment(record:any,prefix:"PO"|"SQ"){
   const reference=String(record.reference||"");
-  const match=reference.match(/^PO:([^|]+)\|/);
+  const match=reference.match(new RegExp(`^${prefix}:([^|]+)\\|`));
   return match?.[1]||"";
 }
 
 function previousLink(type:string,record:any):RefLink|null{
-  if(type==="invoice"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"quote",id,number:id};}
-  if(type==="supplierBill"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"purchaseOrder",id,number:id};}
-  if(type==="purchaseOrder"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"supplierQuote",id,number:id};}
+  if(type==="invoice"&&record.sourceDocumentId){
+    const id=String(record.sourceDocumentId);
+    const credit=String(record.invoiceNumber||"").toUpperCase().startsWith("CN-");
+    return credit
+      ?{label:"Original Sales Invoice",type:"invoice",id,number:id}
+      :{label:"Source Sales Quotation",type:"quote",id,number:id};
+  }
+  if(type==="supplierBill"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Source Purchase Order",type:"purchaseOrder",id,number:id};}
+  if(type==="purchaseOrder"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Source Supplier Quotation",type:"supplierQuote",id,number:id};}
   if(type==="payment"&&record.againstDocumentId){
     const id=String(record.againstDocumentId);
     const against=String(record.againstDocumentType||"").toLowerCase();
-    if(against.includes("sales invoice")||String(record.partyType||"")==="Customer")return{label:"Previous Document",type:"invoice",id,number:id};
-    if(against.includes("supplier bill")||against.includes("supplier invoice"))return{label:"Previous Document",type:"supplierBill",id,number:id};
+    if(against.includes("sales invoice")||against.includes("sales credit note")||String(record.partyType||"")==="Customer")return{label:"Against Sales Document",type:"invoice",id,number:id};
+    if(against.includes("supplier bill")||against.includes("supplier invoice"))return{label:"Against Supplier Invoice",type:"supplierBill",id,number:id};
     return{label:"Previous Document",type:"purchaseOrder",id,number:id};
   }
   if(type==="payment"){
-    const poId=poReferenceFromPayment(record);
-    if(poId)return{label:"Advance Against Purchase Order",type:"purchaseOrder",id:poId,number:poId};
+    const sourceId=String(record.sourceDocumentId||"").trim();
+    if(String(record.partyType||"")==="Supplier"){
+      const poId=sourceMarkerFromPayment(record,"PO")||sourceId;
+      if(poId)return{label:"Advance Against Purchase Order",type:"purchaseOrder",id:poId,number:poId};
+    }
+    if(String(record.partyType||"")==="Customer"){
+      const quoteId=sourceMarkerFromPayment(record,"SQ")||sourceId;
+      if(quoteId)return{label:"Advance Against Sales Quotation",type:"quote",id:quoteId,number:quoteId};
+    }
   }
   return null;
 }
 
 async function resolveConverted(type:string,id:string,number:string):Promise<RefLink|null>{
   if(type==="quote"){
-    const r=(await findRecords<any>("Invoices",{sourceDocumentId:id},1)).rows[0];
-    if(r)return{label:"Converted To",type:"invoice",id:r.invoiceId,number:r.invoiceNumber||r.invoiceId};
+    const rows=(await findRecords<any>("Invoices",{sourceDocumentId:id},20)).rows;
+    const r=rows.find((x:any)=>!String(x.invoiceNumber||"").toUpperCase().startsWith("CN-"));
+    if(r)return{label:"Converted / Fulfilled By",type:"invoice",id:r.invoiceId,number:r.invoiceNumber||r.invoiceId};
   }
   if(type==="invoice"){
     const r=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];
-    if(r)return{label:"Converted To",type:"payment",id:r.paymentId,number:r.paymentNumber||r.paymentId};
+    if(r)return{label:"Payment / Receipt",type:"payment",id:r.paymentId,number:r.paymentNumber||r.paymentId};
   }
   if(type==="purchaseOrder"&&number.startsWith("SUPQ-")){
     const rows=(await findRecords<any>("PurchaseOrders",{sourceDocumentId:id},10)).rows;
@@ -135,17 +151,19 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   const lines=lineResult.rows||[];
   const number=String(record[config.numberField]||id);
   const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
+  const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
   const itemMap=new Map((itemResult.rows||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item]));
   const rowStatus=String(record.status||"DRAFT").toUpperCase();
   let title=config.title;
   if(isSupplierQuotation)title="Supplier Quotation";
+  if(isCreditNote)title="Sales Credit Note / Return";
   if(type==="payment"){
-    if(String(record.partyType)==="Customer")title="Sales Payment Entry / Receipt";
+    if(String(record.partyType)==="Customer")title=String(record.paymentType||"").toUpperCase()==="PAY"?"Customer Refund Payment":"Sales Payment Entry / Receipt";
     else if(String(record.partyType)==="Supplier")title="Purchase Payment Entry / Receipt";
   }
 
   const previous=previousLink(type,record);
-  const shouldResolveConverted=["CONVERTED","BILL_CREATED","BILLED","PAID","CLOSED"].includes(rowStatus)||isSupplierQuotation;
+  const shouldResolveConverted=["CONVERTED","PART_INVOICED","BILL_CREATED","BILLED","PAID","CLOSED","CLOSED_PARTIAL"].includes(rowStatus)||isSupplierQuotation;
   const converted=shouldResolveConverted?await resolveConverted(type,id,number):null;
 
   const query=await searchParams;
@@ -171,13 +189,13 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   };
 
   const editType=type==="invoice"?"invoice":type;
-  const canEdit=rowStatus==="DRAFT"&&!String(record.journalId||"").trim();
+  const canEdit=rowStatus==="DRAFT"&&!String(record.journalId||"").trim()&&!isCreditNote;
   const realPo=type==="purchaseOrder"&&!isSupplierQuotation;
   const realApprovedPo=realPo&&APPROVED_PO_LIFECYCLE.has(rowStatus);
   const supplierName=String(supplierMap.get(String(record.supplierId||""))||record.supplierId||"");
   const projectName=String(projectMap.get(String(record.projectId||""))||record.projectId||"");
   const supplierBillPoId=type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
-  const paymentPoId=type==="payment"&&String(record.partyType||"")==="Supplier"?poReferenceFromPayment(record):"";
+  const paymentPoId=type==="payment"&&String(record.partyType||"")==="Supplier"?(sourceMarkerFromPayment(record,"PO")||String(record.sourceDocumentId||"")):"";
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
@@ -223,8 +241,10 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     </section>
     <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
     {type==="payment"&&<PaymentFinalSave record={record}/>}
+    {type==="quote"&&<SalesQuoteCycle quoteId={id}/>} 
+    {type==="invoice"&&<SalesInvoiceCycle invoiceId={id}/>} 
     {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<SupplierQuoteItemReadiness supplierQuoteId={id}/>} 
-    {!isSupplierQuotation&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
+    {!isSupplierQuotation&&type!=="quote"&&type!=="invoice"&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
     {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={Number(record.totalAmount||0)}/>} 
     {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
     {realPo&&<PoPartialSupplyClose poId={id} poNumber={number}/>} 
