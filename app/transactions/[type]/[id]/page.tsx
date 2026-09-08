@@ -13,6 +13,7 @@ import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
 import SalesInvoiceCycle from "@/app/components/sales-invoice-cycle";
+import LazyDocumentSection from "@/app/components/lazy-document-section";
 
 const CONFIG: Record<string,{table:string;idField:string;numberField:string;lineTable?:string;lineIdField?:string;permission:Permission;title:string}>={
   quote:{table:"Quotes",idField:"quoteId",numberField:"quoteNumber",lineTable:"QuoteLines",lineIdField:"quoteId",permission:"sales.read",title:"Sales Quotation"},
@@ -30,6 +31,7 @@ const VALID_TABS=new Set(["salesQuote","salesInvoice","salesPayment","supplierQu
 const VALID_MODES=new Set(["menu","create","list"]);
 const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
 const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED","CLOSED_PARTIAL"]);
+const QUOTE_ACTION_LIFECYCLE=new Set(["APPROVED","PART_INVOICED","CONVERTED","CLOSED_PARTIAL"]);
 
 function display(key:string,value:unknown){if(moneyFields.has(key))return `K${Number(value||0).toFixed(2)}`;return String(value??"")}
 function href(type:string,id:string){return `/transactions/${type==="supplierQuote"?"purchaseOrder":type}/${encodeURIComponent(id)}`;}
@@ -79,34 +81,6 @@ function previousLink(type:string,record:any):RefLink|null{
   return null;
 }
 
-async function resolveConverted(type:string,id:string,number:string):Promise<RefLink|null>{
-  if(type==="quote"){
-    const rows=(await findRecords<any>("Invoices",{sourceDocumentId:id},20)).rows;
-    const r=rows.find((x:any)=>!String(x.invoiceNumber||"").toUpperCase().startsWith("CN-"));
-    if(r)return{label:"Converted / Fulfilled By",type:"invoice",id:r.invoiceId,number:r.invoiceNumber||r.invoiceId};
-  }
-  if(type==="invoice"){
-    const r=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];
-    if(r)return{label:"Payment / Receipt",type:"payment",id:r.paymentId,number:r.paymentNumber||r.paymentId};
-  }
-  if(type==="purchaseOrder"&&number.startsWith("SUPQ-")){
-    const rows=(await findRecords<any>("PurchaseOrders",{sourceDocumentId:id},10)).rows;
-    const r=rows.find((x:any)=>!String(x.poNumber||"").startsWith("SUPQ-"));
-    if(r)return{label:"Converted To",type:"purchaseOrder",id:r.poId,number:r.poNumber||r.poId};
-  }
-  if(type==="purchaseOrder"){
-    const bill=(await findRecords<any>("SupplierBills",{sourceDocumentId:id},1)).rows[0];
-    if(bill)return{label:"Converted To",type:"supplierBill",id:bill.billId,number:bill.billNumber||bill.billId};
-    const pay=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];
-    if(pay)return{label:"Converted To",type:"payment",id:pay.paymentId,number:pay.paymentNumber||pay.paymentId};
-  }
-  if(type==="supplierBill"){
-    const pay=(await findRecords<any>("Payments",{againstDocumentId:id},1)).rows[0];
-    if(pay)return{label:"Converted To",type:"payment",id:pay.paymentId,number:pay.paymentNumber||pay.paymentId};
-  }
-  return null;
-}
-
 function inferredSection(type:string,number:string,record:any){
   if(type==="quote")return{module:"sales",tab:"salesQuote"};
   if(type==="invoice")return{module:"sales",tab:"salesInvoice"};
@@ -125,14 +99,9 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   if(!config)notFound();
   await requirePermission(config.permission);
 
-  const [result,lineResult,itemResult,customerResult,supplierResult,projectResult,accountResult]=await Promise.all([
+  const [result,lineResult]=await Promise.all([
     findRecords<any>(config.table,{[config.idField]:id},1),
     config.lineTable&&config.lineIdField?findRecords<any>(config.lineTable,{[config.lineIdField]:id},500):Promise.resolve({rows:[] as any[]}),
-    config.lineTable?listTable<any>("Items",500,0):Promise.resolve({rows:[] as any[]}),
-    listTable<any>("Customers",500,0),
-    listTable<any>("Suppliers",500,0),
-    listTable<any>("Projects",500,0),
-    listTable<any>("Accounts",500,0),
   ]);
   const record=result.rows[0];
   if(!record)notFound();
@@ -142,6 +111,18 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     else if(String(record.partyType)==="Supplier")await requirePermission("purchase.read");
     else await requirePermission("accounts.read");
   }
+
+  const needsCustomers=type==="quote"||type==="invoice"||(type==="payment"&&String(record.partyType)==="Customer");
+  const needsSuppliers=type==="purchaseOrder"||type==="supplierBill"||type==="expense"||(type==="payment"&&String(record.partyType)==="Supplier");
+  const needsProjects=Boolean(String(record.projectId||"").trim());
+  const needsAccounts=Boolean(String(record.cashBankAccountId||record.expenseAccountId||"").trim());
+  const [itemResult,customerResult,supplierResult,projectResult,accountResult]=await Promise.all([
+    config.lineTable?listTable<any>("Items",500,0):Promise.resolve({rows:[] as any[]}),
+    needsCustomers?listTable<any>("Customers",500,0):Promise.resolve({rows:[] as any[]}),
+    needsSuppliers?listTable<any>("Suppliers",500,0):Promise.resolve({rows:[] as any[]}),
+    needsProjects?listTable<any>("Projects",500,0):Promise.resolve({rows:[] as any[]}),
+    needsAccounts?listTable<any>("Accounts",500,0):Promise.resolve({rows:[] as any[]}),
+  ]);
 
   const customerMap=new Map((customerResult.rows||[]).map((row:any)=>[String(row.customerId||""),String(row.customerName||row.customerId||"")]));
   const supplierMap=new Map((supplierResult.rows||[]).map((row:any)=>[String(row.supplierId||""),String(row.supplierName||row.supplierId||"")]));
@@ -163,9 +144,6 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
   }
 
   const previous=previousLink(type,record);
-  const shouldResolveConverted=["CONVERTED","PART_INVOICED","BILL_CREATED","BILLED","PAID","CLOSED","CLOSED_PARTIAL"].includes(rowStatus)||isSupplierQuotation;
-  const converted=shouldResolveConverted?await resolveConverted(type,id,number):null;
-
   const query=await searchParams;
   const inferred=inferredSection(type,number,record);
   const requestedModule=Array.isArray(query.returnModule)?query.returnModule[0]:query.returnModule;
@@ -210,11 +188,10 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
         <div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div>
         <div className={`status-pill status-${String(record.status||"draft").toLowerCase()}`}>{record.status||"DRAFT"}</div>
       </header>
-      {(previous||converted)&&<div className="document-meta" style={{marginBottom:20}}>
-        {previous&&<div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
-        {converted&&<div><span>{converted.label}</span><strong><Link prefetch={false} href={href(converted.type,converted.id)}>{converted.number}</Link></strong></div>}
+      {previous&&<div className="document-meta" style={{marginBottom:20}}>
+        <div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>
       </div>}
-      <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>
+      <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>
       {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{
         const itemId=String(line.itemId||"");
         const item=itemId?itemMap.get(itemId):null;
@@ -239,17 +216,58 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
       })}</tbody></table></div>}
       <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
     </section>
+
     <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
-    {type==="payment"&&<PaymentFinalSave record={record}/>}
-    {type==="quote"&&<SalesQuoteCycle quoteId={id}/>} 
-    {type==="invoice"&&<SalesInvoiceCycle invoiceId={id}/>} 
-    {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<SupplierQuoteItemReadiness supplierQuoteId={id}/>} 
-    {!isSupplierQuotation&&type!=="quote"&&type!=="invoice"&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
-    {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={Number(record.totalAmount||0)}/>} 
-    {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
-    {realPo&&<PoPartialSupplyClose poId={id} poNumber={number}/>} 
-    {type==="supplierBill"&&supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={Number(record.totalAmount||0)} billOutstanding={Number(record.outstandingAmount??record.totalAmount??0)}/>} 
-    {type==="supplierBill"&&supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
-    {type==="payment"&&paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>} 
+
+    {type==="quote"&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection
+      title="Sales Quotation Fulfilment"
+      description="Stock readiness, linked invoices, backorders, procurement and customer advances are loaded only when you request them."
+      buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Invoice":"Open Sales Fulfilment Actions"}
+    ><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
+
+    {type==="invoice"&&<LazyDocumentSection
+      title={isCreditNote?"Credit Note / Refund Actions":"Sales Invoice Settlement Actions"}
+      description="Linked receipts, advances, returns, credit notes and refunds are loaded on demand."
+      buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Payment / Return Actions"}
+    ><SalesInvoiceCycle invoiceId={id}/></LazyDocumentSection>}
+
+    {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<LazyDocumentSection
+      title="Supplier Quotation Conversion"
+      description="Item readiness and linked Purchase Order data are loaded only when needed."
+      buttonLabel="Prepare Items / Convert to Purchase Order"
+    ><SupplierQuoteItemReadiness supplierQuoteId={id}/></LazyDocumentSection>}
+
+    {realPo&&<LazyDocumentSection
+      title="Purchase Order Follow-up"
+      description="Linked advances, receipts, partial-close controls and downstream document data are loaded only when requested."
+      buttonLabel="Open PO Follow-up Actions"
+    >
+      {String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={Number(record.totalAmount||0)}/>} 
+      {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
+      <PoPartialSupplyClose poId={id} poNumber={number}/>
+      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+    </LazyDocumentSection>}
+
+    {type==="supplierBill"&&<LazyDocumentSection
+      title="Supplier Invoice Settlement"
+      description="Advance chain, allocations and downstream payment data are loaded on demand."
+      buttonLabel="Open Supplier Invoice Settlement Actions"
+    >
+      {supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={Number(record.totalAmount||0)} billOutstanding={Number(record.outstandingAmount??record.totalAmount??0)}/>} 
+      {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
+      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+    </LazyDocumentSection>}
+
+    {type==="payment"&&<LazyDocumentSection
+      title="Payment / Receipt Finalization"
+      description="Settlement validation, journal finalization and linked advance history are loaded only when requested."
+      buttonLabel="Open Payment / Receipt Actions"
+    >
+      <PaymentFinalSave record={record}/>
+      {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>} 
+      <DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>
+    </LazyDocumentSection>}
+
+    {type==="expense"&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
   </div>;
 }
