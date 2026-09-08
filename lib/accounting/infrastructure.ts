@@ -1,4 +1,4 @@
-import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords } from "@/lib/backend/apps-script";
 
 const REQUIRED_ACCOUNTS = [
   { accountId: "ACC-2190", accountCode: "2190", accountName: "Stock Received But Not Billed / GRNI", accountType: "Liability", parentAccount: "ACC-2100", active: true },
@@ -11,7 +11,7 @@ const REQUIRED_ACCOUNTS = [
 const REQUIRED_SETTINGS = [
   { key: "perpetual_inventory", value: "true", notes: "Perpetual inventory GL integration enabled." },
   { key: "purchase_price_variance_tolerance_pct", value: "5", notes: "Supplier invoice stock price variance above this percentage is blocked for review." },
-  { key: "deferred_revenue_policy_json", value: JSON.stringify({ "ACC-4700": 12, "ACC-4400": 12 }), notes: "Revenue account to monthly recognition-period mapping. Item Master deferred months can override its revenue-account policy." },
+  { key: "deferred_revenue_policy_json", value: JSON.stringify({ "ACC-4700": 12, "ACC-4400": 12 }), notes: "Default revenue-account to monthly recognition-period mapping. Item Master deferred months override this default per invoice line." },
   { key: "inventory_valuation_method", value: "MOVING_AVERAGE", notes: "Inventory valuation method used for perpetual inventory and COGS." },
   { key: "inventory_nrv_policy", value: "LOWER_OF_COST_AND_NRV", notes: "IAS 2 style lower-of-cost-and-NRV control." },
 ] as const;
@@ -60,25 +60,5 @@ export async function deferredRevenuePolicy() {
   } catch {
     normalized = { "ACC-4700": 12, "ACC-4400": 12 };
   }
-
-  // Item Master may set a more specific period. The current accounting model
-  // posts deferred revenue by revenue account, so items sharing one revenue
-  // account must use the same custom period. This keeps posting deterministic
-  // and avoids one invoice line silently using a different recognition policy.
-  const items = await listTable<any>("Items", 500, 0);
-  const itemPolicy = new Map<string, number>();
-  for (const item of items.rows) {
-    if (String(item.itemType || "").toUpperCase() === "STOCK") continue;
-    const periods = Math.trunc(Number(item.deferredRevenueMonths || 0));
-    if (!(periods > 1 && periods <= 120)) continue;
-    const accountId = String(item.revenueAccount || "").trim();
-    if (!accountId) continue;
-    const existing = itemPolicy.get(accountId);
-    if (existing && existing !== periods) {
-      throw new Error(`Deferred revenue policy conflict on ${accountId}: Item Master contains both ${existing} and ${periods} month schedules. Use separate revenue accounts or one common period.`);
-    }
-    itemPolicy.set(accountId, periods);
-  }
-  for (const [accountId, periods] of itemPolicy.entries()) normalized[accountId] = periods;
   return normalized;
 }
