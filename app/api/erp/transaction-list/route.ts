@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission, type Permission } from "@/lib/auth";
+import { hasPermission, requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 
 type Scope =
@@ -15,19 +15,11 @@ type Scope =
   | "purchasePayment"
   | "expense";
 
-const PERMISSION: Record<Scope, Permission> = {
-  salesModule: "sales.read",
-  purchaseModule: "purchase.read",
-  expenseModule: "purchase.read",
-  salesQuote: "sales.read",
-  salesInvoice: "sales.read",
-  salesPayment: "sales.read",
-  supplierQuote: "purchase.read",
-  purchaseOrder: "purchase.read",
-  supplierInvoice: "purchase.read",
-  purchasePayment: "purchase.read",
-  expense: "purchase.read",
-};
+const VALID_SCOPES = new Set<Scope>([
+  "salesModule", "purchaseModule", "expenseModule",
+  "salesQuote", "salesInvoice", "salesPayment",
+  "supplierQuote", "purchaseOrder", "supplierInvoice", "purchasePayment", "expense",
+]);
 
 function newest(rows: any[]) {
   return [...rows].sort((a, b) => {
@@ -51,18 +43,25 @@ function emptyEnvelope(scope: Scope) {
   };
 }
 
+function forbidden() {
+  return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+}
+
 export async function GET(request: NextRequest) {
   try {
     const scope = String(request.nextUrl.searchParams.get("scope") || "") as Scope;
-    const permission = PERMISSION[scope];
-    if (!permission) return NextResponse.json({ ok: false, error: "Invalid transaction scope" }, { status: 400 });
-    await requirePermission(permission);
+    if (!VALID_SCOPES.has(scope)) return NextResponse.json({ ok: false, error: "Invalid transaction scope" }, { status: 400 });
+
+    const user = await requirePermission("dashboard.read");
+    const canSales = hasPermission(user, "sales.read");
+    const canPurchase = hasPermission(user, "purchase.read");
+    const canAccounts = hasPermission(user, "accounts.read");
 
     if (scope === "salesModule") {
       const [quotes, invoices, payments] = await Promise.all([
-        listTable<any>("Quotes", 500, 0),
-        listTable<any>("Invoices", 500, 0),
-        listTable<any>("Payments", 500, 0),
+        canSales ? listTable<any>("Quotes", 500, 0) : Promise.resolve({ rows: [] as any[] }),
+        canSales ? listTable<any>("Invoices", 500, 0) : Promise.resolve({ rows: [] as any[] }),
+        (canSales || canAccounts) ? listTable<any>("Payments", 500, 0) : Promise.resolve({ rows: [] as any[] }),
       ]);
       return NextResponse.json({
         ...emptyEnvelope(scope),
@@ -74,9 +73,9 @@ export async function GET(request: NextRequest) {
 
     if (scope === "purchaseModule") {
       const [orders, bills, payments] = await Promise.all([
-        listTable<any>("PurchaseOrders", 500, 0),
-        listTable<any>("SupplierBills", 500, 0),
-        listTable<any>("Payments", 500, 0),
+        canPurchase ? listTable<any>("PurchaseOrders", 500, 0) : Promise.resolve({ rows: [] as any[] }),
+        canPurchase ? listTable<any>("SupplierBills", 500, 0) : Promise.resolve({ rows: [] as any[] }),
+        (canPurchase || canAccounts) ? listTable<any>("Payments", 500, 0) : Promise.resolve({ rows: [] as any[] }),
       ]);
       const purchaseOrders = orders.rows || [];
       return NextResponse.json({
@@ -89,9 +88,15 @@ export async function GET(request: NextRequest) {
     }
 
     if (scope === "expenseModule") {
+      if (!canPurchase) return NextResponse.json(emptyEnvelope(scope));
       const expenses = await listTable<any>("Expenses", 500, 0);
       return NextResponse.json({ ...emptyEnvelope(scope), expenses: newest(expenses.rows || []) });
     }
+
+    if ((scope === "salesQuote" || scope === "salesInvoice") && !canSales) return forbidden();
+    if ((scope === "supplierQuote" || scope === "purchaseOrder" || scope === "supplierInvoice" || scope === "expense") && !canPurchase) return forbidden();
+    if (scope === "salesPayment" && !canSales && !canAccounts) return forbidden();
+    if (scope === "purchasePayment" && !canPurchase && !canAccounts) return forbidden();
 
     if (scope === "salesQuote") {
       const rows = await listTable<any>("Quotes", 500, 0);
