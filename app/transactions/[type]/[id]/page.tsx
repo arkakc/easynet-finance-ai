@@ -7,6 +7,8 @@ import DocumentConversionActions from "@/app/components/document-conversion-acti
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
 import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-readiness";
+import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
+import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 
 const CONFIG: Record<string,{table:string;idField:string;numberField:string;lineTable?:string;lineIdField?:string;permission:Permission;title:string}>={
   quote:{table:"Quotes",idField:"quoteId",numberField:"quoteNumber",lineTable:"QuoteLines",lineIdField:"quoteId",permission:"sales.read",title:"Sales Quotation"},
@@ -23,6 +25,7 @@ const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
 const VALID_MODES=new Set(["menu","create","list"]);
 const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
+const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED"]);
 
 function display(key:string,value:unknown){if(moneyFields.has(key))return `K${Number(value||0).toFixed(2)}`;return String(value??"")}
 function href(type:string,id:string){return `/transactions/${type==="supplierQuote"?"purchaseOrder":type}/${encodeURIComponent(id)}`;}
@@ -35,6 +38,12 @@ function named(id: unknown, map: Map<string,string>) {
   return name&&name!==key?`${name} (${key})`:key;
 }
 
+function poReferenceFromPayment(record:any){
+  const reference=String(record.reference||"");
+  const match=reference.match(/^PO:([^|]+)\|/);
+  return match?.[1]||"";
+}
+
 function previousLink(type:string,record:any):RefLink|null{
   if(type==="invoice"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"quote",id,number:id};}
   if(type==="supplierBill"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Previous Document",type:"purchaseOrder",id,number:id};}
@@ -45,6 +54,10 @@ function previousLink(type:string,record:any):RefLink|null{
     if(against.includes("sales invoice")||String(record.partyType||"")==="Customer")return{label:"Previous Document",type:"invoice",id,number:id};
     if(against.includes("supplier bill")||against.includes("supplier invoice"))return{label:"Previous Document",type:"supplierBill",id,number:id};
     return{label:"Previous Document",type:"purchaseOrder",id,number:id};
+  }
+  if(type==="payment"){
+    const poId=poReferenceFromPayment(record);
+    if(poId)return{label:"Advance Against Purchase Order",type:"purchaseOrder",id:poId,number:poId};
   }
   return null;
 }
@@ -157,6 +170,9 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
 
   const editType=type==="invoice"?"invoice":type;
   const canEdit=rowStatus==="DRAFT"&&!String(record.journalId||"").trim();
+  const realApprovedPo=type==="purchaseOrder"&&!isSupplierQuotation&&APPROVED_PO_LIFECYCLE.has(rowStatus);
+  const supplierName=String(supplierMap.get(String(record.supplierId||""))||record.supplierId||"");
+  const projectName=String(projectMap.get(String(record.projectId||""))||record.projectId||"");
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
@@ -202,6 +218,9 @@ export default async function TransactionDocumentPage({params,searchParams}:{par
     </section>
     <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={String(record.status||"DRAFT")}/>
     {type==="payment"&&<PaymentFinalSave record={record}/>}
-    {isSupplierQuotation?<SupplierQuoteItemReadiness supplierQuoteId={id}/>:<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
+    {isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus)&&<SupplierQuoteItemReadiness supplierQuoteId={id}/>} 
+    {!isSupplierQuotation&&<DocumentConversionActions type={type} id={id} status={String(record.status||"")} documentNumber={number}/>} 
+    {realApprovedPo&&<SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={Number(record.totalAmount||0)}/>} 
+    {type==="supplierBill"&&String(record.poId||record.sourceDocumentId||"")&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={String(record.poId||record.sourceDocumentId||"")} supplierId={String(record.supplierId||"")} outstandingAmount={Number(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} 
   </div>;
 }
