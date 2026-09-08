@@ -162,6 +162,57 @@ async function finalizeCustomerRefund(row: any, patch: { paymentDate: string; am
   return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, refund: true, creditNoteId };
 }
 
+function referenceSourceId(row: any, prefix: "SQ" | "PO") {
+  const match = String(row.reference || "").match(new RegExp(`^${prefix}:([^|]+)\\|`));
+  return match?.[1] || "";
+}
+
+async function validateSourceLinkedAdvance(row: any, amount: number) {
+  const partyType = String(row.partyType || "");
+  const customer = partyType === "Customer";
+  const supplier = partyType === "Supplier";
+  if (!customer && !supplier) return;
+  const sourceId = String(row.sourceDocumentId || "").trim() || referenceSourceId(row, customer ? "SQ" : "PO");
+  if (!sourceId) return; // General unallocated advance.
+
+  const source = customer
+    ? (await findRecords<any>("Quotes", { quoteId: sourceId }, 1)).rows[0]
+    : (await findRecords<any>("PurchaseOrders", { poId: sourceId }, 1)).rows[0];
+  if (!source) throw new Error(customer ? "Source Sales Quotation not found for Customer Advance" : "Source Purchase Order not found for Supplier Advance");
+  if (!customer && String(source.poNumber || "").toUpperCase().startsWith("SUPQ-")) throw new Error("Supplier Advance cannot be finalized against a Supplier Quotation");
+
+  const expectedParty = String(customer ? source.customerId || "" : source.supplierId || "");
+  if (expectedParty !== String(row.partyId || "")) throw new Error(`${customer ? "Customer" : "Supplier"} Advance party no longer matches its source document`);
+  const sourceProject = String(source.projectId || "");
+  const paymentProject = String(row.projectId || "");
+  if (sourceProject && paymentProject && sourceProject !== paymentProject) throw new Error("Advance project no longer matches its source document");
+
+  const sourceStatus = String(source.status || "").toUpperCase();
+  const allowed = customer
+    ? ["APPROVED", "PART_INVOICED"]
+    : ["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED"];
+  if (!allowed.includes(sourceStatus)) {
+    throw new Error(customer
+      ? `Customer Advance cannot be finalized after the Sales Quotation leaves the advance lifecycle. Current status: ${sourceStatus}. Use a receipt against the posted Sales Invoice.`
+      : `Supplier Advance cannot be finalized after the Purchase Order leaves the prepayment lifecycle. Current status: ${sourceStatus}. Use Supplier Payment against the posted Supplier Invoice.`);
+  }
+
+  const payments = await listTable<any>("Payments", 500, 0);
+  const markerPrefix = customer ? `SQ:${sourceId}|` : `PO:${sourceId}|`;
+  const committedOther = round2((payments.rows || [])
+    .filter((payment: any) => String(payment.paymentId || "") !== String(row.paymentId || "")
+      && String(payment.partyType || "") === partyType
+      && String(payment.partyId || "") === String(row.partyId || "")
+      && !["CANCELLED", "REVERSED"].includes(String(payment.status || "").toUpperCase())
+      && (String(payment.sourceDocumentId || "") === sourceId || String(payment.reference || "").startsWith(markerPrefix)))
+    .reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0));
+  const total = Number(source.totalAmount || 0);
+  const remainingCapacity = round2(Math.max(0, total - committedOther));
+  if (amount > remainingCapacity + 0.001) {
+    throw new Error(`Advance Final Save exceeds remaining source-document capacity. Available K${remainingCapacity.toFixed(2)}, requested K${amount.toFixed(2)}.`);
+  }
+}
+
 async function finalizeStandardPayment(row: any, patch: { paymentDate: string; amount: number; paymentMethod: string; cashBankAccountId: string; reference: string }) {
   await ensureAccountingInfrastructure();
   const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
@@ -171,23 +222,23 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
 
   const againstDocumentId = String(row.againstDocumentId || "").trim();
   const advance = !againstDocumentId;
-  if (!advance) {
-    if (receive) {
-      const invoice = (await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1)).rows[0];
-      if (!invoice) throw new Error("Against Sales Invoice not found");
-      if (String(invoice.customerId || "") !== String(row.partyId || "")) throw new Error("Payment customer does not match the Sales Invoice customer");
-      if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
-      if (patch.amount > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds Sales Invoice outstanding amount");
-      if (String(row.againstDocumentType || "") && !String(row.againstDocumentType || "").toLowerCase().includes("sales invoice")) throw new Error("Customer receipt has an invalid against-document type");
-    } else {
-      const bill = (await findRecords<any>("SupplierBills", { billId: againstDocumentId }, 1)).rows[0];
-      if (!bill) throw new Error("Against Supplier Invoice not found");
-      if (String(bill.supplierId || "") !== String(row.partyId || "")) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
-      if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
-      if (patch.amount > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds Supplier Invoice outstanding amount");
-      const againstType = String(row.againstDocumentType || "").toLowerCase();
-      if (againstType && !againstType.includes("supplier invoice") && !againstType.includes("supplier bill")) throw new Error("Supplier payment has an invalid against-document type");
-    }
+  if (advance) {
+    await validateSourceLinkedAdvance(row, patch.amount);
+  } else if (receive) {
+    const invoice = (await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1)).rows[0];
+    if (!invoice) throw new Error("Against Sales Invoice not found");
+    if (String(invoice.customerId || "") !== String(row.partyId || "")) throw new Error("Payment customer does not match the Sales Invoice customer");
+    if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
+    if (patch.amount > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds Sales Invoice outstanding amount");
+    if (String(row.againstDocumentType || "") && !String(row.againstDocumentType || "").toLowerCase().includes("sales invoice")) throw new Error("Customer receipt has an invalid against-document type");
+  } else {
+    const bill = (await findRecords<any>("SupplierBills", { billId: againstDocumentId }, 1)).rows[0];
+    if (!bill) throw new Error("Against Supplier Invoice not found");
+    if (String(bill.supplierId || "") !== String(row.partyId || "")) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
+    if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
+    if (patch.amount > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds Supplier Invoice outstanding amount");
+    const againstType = String(row.againstDocumentType || "").toLowerCase();
+    if (againstType && !againstType.includes("supplier invoice") && !againstType.includes("supplier bill")) throw new Error("Supplier payment has an invalid against-document type");
   }
 
   const lines = receive
@@ -240,7 +291,6 @@ async function finalizePayment(payload: Record<string, unknown>) {
       throw new Error(`Insufficient funds in ${funds.label}. Available K${funds.balance.toFixed(2)}, payment K${amount.toFixed(2)}. Record funding/opening balance first or use a valid funded account.`);
     }
   } else {
-    // Receipts may increase a valid controlled cash/bank account from zero.
     await cashBankAvailability(patch.cashBankAccountId);
   }
 
@@ -258,7 +308,7 @@ async function allocateAdvance(payload: Record<string, unknown>) {
   if (!row) throw new Error("Advance Payment Entry not found");
   const partyType = String(row.partyType || "");
   await requirePermission(partyType === "Supplier" ? "purchase.write" : "sales.write");
-  return callLegacy("allocateAdvance", payload);
+  throw new Error("Use the controlled partial Advance Allocation endpoint for customer/supplier advance reconciliation");
 }
 
 export async function POST(request: Request) {
