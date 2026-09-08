@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { requirePermission } from "@/lib/auth";
 import {
   appendRecord,
   findRecords,
@@ -80,6 +81,7 @@ async function normalizedProject(parsed: z.infer<typeof projectSchema>) {
 
 export async function GET() {
   try {
+    await requirePermission("dashboard.read");
     const [customers, suppliers, projects] = await Promise.all([
       listTable("Customers", 500, 0),
       listTable("Suppliers", 500, 0),
@@ -93,9 +95,10 @@ export async function GET() {
       projects: projects.rows,
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Master-data read failed";
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Master-data read failed" },
-      { status: 500 },
+      { ok: false, error: message },
+      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
     );
   }
 }
@@ -154,12 +157,12 @@ export async function POST(request: Request) {
 
     if (body.type === "project") {
       const parsed = projectSchema.parse(body.record || {});
-      const normalized = await normalizedProject(parsed);
+      const normalizedProjectRecord = await normalizedProject(parsed);
       if (mode === "update") {
         if (!parsed.projectId) throw new Error("Project ID is required for update");
         const existing = await findRecords("Projects", { projectId: parsed.projectId }, 1);
         if (!existing.rows.length) throw new Error("Project not found");
-        const { projectId, ...patch } = normalized;
+        const { projectId, ...patch } = normalizedProjectRecord;
         const result = await updateRecord("Projects", "projectId", projectId, patch, "master-data-ui:update");
         return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
       }
@@ -167,7 +170,7 @@ export async function POST(request: Request) {
       const projectId = generatedId("PJ");
       const result = await appendRecord(
         "Projects",
-        { ...normalized, projectId },
+        { ...normalizedProjectRecord, projectId },
         "master-data-ui",
       );
       return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
