@@ -15,7 +15,7 @@ type Props = {
 };
 
 type CashBankAccount = { accountId: string; accountCode: string; accountName: string; balance: number };
-type Payment = { paymentId: string; paymentNumber?: string; amount?: number|string; status?: string; journalId?: string; sourceDocumentId?: string; againstDocumentId?: string; partyType?: string; partyId?: string; paymentType?: string; createdAt?: string };
+type Payment = { paymentId: string; paymentNumber?: string; amount?: number|string; status?: string; journalId?: string; againstDocumentId?: string; partyType?: string; partyId?: string; paymentType?: string; reference?: string; createdAt?: string };
 
 const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
 function localDate(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const v=Object.fromEntries(parts.map((p)=>[p.type,p.value]));return `${v.year}-${v.month}-${v.day}`;}
@@ -33,6 +33,7 @@ export default function SupplierAdvanceFromPo(props: Props) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const poMarker = `PO:${props.poId}|`;
 
   async function load() {
     setLoading(true);
@@ -48,7 +49,7 @@ export default function SupplierAdvanceFromPo(props: Props) {
         String(row.partyType || "") === "Supplier" &&
         String(row.paymentType || "").toUpperCase() === "PAY" &&
         String(row.partyId || "") === props.supplierId &&
-        String(row.sourceDocumentId || "") === props.poId
+        String(row.reference || "").startsWith(poMarker)
       );
       setPayments(rows);
       setAccounts(refs.cashBankAccounts || []);
@@ -80,6 +81,7 @@ export default function SupplierAdvanceFromPo(props: Props) {
     if (calculated > remainingCapacity + 0.001) { setMessage(`PO advance cannot exceed PO total. Remaining advance capacity is ${money(remainingCapacity)}.`); return; }
     setBusy(true); setMessage("Saving Supplier Advance Payment Draft…");
     try {
+      const userReference = reference.trim() || `Supplier advance against ${props.poNumber}`;
       const response = await fetch("/api/erp/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -95,10 +97,9 @@ export default function SupplierAdvanceFromPo(props: Props) {
             amount,
             paymentMethod,
             cashBankAccountId: accountId,
-            reference: reference || `Supplier advance against ${props.poNumber}`,
+            reference: `${poMarker}${userReference}`,
             againstDocumentType: "",
             againstDocumentId: "",
-            sourceDocumentId: props.poId,
           },
         }),
       });
