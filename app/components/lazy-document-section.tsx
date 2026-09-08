@@ -10,7 +10,8 @@ type Props = {
 };
 
 export default function LazyDocumentSection({ title, description, buttonLabel, children }: Props) {
-  const [open, setOpen] = useState(false);
+  const autoOpen = title === "Payment / Receipt Finalization";
+  const [open, setOpen] = useState(autoOpen);
 
   if (open) return <>{children}</>;
 
