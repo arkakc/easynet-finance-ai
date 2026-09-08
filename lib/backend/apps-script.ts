@@ -29,8 +29,10 @@ type ServiceConfig = { url: string; token: string; source: "split" | "legacy" };
 
 const RETRYABLE_STATUS = new Set([404, 408, 409, 425, 429, 500, 502, 503, 504]);
 const RETRY_DELAYS_MS = [0, 250];
+const HEALTH_RETRY_DELAYS_MS = [0, 750, 1_500];
 const READ_ONLY_ACTIONS = new Set<BackendAction>(["health", "bootstrapStatus", "list", "find"]);
 const READ_TIMEOUT_MS = 12_000;
+const HEALTH_TIMEOUT_MS = 18_000;
 const READ_CACHE_TTL_MS = 4_000;
 
 const DOCUMENT_TABLES = new Set(["Documents", "DocumentLines"]);
@@ -172,10 +174,11 @@ async function executeBackend<T>(
 ): Promise<BackendEnvelope<T>> {
   const config = serviceConfig(service);
   let lastError: Error | null = null;
-  const maxAttempts = READ_ONLY_ACTIONS.has(action) ? RETRY_DELAYS_MS.length : 1;
+  const retryDelays = action === "health" ? HEALTH_RETRY_DELAYS_MS : RETRY_DELAYS_MS;
+  const maxAttempts = READ_ONLY_ACTIONS.has(action) ? retryDelays.length : 1;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (RETRY_DELAYS_MS[attempt]) await sleep(RETRY_DELAYS_MS[attempt]);
+    if (retryDelays[attempt]) await sleep(retryDelays[attempt]);
     try {
       const response = await fetch(config.url, {
         method: "POST",
@@ -183,7 +186,9 @@ async function executeBackend<T>(
         body: JSON.stringify({ token: config.token, action, payload }),
         cache: "no-store",
         redirect: "follow",
-        signal: READ_ONLY_ACTIONS.has(action) ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined,
+        signal: READ_ONLY_ACTIONS.has(action)
+          ? AbortSignal.timeout(action === "health" ? HEALTH_TIMEOUT_MS : READ_TIMEOUT_MS)
+          : undefined,
       });
       const raw = await response.text();
       if (!response.ok) {
