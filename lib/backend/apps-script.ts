@@ -58,7 +58,7 @@ const TABLE_ID_FIELDS: Record<string, string> = {
   Invoices: "invoiceId",
   InvoiceLines: "invoiceLineId",
   SupplierBills: "billId",
-  SupplierBillLines: "supplierBillLineId",
+  SupplierBillLines: "billLineId",
   Payments: "paymentId",
   Expenses: "expenseId",
   Loans: "loanId",
