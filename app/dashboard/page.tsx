@@ -7,8 +7,23 @@ export const dynamic = "force-dynamic";
 type DashboardKPI = { key: string; value: string | number; updatedAt: string };
 type BackendStatus = { ok: boolean; version?: string; error?: string };
 
-const n = (value: unknown) => Number(value || 0);
-const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
+const n = (value: unknown) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const cleaned = value.trim().replace(/,/g, "");
+    if (!cleaned) return 0;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const money = (value: number) => new Intl.NumberFormat("en-PG", {
+  style: "currency",
+  currency: "PGK",
+  minimumFractionDigits: 2,
+}).format(Number.isFinite(value) ? value : 0);
 
 export default async function DashboardPage() {
   let backendError = "";
