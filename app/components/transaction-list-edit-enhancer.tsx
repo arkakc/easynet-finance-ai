@@ -15,19 +15,27 @@ function enhanceDocumentLists() {
 
     const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"));
     for (const row of rows) {
-      if (row.dataset.editEnhanced === "1") continue;
       const cells = row.querySelectorAll<HTMLTableCellElement>("td");
       if (cells.length <= Math.max(idIndex, statusIndex, actionIndex)) continue;
 
       const documentLink = cells[idIndex].querySelector<HTMLAnchorElement>('a[href^="/transactions/"]');
       if (!documentLink) continue;
+
+      const path = new URL(documentLink.href, window.location.origin).pathname;
+      const currentLabel = (documentLink.textContent || "").trim();
+      if (path.startsWith("/transactions/invoice/") && currentLabel.toUpperCase().startsWith("CN-") && row.dataset.creditNoteLabeled !== "1") {
+        documentLink.textContent = `Credit Note / Return · ${currentLabel}`;
+        row.dataset.creditNoteLabeled = "1";
+      }
+
+      if (row.dataset.editEnhanced === "1") continue;
       const actionCell = cells[actionIndex];
       const status = (cells[statusIndex].textContent || "DRAFT").trim().toUpperCase().split(/\s+/)[0];
       const baseUrl = new URL(documentLink.href, window.location.origin);
       baseUrl.pathname = `${baseUrl.pathname.replace(/\/$/, "")}/edit`;
 
       const holder = actionCell.querySelector<HTMLElement>(".row-actions") || actionCell;
-      if (status === "DRAFT") {
+      if (status === "DRAFT" && row.dataset.creditNoteLabeled !== "1") {
         const edit = document.createElement("a");
         edit.href = `${baseUrl.pathname}${baseUrl.search}`;
         edit.textContent = "Edit";
@@ -38,7 +46,7 @@ function enhanceDocumentLists() {
         const locked = document.createElement("button");
         locked.type = "button";
         locked.disabled = true;
-        locked.textContent = "Edit Locked";
+        locked.textContent = row.dataset.creditNoteLabeled === "1" ? "Controlled Credit Note" : "Edit Locked";
         locked.setAttribute("data-list-edit", "1");
         holder.appendChild(locked);
       }
