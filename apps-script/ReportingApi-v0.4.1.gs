@@ -289,9 +289,10 @@ function materializeReportingFromSplitDatabases(coreSpreadsheetId, documentSprea
   const apSubledger = round2(postedBills.reduce(function(sum, r) { return sum + n(r.outstandingAmount); }, 0));
 
   // Supplier quotations share the PurchaseOrders storage table, but are not commitments.
+  // Closed/partially closed POs are excluded because their remaining commitment is transferred to a replacement PO.
   const poCommitments = round2(pos.filter(function(r) {
     const number = String(r.poNumber || '');
-    return number.indexOf('SUPQ-') !== 0 && ['CANCELLED','REVERSED','BILLED'].indexOf(status(r.status)) < 0;
+    return number.indexOf('SUPQ-') !== 0 && ['CANCELLED','REVERSED','BILLED','CLOSED','CLOSED_PARTIAL'].indexOf(status(r.status)) < 0;
   }).reduce(function(sum, r) { return sum + n(r.totalAmount); }, 0));
 
   const draftApprovals =
