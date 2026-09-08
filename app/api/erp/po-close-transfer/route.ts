@@ -10,6 +10,7 @@ const closeSchema = z.object({
 });
 
 const OPEN_PO_STATUSES = new Set(["APPROVED", "PART_RECEIVED", "RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"]);
+const CLOSED_PO_STATUSES = new Set(["CLOSED", "CLOSED_PARTIAL"]);
 const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 function pngDate() {
@@ -146,7 +147,7 @@ export async function POST(request: Request) {
     const input = closeSchema.parse(await request.json());
     let state = await buildState(input.poId);
 
-    if (state.status === "CLOSED") {
+    if (CLOSED_PO_STATUSES.has(state.status)) {
       return NextResponse.json({ ok: true, alreadyClosed: true, state });
     }
     if (!OPEN_PO_STATUSES.has(state.status)) throw new Error(`Purchase Order must be approved before partial-supply closure. Current status: ${state.status}`);
@@ -189,8 +190,7 @@ export async function POST(request: Request) {
       })), "partial-supply-transfer");
     }
 
-    const existingClosure = state.closure;
-    if (!existingClosure) {
+    if (!state.closure) {
       await appendRecord("Exceptions", {
         exceptionId: `PO-CLOSE-${randomUUID().slice(0, 12).toUpperCase()}`,
         severity: "INFO",
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
       }, "partial-supply-transfer");
     }
 
-    await updateRecord("PurchaseOrders", "poId", input.poId, { status: "CLOSED" }, "partial-supply-transfer");
+    await updateRecord("PurchaseOrders", "poId", input.poId, { status: "CLOSED_PARTIAL" }, "partial-supply-transfer");
     state = await buildState(input.poId);
     return NextResponse.json({ ok: true, state });
   } catch (error) {
