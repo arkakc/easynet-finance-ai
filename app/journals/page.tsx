@@ -1,5 +1,7 @@
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -27,26 +29,102 @@ export default async function JournalsPage() {
   let accounts: Account[] = [];
   let error = "";
   try {
-    const [h, l, a] = await Promise.all([
-      listTable<Header>("JournalHeaders", 500, 0),
-      listTable<Line>("JournalLines", 500, 0),
-      listTable<Account>("Accounts", 500, 0),
-    ]);
-    headers = h.rows;
-    lines = l.rows;
-    accounts = a.rows;
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [journalHeaders, journalLines, chartOfAccounts] = await Promise.all([
+        prisma.journalHeader.findMany({ orderBy: { createdAt: "desc" } }),
+        prisma.journalLine.findMany({ orderBy: { lineNo: "asc" } }),
+        prisma.chartOfAccounts.findMany({ orderBy: { code: "asc" } }),
+      ]);
+      headers = journalHeaders.map((row) => ({
+        journalId: row.code,
+        postingDate: row.date.toISOString(),
+        documentType: row.sourceDocType || "JOURNAL",
+        documentNumber: row.sourceDocId || "",
+        reference: row.reference || row.description,
+        projectId: "",
+        status: row.status,
+        approvedBy: row.approvedBy || "",
+        postedAt: row.postedAt?.toISOString() || "",
+        createdAt: row.createdAt.toISOString(),
+      }));
+      const journalCodeById = new Map(journalHeaders.map((row) => [row.id, row.code]));
+      lines = journalLines.map((row) => ({
+        journalLineId: row.id,
+        journalId: journalCodeById.get(row.journalId) || row.journalId,
+        lineNo: row.lineNo,
+        accountId: row.accountId,
+        customerId: row.customerId || "",
+        supplierId: row.supplierId || "",
+        projectId: row.projectId || "",
+        debit: Number(row.debit),
+        credit: Number(row.credit),
+        description: row.description,
+      }));
+      accounts = chartOfAccounts.map((row) => ({ accountId: row.id, accountCode: row.code, accountName: row.name }));
+    } else {
+      const [h, l, a] = await Promise.all([
+        listTable<Header>("JournalHeaders", 500, 0),
+        listTable<Line>("JournalLines", 500, 0),
+        listTable<Account>("Accounts", 500, 0),
+      ]);
+      headers = h.rows;
+      lines = l.rows;
+      accounts = a.rows;
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "Journal load failed";
   }
 
   const account = new Map(accounts.map((row) => [row.accountId, `${row.accountCode} — ${row.accountName}`]));
   headers.sort((a, b) => createdValue(b) - createdValue(a));
+  const totalDebits = lines.reduce((sum, line) => sum + n(line.debit), 0);
+  const totalCredits = lines.reduce((sum, line) => sum + n(line.credit), 0);
+  const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
   return (
     <>
-      <h2>Posted Journals</h2>
-      <p className="small">Read-only accounting ledger · newest created/posted journals first. Posted journals are not edited or deleted; corrections must use reversal and corrected entries.</p>
-      {error && <section className="panel"><strong>Backend warning:</strong> {error}</section>}
+      <div className="page-head">
+        <div>
+          <h2>Posted Journals</h2>
+          <p className="small">Papua New Guinea immutable accounting ledger · double-entry audit trail.</p>
+        </div>
+        <div className="page-head-actions">
+          <div className="badge">{isBalanced ? "✓ BALANCED" : "⚠️ UNBALANCED"}</div>
+          {error && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>Backend warning:</strong> {error}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <div className="label">Posted Journals</div>
+          <div className="value">{headers.length}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Debits</div>
+          <div className="value">{money(totalDebits)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Credits</div>
+          <div className="value">{money(totalCredits)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Ledger Integrity</div>
+          <div className="value small-value" style={{ color: isBalanced ? "var(--soft-emerald-text)" : "var(--soft-rose-text)" }}>
+            {isBalanced ? "100% Balanced" : "Check Exceptions"}
+          </div>
+        </div>
+      </div>
 
       {headers.map((header) => {
         const journalLines = lines.filter((line) => line.journalId === header.journalId).sort((a, b) => n(a.lineNo) - n(b.lineNo));

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import { hashPassword, verifyPassword, ROLE_PERMISSIONS, PERMISSIONS } from '@/lib/auth';
+import { prisma } from '@/src/lib/prisma';
+import { hashPassword, verifyPassword, ROLE_PERMISSIONS, PERMISSIONS } from '@/src/lib/auth';
 import { z } from 'zod';
 import { Role, UserStatus } from '@prisma/client';
 

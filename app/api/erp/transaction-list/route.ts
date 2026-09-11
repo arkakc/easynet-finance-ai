@@ -47,9 +47,34 @@ function forbidden() {
   return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 }
 
+export const dynamic = "force-dynamic";
+
+function inferScopeFromReferer(referer: string): Scope | "" {
+  if (!referer) return "";
+  try {
+    const url = new URL(referer);
+    if (url.pathname !== "/transactions") return "";
+    const module = url.searchParams.get("module") || "sales";
+    return module === "purchase" ? "purchaseModule" : module === "expense" ? "expenseModule" : "salesModule";
+  } catch {
+    return "";
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const scope = String(request.nextUrl.searchParams.get("scope") || "") as Scope;
+    let rawScope = request.headers.get("x-erp-scope")
+      || request.nextUrl.searchParams.get("scope")
+      || "";
+    if (!rawScope) {
+      try {
+        rawScope = new URL(request.url).searchParams.get("scope") || "";
+      } catch {}
+    }
+    if (!rawScope) {
+      rawScope = inferScopeFromReferer(request.headers.get("referer") || "");
+    }
+    const scope = (rawScope || "salesModule") as Scope;
     if (!VALID_SCOPES.has(scope)) return NextResponse.json({ ok: false, error: "Invalid transaction scope" }, { status: 400 });
 
     const user = await requirePermission("dashboard.read");
@@ -78,10 +103,11 @@ export async function GET(request: NextRequest) {
         (canPurchase || canAccounts) ? listTable<any>("Payments", 500, 0) : Promise.resolve({ rows: [] as any[] }),
       ]);
       const purchaseOrders = orders.rows || [];
+      const isSupq = (row: any) => String(row.poNumber || row.code || row.poId || "").toUpperCase().startsWith("SUPQ-");
       return NextResponse.json({
         ...emptyEnvelope(scope),
-        supplierQuotes: newest(purchaseOrders.filter((row: any) => String(row.poNumber || "").toUpperCase().startsWith("SUPQ-"))),
-        purchaseOrders: newest(purchaseOrders.filter((row: any) => !String(row.poNumber || "").toUpperCase().startsWith("SUPQ-"))),
+        supplierQuotes: newest(purchaseOrders.filter(isSupq)),
+        purchaseOrders: newest(purchaseOrders.filter((row: any) => !isSupq(row))),
         supplierBills: newest(bills.rows || []),
         payments: newest((payments.rows || []).filter((row: any) => String(row.partyType || "") === "Supplier")),
       });
@@ -113,7 +139,8 @@ export async function GET(request: NextRequest) {
     if (scope === "supplierQuote" || scope === "purchaseOrder") {
       const rows = await listTable<any>("PurchaseOrders", 500, 0);
       const supplierQuote = scope === "supplierQuote";
-      const filtered = (rows.rows || []).filter((row: any) => String(row.poNumber || "").toUpperCase().startsWith("SUPQ-") === supplierQuote);
+      const isSupq = (row: any) => String(row.poNumber || row.code || row.poId || "").toUpperCase().startsWith("SUPQ-");
+      const filtered = (rows.rows || []).filter((row: any) => isSupq(row) === supplierQuote);
       return NextResponse.json(supplierQuote
         ? { ok: true, scope, supplierQuotes: newest(filtered) }
         : { ok: true, scope, purchaseOrders: newest(filtered) });

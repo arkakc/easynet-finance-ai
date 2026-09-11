@@ -19,9 +19,50 @@ export default function QuickItemCreatePage(){
   async function save(event:FormEvent<HTMLFormElement>){event.preventDefault();if(busy||aiBusy)return;setBusy(true);setSavedLabel("");setMessage("Saving Item…");try{const response=await fetch("/api/erp/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target:"stock",body:{action:"createItem",record:{itemName,itemType,uom,revenueAccount,costAccount,deferredRevenueMonths:Number(deferredMonths||0),taxCode}}})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Item save failed");const row=body.row||body.result?.row||{};const id=String(row.itemId||row.itemCode||"");setMessage(`Item saved successfully${id?` · ${id}`:""}. Return to the previous document flow and select the new Item Master record.`);setSavedLabel("Item");notifyFlowDataChanged("item",id);setNextCode(String(row.itemCode||row.itemId||nextCode));}catch(error){setMessage(error instanceof Error?error.message:"Item save failed");}finally{setBusy(false);}}
 
   return <>
-    <h2>Create New Item Master</h2><p className="small">This quick-entry page is designed for use from an active Sales, Purchase or Stock flow. The original document can stay open in its previous tab.</p>
+    <div className="page-head">
+      <div>
+        <h2>Create New Item Master</h2>
+        <p className="small">Quick catalog item registration with AI-suggested Revenue and Cost/COGS chart of accounts.</p>
+      </div>
+      <div className="page-head-actions">
+        {message && (
+          <details className="system-notice-tab">
+            <summary>
+              <span>ℹ️ System Notice</span>
+              <span className="notice-arrow">▾</span>
+            </summary>
+            <div className="system-notice-dropdown">
+              <strong>Item setup notice:</strong> {message}
+            </div>
+          </details>
+        )}
+        <a className="button-link secondary-link" href="/stock">
+          ← Items & Stock
+        </a>
+        <span className="badge">Catalog Setup</span>
+      </div>
+    </div>
+
+    <div className="grid">
+      <div className="card">
+        <div className="label">GL Mapping Model</div>
+        <div className="value small-value">AI Account Assist</div>
+      </div>
+      <div className="card">
+        <div className="label">Tax Standard</div>
+        <div className="value small-value">IRC 10% GST Ready</div>
+      </div>
+      <div className="card">
+        <div className="label">Costing Model</div>
+        <div className="value small-value">Moving Average Cost</div>
+      </div>
+      <div className="card">
+        <div className="label">Creation Flow</div>
+        <div className="value small-value">Cross-Tab Linked</div>
+      </div>
+    </div>
+
     <FlowReturnPanel savedLabel={savedLabel}/>
-    {message&&<section className="panel status-banner">{message}</section>}
     <form className="panel form-grid" onSubmit={save}>
       <div className="form-wide form-title-row"><div><h3 style={{margin:0}}>New Item</h3><p className="small">AI suggests controlled Revenue and Cost/COGS posting accounts from the Item Name and Type.</p></div><span className="auto-badge">{aiBusy?"AI ANALYZING…":"FLOW QUICK ENTRY"}</span></div>
       <label>Item Code<input value={nextCode||"AUTO"} readOnly/></label>
@@ -33,7 +74,7 @@ export default function QuickItemCreatePage(){
       <label>Moving Average Rate<input value="0.00" readOnly/><span className="small">Calculated from stock transactions.</span></label>
       <label>Deferred Revenue Months<input type="number" min="0" max="120" value={deferredMonths} onChange={event=>setDeferredMonths(event.target.value)} disabled={busy}/></label>
       <label>Tax Code<input value={taxCode} onChange={event=>setTaxCode(event.target.value)} disabled={busy}/></label>
-      <div className="form-wide button-row"><button type="button" className="secondary" disabled={busy||aiBusy||itemName.trim().length<2} onClick={()=>void suggest()}>{aiBusy?"AI Analyzing…":"Re-suggest Posting Accounts"}</button><button type="submit" disabled={busy||aiBusy}>{busy?"Saving…":"Save Item"}</button></div>
+      <div className="form-wide button-row"><button type="button" className="secondary" disabled={busy||aiBusy||itemName.trim().length<2} onClick={()=>void suggest()}>{aiBusy?"AI Analyzing…":"Re-suggest Posting Accounts"}</button><button type="submit" disabled={busy||aiBusy} style={(busy||aiBusy) ? { opacity: 0.6, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}>{busy?"Saving…":"Save Item"}</button></div>
     </form>
   </>;
 }

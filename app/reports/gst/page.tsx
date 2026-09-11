@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +18,38 @@ export default async function GstReportPage() {
   let lines: Line[] = [];
   let error = "";
   try {
-    const [s, h, l] = await Promise.all([
-      listTable<Setting>("Settings", 500, 0),
-      listTable<Header>("JournalHeaders", 500, 0),
-      listTable<Line>("JournalLines", 500, 0),
-    ]);
-    settings = s.rows;
-    headers = h.rows.filter((row) => normalized(row.status) === "POSTED");
-    lines = l.rows;
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [storedSettings, journalHeaders, journalLines] = await Promise.all([
+        prisma.globalSettings.findMany({ where: { key: { in: ["gst_status", "gst_number"] } } }),
+        prisma.journalHeader.findMany({ where: { status: "POSTED" } }),
+        prisma.journalLine.findMany({ include: { account: true } }),
+      ]);
+      settings = storedSettings.map((row) => ({ key: row.key, value: row.value || "", notes: row.description || "" }));
+      headers = journalHeaders.map((row) => ({
+        journalId: row.id,
+        postingDate: row.date.toISOString(),
+        documentType: row.sourceDocType || "JOURNAL",
+        documentNumber: row.sourceDocId || "",
+        status: row.status,
+      }));
+      const accountById = new Map(journalLines.map((row) => [row.accountId, row.account.code]));
+      lines = journalLines.map((row) => ({
+        journalId: row.journalId,
+        accountId: `ACC-${accountById.get(row.accountId) || ""}`,
+        debit: Number(row.debit),
+        credit: Number(row.credit),
+        taxCode: row.taxCode || "",
+        description: row.description,
+      }));
+    } else {
+      const [s, h, l] = await Promise.all([
+        listTable<Setting>("Settings", 500, 0),
+        listTable<Header>("JournalHeaders", 500, 0),
+        listTable<Line>("JournalLines", 500, 0),
+      ]);
+      settings = s.rows; headers = h.rows.filter((row) => normalized(row.status) === "POSTED"); lines = l.rows;
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "GST report load failed";
   }
@@ -51,9 +76,25 @@ export default async function GstReportPage() {
 
   return (
     <>
-      <h2>GST Control Report</h2>
-      <p className="small">Management GST ledger derived only from POSTED journal entries. The configured GST status is an ERP control flag; formal tax filing still requires reconciliation to registration evidence and source documents.</p>
-      {status !== "VERIFIED" && <section className="panel warning-panel"><strong>GST control status: {status}.</strong> GST posting/reporting should be reviewed before relying on this control report.</section>}
+      <div className="page-head">
+        <div>
+          <h2>GST Control Report</h2>
+          <p className="small">Management GST ledger derived only from POSTED journal entries according to PNG IRC tax rules.</p>
+        </div>
+        <div className="page-head-actions">
+          {status !== "VERIFIED" && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>GST control status: {status}.</strong> GST posting/reporting should be reviewed before relying on this control report. Formal tax filing still requires reconciliation to registration evidence and source documents.
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
 
       <div className="grid">
         <div className="card"><div className="label">GST Control Status</div><div className="value small-value">{status}</div></div>

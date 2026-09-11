@@ -1,4 +1,6 @@
-import { listTable } from "@/lib/backend/apps-script";
+import Link from "next/link";
+import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -20,18 +22,30 @@ export default async function ProjectsPage() {
   let error = "";
 
   try {
-    const [p, a, j, po, b] = await Promise.all([
-      listTable<Project>("Projects", 500, 0),
-      listTable<Account>("Accounts", 500, 0),
-      listTable<JournalLine>("JournalLines", 500, 0),
-      listTable<PurchaseOrder>("PurchaseOrders", 500, 0),
-      listTable<Bill>("SupplierBills", 500, 0),
-    ]);
-    projects = p.rows;
-    accounts = a.rows;
-    lines = j.rows;
-    pos = po.rows;
-    bills = b.rows;
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [p, a, j, po, b] = await Promise.all([
+        prisma.project.findMany(),
+        prisma.chartOfAccounts.findMany(),
+        prisma.journalLine.findMany({ include: { journal: true } }),
+        prisma.purchaseOrder.findMany(),
+        prisma.supplierBill.findMany(),
+      ]);
+      projects = p.map((row) => ({ projectId: row.id, projectName: row.name, customerId: row.customerId || "", status: row.status, contractTotal: Number(row.budget || 0), expectedCost: 0 }));
+      accounts = a.map((row) => ({ accountId: row.id, accountType: row.type }));
+      lines = j.filter((row) => row.journal.status === "POSTED").map((row) => ({ accountId: row.accountId, projectId: row.projectId || "", debit: Number(row.debit), credit: Number(row.credit) }));
+      pos = po.map((row) => ({ poId: row.id, projectId: row.projectId || "", totalAmount: Number(row.total), status: row.status }));
+      bills = b.map((row) => ({ billId: row.id, projectId: row.projectId || "", totalAmount: Number(row.total), status: row.status }));
+    } else {
+      const [p, a, j, po, b] = await Promise.all([
+        listTable<Project>("Projects", 500, 0),
+        listTable<Account>("Accounts", 500, 0),
+        listTable<JournalLine>("JournalLines", 500, 0),
+        listTable<PurchaseOrder>("PurchaseOrders", 500, 0),
+        listTable<Bill>("SupplierBills", 500, 0),
+      ]);
+      projects = p.rows; accounts = a.rows; lines = j.rows; pos = po.rows; bills = b.rows;
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "Project report load failed";
   }
@@ -58,22 +72,85 @@ export default async function ProjectsPage() {
     return { ...project, revenue, cost, grossProfit, margin, commitments, billTotal, openCommitment };
   });
 
+  const totalContract = rows.reduce((sum, r) => sum + n(r.contractTotal), 0);
+  const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0);
+  const totalCost = rows.reduce((sum, r) => sum + r.cost, 0);
+  const totalGrossProfit = totalRevenue - totalCost;
+
   return (
     <>
-      <h2>Project Profitability</h2>
-      <p className="small">Posted revenue/cost plus purchase-order commitments by project.</p>
-      {error && <section className="panel"><strong>Backend warning:</strong> {error}</section>}
+      <div className="page-head">
+        <div>
+          <h2>Project Profitability & Job Costing</h2>
+          <p className="small">Live contract budgets, posted revenue/cost and purchase-order commitments by project.</p>
+        </div>
+        <div className="page-head-actions">
+          {error && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong className="system-notice-warning">Backend notice:</strong> {error}
+              </div>
+            </details>
+          )}
+          <Link prefetch={false} className="button-link secondary-link" href="/masters?tab=project">
+            Manage Projects
+          </Link>
+          <span className="badge">PGK (K)</span>
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <div className="label">Active Projects</div>
+          <div className="value">{projects.length}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Contract Value</div>
+          <div className="value">{money(totalContract)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Posted Revenue</div>
+          <div className="value">{money(totalRevenue)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Overall Gross Profit</div>
+          <div className="value">{money(totalGrossProfit)}</div>
+        </div>
+      </div>
 
       <section className="panel table-wrap">
         <table className="data-table">
-          <thead><tr><th>Project</th><th>Customer</th><th>Status</th><th>Contract</th><th>Revenue</th><th>Posted Cost</th><th>Gross Profit</th><th>Margin</th><th>PO Commitments</th><th>Open Commitment</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Contract</th>
+              <th>Revenue</th>
+              <th>Posted Cost</th>
+              <th>Gross Profit</th>
+              <th>Margin</th>
+              <th>PO Commitments</th>
+              <th>Open Commitment</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.projectId}>
                 <td><strong>{row.projectName}</strong><br/><span className="small">{row.projectId}</span></td>
-                <td>{row.customerId}</td><td>{row.status}</td><td>{money(n(row.contractTotal))}</td>
-                <td>{money(row.revenue)}</td><td>{money(row.cost)}</td><td>{money(row.grossProfit)}</td><td>{row.margin.toFixed(1)}%</td>
-                <td>{money(row.commitments)}</td><td>{money(row.openCommitment)}</td>
+                <td>{row.customerId || "—"}</td>
+                <td><span className="auto-badge">{row.status}</span></td>
+                <td>{money(n(row.contractTotal))}</td>
+                <td>{money(row.revenue)}</td>
+                <td>{money(row.cost)}</td>
+                <td><strong>{money(row.grossProfit)}</strong></td>
+                <td>{row.margin.toFixed(1)}%</td>
+                <td>{money(row.commitments)}</td>
+                <td>{money(row.openCommitment)}</td>
               </tr>
             ))}
             {!rows.length && !error && <tr><td colSpan={10}>No projects found.</td></tr>}

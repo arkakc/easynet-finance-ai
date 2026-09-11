@@ -58,6 +58,29 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState("");
   const[returnContext,setReturnContext]=useState<ReturnContext>({});
+  const[deleteBusy,setDeleteBusy]=useState(false);
+
+  async function handleDeleteDocument(){
+    if(deleteBusy)return;
+    const confirmed=window.confirm(`Are you sure you want to delete ${number}? This action cannot be undone.`);
+    if(!confirmed)return;
+    setDeleteBusy(true);
+    try{
+      const response=await fetch("/api/erp/transactions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"deleteDocument",payload:{type,id}})
+      });
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Delete failed");
+      alert(`Document ${number} has been deleted successfully.`);
+      window.location.href=backHref;
+    }catch(err){
+      alert(`Cannot delete ${number}:\n\n${err instanceof Error?err.message:"Delete failed"}`);
+    }finally{
+      setDeleteBusy(false);
+    }
+  }
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
@@ -75,11 +98,11 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     return()=>{controller.abort();window.cancelAnimationFrame(frame);};
   },[type,id]);
 
-  const customerMap=useMemo(()=>new Map((references.customers||[]).map((row:any)=>[String(row.customerId||""),String(row.customerName||row.customerId||"")])),[references.customers]);
-  const supplierMap=useMemo(()=>new Map((references.suppliers||[]).map((row:any)=>[String(row.supplierId||""),String(row.supplierName||row.supplierId||"")])),[references.suppliers]);
-  const projectMap=useMemo(()=>new Map((references.projects||[]).map((row:any)=>[String(row.projectId||""),String(row.projectName||row.projectId||"")])),[references.projects]);
-  const accountMap=useMemo(()=>new Map((references.accounts||[]).map((row:any)=>[String(row.accountId||""),`${String(row.accountName||row.accountId||"")} · ${String(row.accountCode||"")}`])),[references.accounts]);
-  const itemMap=useMemo(()=>new Map((references.items||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item])),[references.items]);
+  const customerMap=useMemo(()=>new Map<string, string>((references.customers||[]).map((row:any)=>[String(row.customerId||""),String(row.customerName||row.customerId||"")])),[references.customers]);
+  const supplierMap=useMemo(()=>new Map<string, string>((references.suppliers||[]).map((row:any)=>[String(row.supplierId||""),String(row.supplierName||row.supplierId||"")])),[references.suppliers]);
+  const projectMap=useMemo(()=>new Map<string, string>((references.projects||[]).map((row:any)=>[String(row.projectId||""),String(row.projectName||row.projectId||"")])),[references.projects]);
+  const accountMap=useMemo(()=>new Map<string, string>((references.accounts||[]).map((row:any)=>[String(row.accountId||""),`${String(row.accountName||row.accountId||"")} · ${String(row.accountCode||"")}`])),[references.accounts]);
+  const itemMap=useMemo(()=>new Map<string, any>((references.items||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item])),[references.items]);
 
   const number=record?String(record[config?.numberField||""]||id):id;
   const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
@@ -118,14 +141,74 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
 
   return <div className="document-page">
-    <div className="document-toolbar no-print"><Link prefetch={false} href={backHref}>← Back to {backLabel}</Link><div className="row-actions">{canEdit&&<Link prefetch={false} className="button-link" href={type==="invoice"?`/transactions/invoice/${encodeURIComponent(id)}/edit`:`/transactions/${encodeURIComponent(type)}/${encodeURIComponent(id)}/edit`}>Edit Draft</Link>}<PrintButton/></div></div>
-    {error&&<section className="panel warning-panel"><strong>Document unavailable.</strong> {error}</section>}
+    <div className="document-toolbar no-print">
+      <Link prefetch={false} href={backHref}>← Back to {backLabel}</Link>
+      <div className="row-actions">
+        {error && (
+          <details className="system-notice-tab">
+            <summary>
+              <span>ℹ️ System Notice</span>
+              <span className="notice-arrow">▾</span>
+            </summary>
+            <div className="system-notice-dropdown">
+              <strong>Document unavailable:</strong> {error}
+            </div>
+          </details>
+        )}
+        {canEdit && (
+          <Link prefetch={false} className="button-link" href={type === "invoice" ? `/transactions/invoice/${encodeURIComponent(id)}/edit` : `/transactions/${encodeURIComponent(type)}/${encodeURIComponent(id)}/edit`}>
+            Edit Draft
+          </Link>
+        )}
+        <button
+          type="button"
+          disabled={deleteBusy}
+          className="danger-button"
+          style={{
+            color: "#dc2626",
+            borderColor: "#fca5a5",
+            background: "#fef2f2",
+            cursor: deleteBusy ? "not-allowed" : "pointer"
+          }}
+          onClick={() => void handleDeleteDocument()}
+        >
+          {deleteBusy ? "Deleting…" : "Delete"}
+        </button>
+        <PrintButton />
+      </div>
+    </div>
     <section className="document-sheet">
       <header className="document-header"><div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div><div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div></header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
         {previous&&<div className="document-meta" style={{marginBottom:20}}><div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div></div>}
         <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>
         {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`K${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>K{n(line.rate).toFixed(2)}</td><td>K{n(line.netAmount).toFixed(2)}</td><td>K{n(line.gstAmount).toFixed(2)}</td><td><strong>K{n(line.totalAmount).toFixed(2)}</strong></td></tr>;})}</tbody></table></div>}
+        {lines.length>0&&(()=>{
+          const lineNetTotal = lines.reduce((sum: number, l: any) => sum + n(l.netAmount || (n(l.qty) * n(l.rate))), 0);
+          const lineGstTotal = lines.reduce((sum: number, l: any) => sum + n(l.gstAmount), 0);
+          const lineGrandTotal = lines.reduce((sum: number, l: any) => sum + n(l.totalAmount || (n(l.netAmount) + n(l.gstAmount))), 0);
+          const docNet = n(record.netAmount ?? record.subtotal ?? lineNetTotal);
+          const docGst = n(record.gstAmount ?? record.taxTotal ?? lineGstTotal);
+          const docTotal = n(record.totalAmount ?? record.total ?? lineGrandTotal);
+          return (
+            <div style={{ display: "flex", justifyContent: "flex-end", margin: "18px 0 24px" }}>
+              <div style={{ width: "min(380px, 100%)", border: "1px solid #cbd5e1", borderRadius: 8, background: "#f8fafc", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
+                  <span>Net Total</span>
+                  <strong>K{docNet.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
+                  <span>GST</span>
+                  <strong>K{docGst.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", borderTop: "2px solid #cbd5e1", marginTop: 6, fontSize: "1.15rem", color: "#0f172a" }}>
+                  <strong>Total</strong>
+                  <strong style={{ color: "#0f172a" }}>K{docTotal.toFixed(2)}</strong>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
       </>:null}
     </section>

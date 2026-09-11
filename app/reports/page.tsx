@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -47,18 +48,30 @@ export default async function ReportsPage() {
   let error = "";
 
   try {
-    const [a, h, j, i, b] = await Promise.all([
-      listTable<Account>("Accounts", 500, 0),
-      listTable<JournalHeader>("JournalHeaders", 500, 0),
-      listTable<JournalLine>("JournalLines", 500, 0),
-      listTable<Invoice>("Invoices", 500, 0),
-      listTable<Bill>("SupplierBills", 500, 0),
-    ]);
-    accounts = a.rows;
-    headers = h.rows;
-    lines = j.rows;
-    invoices = i.rows;
-    bills = b.rows;
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [a, h, j, i, b] = await Promise.all([
+        prisma.chartOfAccounts.findMany(),
+        prisma.journalHeader.findMany(),
+        prisma.journalLine.findMany(),
+        prisma.invoice.findMany(),
+        prisma.supplierBill.findMany(),
+      ]);
+      accounts = a.map((row) => ({ accountId: `ACC-${row.code}`, accountCode: row.code, accountName: row.name, accountType: row.type }));
+      headers = h.map((row) => ({ journalId: row.id, status: row.status }));
+      lines = j.map((row) => ({ journalId: row.journalId, accountId: `ACC-${a.find((account) => account.id === row.accountId)?.code || ""}`, debit: Number(row.debit), credit: Number(row.credit), projectId: row.projectId || "" }));
+      invoices = i.map((row) => ({ invoiceId: row.id, invoiceNumber: row.code, customerId: row.customerId, dueDate: row.dueDate?.toISOString() || "", totalAmount: Number(row.total), outstandingAmount: Number(row.outstanding), status: row.status, projectId: row.projectId || "", journalId: row.journalId || "" }));
+      bills = b.map((row) => ({ billId: row.id, billNumber: row.code, supplierId: row.supplierId, dueDate: row.dueDate?.toISOString() || "", totalAmount: Number(row.total), outstandingAmount: Number(row.outstanding), status: row.status, projectId: row.projectId || "", journalId: row.journalId || "" }));
+    } else {
+      const [a, h, j, i, b] = await Promise.all([
+        listTable<Account>("Accounts", 500, 0),
+        listTable<JournalHeader>("JournalHeaders", 500, 0),
+        listTable<JournalLine>("JournalLines", 500, 0),
+        listTable<Invoice>("Invoices", 500, 0),
+        listTable<Bill>("SupplierBills", 500, 0),
+      ]);
+      accounts = a.rows; headers = h.rows; lines = j.rows; invoices = i.rows; bills = b.rows;
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "Report load failed";
   }
@@ -119,14 +132,56 @@ export default async function ReportsPage() {
 
   return (
     <>
-      <h2>Financial Reports</h2>
-      <p className="small">Live management reports derived only from POSTED journal headers and current posted AR/AP documents. Cancelled, reversed and draft source documents are excluded.</p>
+      <div className="page-head">
+        <div>
+          <h2>Financial Reports & General Ledger Summary</h2>
+          <p className="small">
+            Live management accounts derived exclusively from POSTED journals and active AR/AP ledgers.
+          </p>
+        </div>
+        <div className="page-head-actions">
+          {error && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>Reporting notice:</strong> {error}
+              </div>
+            </details>
+          )}
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/cashflow">
+            Cash Flow Statement
+          </Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/gst">
+            IRC GST Report
+          </Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/controls">
+            Integrity Controls
+          </Link>
+        </div>
+      </div>
 
       <div className="grid">
-        <div className="card"><div className="label">Revenue</div><div className="value">{money(revenue)}</div></div>
-        <div className="card"><div className="label">Expenses</div><div className="value">{money(expenses)}</div></div>
-        <div className="card"><div className="label">Net Profit</div><div className="value">{money(netProfit)}</div></div>
-        <div className="card"><div className="label">Balance Check</div><div className="value">{money(balanceCheck)}</div></div>
+        <div className="card">
+          <div className="label">Gross Revenue</div>
+          <div className="value">{money(revenue)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Expenses</div>
+          <div className="value">{money(expenses)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Net Profit / (Loss)</div>
+          <div className="value">{money(netProfit)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Balance Check</div>
+          <div className="value" style={{ color: Math.abs(balanceCheck) < 0.01 ? "#10b981" : "#ef4444" }}>
+            {money(balanceCheck)}
+          </div>
+        </div>
       </div>
 
       <section className="panel table-wrap">

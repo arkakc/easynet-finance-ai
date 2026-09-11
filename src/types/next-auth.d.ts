@@ -1,5 +1,5 @@
 import 'next-auth';
-import { Permission } from '@/lib/auth';
+import { Permission } from '@/src/lib/auth';
 
 declare module 'next-auth' {
   interface User {

@@ -1,6 +1,8 @@
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -38,17 +40,78 @@ export default async function LoansPage() {
   let loans: Loan[] = [];
   let error = "";
   try {
-    const result = await listTable<Loan>("Loans", 500, 0);
-    loans = result.rows;
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const result = await prisma.loan.findMany({ orderBy: { createdAt: "desc" } });
+      loans = result.map((loan) => ({
+        loanId: loan.code,
+        lenderName: loan.lenderName,
+        loanDate: loan.loanDate.toISOString(),
+        principal: Number(loan.principal),
+        interestRate: Number(loan.interestRate),
+        contractInterest: Number(loan.contractInterest),
+        principalOutstanding: Number(loan.principalOutstanding),
+        interestOutstanding: Number(loan.interestOutstanding),
+        expectedSettlement: Number(loan.expectedSettlement),
+        lastAccruedThrough: loan.lastAccruedThrough?.toISOString() || "",
+        firstAccrualDate: loan.firstAccrualDate?.toISOString() || "",
+        status: loan.status,
+        repaymentCondition: loan.repaymentCondition || "",
+      }));
+    } else {
+      const result = await listTable<Loan>("Loans", 500, 0);
+      loans = result.rows;
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "Unable to load loans";
   }
 
+  const totalPrincipal = loans.reduce((sum, l) => sum + n(l.principal), 0);
+  const totalPrincipalOut = loans.reduce((sum, l) => sum + n(l.principalOutstanding), 0);
+  const totalInterestOut = loans.reduce((sum, l) => sum + n(l.interestOutstanding), 0);
+  const totalSettlement = loans.reduce((sum, l) => sum + n(l.expectedSettlement), 0);
+
   return (
     <>
-      <h2>Loan Register</h2>
-      <p className="small">Recorded funding balances and anniversary-based compound interest controls.</p>
-      {error && <section className="panel warning-panel"><strong>Loan data unavailable.</strong> {error}</section>}
+      <div className="page-head">
+        <div>
+          <h2>Loan Register</h2>
+          <p className="small">Recorded funding balances, lender covenants, and anniversary compound interest controls.</p>
+        </div>
+        <div className="page-head-actions">
+          <div className="badge">{loans.length} LOAN{loans.length !== 1 ? "S" : ""} RECORDED</div>
+          {error && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>Loan data notice:</strong> {error}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <div className="label">Original Principal</div>
+          <div className="value">{money(totalPrincipal)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Principal Outstanding</div>
+          <div className="value">{money(totalPrincipalOut)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Accrued Interest</div>
+          <div className="value">{money(totalInterestOut)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Settlement</div>
+          <div className="value">{money(totalSettlement)}</div>
+        </div>
+      </div>
 
       <section className="panel table-wrap">
         <table className="data-table">

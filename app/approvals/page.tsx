@@ -66,7 +66,125 @@ export default function ApprovalsPage() {
 
   const sales = pending.filter((row) => row.module === "Sales");
   const purchase = pending.filter((row) => row.module === "Purchase");
-  const table = (title: string, rows: PendingRow[]) => <section className="panel table-wrap"><div className="form-title-row"><h3>{title}</h3><span className="auto-badge">Newest created first</span></div><table className="data-table"><thead><tr><th>Document</th><th>Type</th><th>Party</th><th>Project</th><th>Created</th><th>Document Date</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.documentType}-${row.recordId}`}><td><Link href={row.href}><strong>{row.documentNo}</strong></Link></td><td>{row.documentType}</td><td>{row.party || "—"}</td><td>{row.project || "—"}</td><td>{createdLabel(row)}</td><td>{row.date || "—"}</td><td>K{Number(row.amount || 0).toFixed(2)}</td><td><strong>DRAFT</strong></td><td><div className="button-row"><Link className="button-link secondary-link" href={row.href}>Open Document</Link><button type="button" onClick={() => decide(row, "APPROVE")}>Approve</button><button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>Cancel</button></div></td></tr>)}{!rows.length && <tr><td colSpan={9}>No DRAFT documents pending approval.</td></tr>}</tbody></table></section>;
+  const totalAmount = pending.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
-  return <><h2>Pending Approval Queue</h2><p className="small">Workflow: DRAFT → APPROVED → POSTED. Only DRAFT documents are listed here for approval; newest-created documents appear first.</p>{message && <section className="panel"><strong>Status:</strong> {message}</section>}{loading ? <section className="panel">Loading pending approvals…</section> : <>{table(`Sales — Pending (${sales.length})`, sales)}{table(`Purchase — Pending (${purchase.length})`, purchase)}</>}</>;
+  const table = (title: string, rows: PendingRow[]) => (
+    <section className="panel table-wrap">
+      <div className="form-title-row">
+        <h3>{title}</h3>
+        <span className="auto-badge">Newest created first</span>
+      </div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Document</th>
+            <th>Type</th>
+            <th>Party</th>
+            <th>Project</th>
+            <th>Created</th>
+            <th>Document Date</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.documentType}-${row.recordId}`}>
+              <td>
+                <Link href={row.href}>
+                  <strong>{row.documentNo}</strong>
+                </Link>
+              </td>
+              <td>{row.documentType}</td>
+              <td>{row.party || "—"}</td>
+              <td>{row.project || "—"}</td>
+              <td>{createdLabel(row)}</td>
+              <td>{row.date || "—"}</td>
+              <td>K{Number(row.amount || 0).toFixed(2)}</td>
+              <td><span className="auto-badge">DRAFT</span></td>
+              <td>
+                <div className="button-row">
+                  <Link className="button-link secondary-link" href={row.href}>
+                    Open Document
+                  </Link>
+                  <button type="button" onClick={() => decide(row, "APPROVE")}>
+                    Approve
+                  </button>
+                  <button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>
+                    Cancel
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+          {!rows.length && (
+            <tr>
+              <td colSpan={9}>No DRAFT documents pending approval.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </section>
+  );
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h2>Pending Approval Queue</h2>
+          <p className="small">
+            Sequential approval control: DRAFT → APPROVED → POSTED. Only DRAFT documents appear here for executive sign-off.
+          </p>
+        </div>
+        <div className="page-head-actions">
+          {message && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>Action status:</strong> {message}
+              </div>
+            </details>
+          )}
+          <button type="button" className="secondary" onClick={() => void load()}>
+            Refresh Queue
+          </button>
+          <span className="badge">Control Gateway</span>
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <div className="label">Pending Queue</div>
+          <div className="value">{pending.length}</div>
+        </div>
+        <div className="card">
+          <div className="label">Sales Drafts</div>
+          <div className="value">{sales.length}</div>
+        </div>
+        <div className="card">
+          <div className="label">Purchase Drafts</div>
+          <div className="value">{purchase.length}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Pending Value</div>
+          <div className="value">K{totalAmount.toFixed(2)}</div>
+        </div>
+      </div>
+
+      {loading ? (
+        <section className="panel">
+          <p className="small">Loading live pending approvals…</p>
+        </section>
+      ) : (
+        <>
+          {table("Sales — Pending Documents", sales)}
+          {table("Purchase — Pending Documents", purchase)}
+        </>
+      )}
+    </>
+  );
 }

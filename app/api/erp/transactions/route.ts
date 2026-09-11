@@ -8,6 +8,14 @@ import { postJournal, receiptPosting, supplierPaymentPosting } from "@/lib/accou
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { synchronizeSettlement } from "@/lib/accounting/advance-allocation";
 import { round2 } from "@/lib/accounting/inventory";
+import {
+  prismaDeleteQuote,
+  prismaDeleteInvoice,
+  prismaDeletePurchaseOrder,
+  prismaDeleteSupplierBill,
+  prismaDeletePayment,
+  prismaDeleteExpense,
+} from "@/lib/backend/prisma-store";
 
 const ACTION_PERMISSION: Record<string, Permission> = {
   createQuote: "sales.write",
@@ -85,8 +93,9 @@ export async function GET(request: Request) {
     if (!body.ok) return NextResponse.json(body, { status: response.status });
     const canSales = hasPermission(user, "sales.read"), canPurchase = hasPermission(user, "purchase.read"), canAccounts = hasPermission(user, "accounts.read");
     const allPurchaseOrders = Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [];
-    const supplierQuotes = canPurchase ? allPurchaseOrders.filter((row: any) => String(row.poNumber || "").startsWith("SUPQ-")) : [];
-    const purchaseOrders = canPurchase ? allPurchaseOrders.filter((row: any) => !String(row.poNumber || "").startsWith("SUPQ-")) : [];
+    const isSupq = (row: any) => String(row.poNumber || row.code || row.poId || "").toUpperCase().startsWith("SUPQ-");
+    const supplierQuotes = canPurchase ? allPurchaseOrders.filter(isSupq) : [];
+    const purchaseOrders = canPurchase ? allPurchaseOrders.filter((row: any) => !isSupq(row)) : [];
     const payments = Array.isArray(body.payments) ? body.payments.filter((row: any) => {
       if (canAccounts) return true;
       if (String(row.partyType || "") === "Customer") return canSales;
@@ -317,6 +326,35 @@ export async function POST(request: Request) {
     if (body.action === "post") return NextResponse.json({ ok: false, error: "Use document approval for invoices/expenses or Final Save for Payment Entries." }, { status: 400 });
     if (body.action === "finalizePayment") return NextResponse.json({ ok: true, result: await finalizePayment(body.payload || {}) });
     if (body.action === "allocateAdvance") return NextResponse.json({ ok: true, result: await allocateAdvance(body.payload || {}) });
+
+    if (body.action === "deleteDocument" || body.action === "deleteTransaction") {
+      const payload = body.payload || {};
+      const type = String(payload.type || "").trim();
+      const id = String(payload.id || "").trim();
+      if (!type || !id) throw new Error("Document type and ID are required for deletion");
+
+      const isSales = ["quote", "invoice", "salesQuote", "salesInvoice"].includes(type) || (type === "payment" && String(payload.partyType || "") === "Customer");
+      await requirePermission(isSales ? "sales.write" : "purchase.write");
+
+      let deleteResult: unknown;
+      if (type === "quote" || type === "salesQuote") {
+        deleteResult = await prismaDeleteQuote(id);
+      } else if (type === "invoice" || type === "salesInvoice") {
+        deleteResult = await prismaDeleteInvoice(id);
+      } else if (type === "purchaseOrder" || type === "supplierQuote" || type === "po") {
+        deleteResult = await prismaDeletePurchaseOrder(id);
+      } else if (type === "supplierBill" || type === "bill" || type === "supplierInvoice") {
+        deleteResult = await prismaDeleteSupplierBill(id);
+      } else if (type === "payment") {
+        deleteResult = await prismaDeletePayment(id);
+      } else if (type === "expense") {
+        deleteResult = await prismaDeleteExpense(id);
+      } else {
+        throw new Error(`Unsupported document type for deletion: ${type}`);
+      }
+
+      return NextResponse.json({ ok: true, deleted: true, result: deleteResult });
+    }
 
     const permission = body.action ? permissionForAction(body.action, String(body.payload?.partyType || "")) : undefined;
     if (!permission) return NextResponse.json({ ok: false, error: "Unsupported transaction action" }, { status: 400 });

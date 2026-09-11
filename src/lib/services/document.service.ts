@@ -206,39 +206,35 @@ async function checkDocumentExists(type: DocumentType, documentNumber: string): 
  */
 export async function getDocumentByNumber(documentNumber: string) {
   // Try to find in quotes
-  let doc = await prisma.quote.findUnique({
+  const quote = await prisma.quote.findUnique({
     where: { code: documentNumber },
   });
-
-  if (doc) {
-    return { type: 'QUOTE', data: doc };
+  if (quote) {
+    return { type: 'QUOTE' as const, data: quote };
   }
 
   // Try to find in invoices
-  doc = await prisma.invoice.findUnique({
+  const invoice = await prisma.invoice.findUnique({
     where: { code: documentNumber },
   });
-
-  if (doc) {
-    return { type: 'INVOICE', data: doc };
+  if (invoice) {
+    return { type: 'INVOICE' as const, data: invoice };
   }
 
   // Try to find in purchase orders
-  doc = await prisma.purchaseOrder.findUnique({
+  const po = await prisma.purchaseOrder.findUnique({
     where: { code: documentNumber },
   });
-
-  if (doc) {
-    return { type: 'PURCHASE_ORDER', data: doc };
+  if (po) {
+    return { type: 'PURCHASE_ORDER' as const, data: po };
   }
 
   // Try to find in supplier bills
-  doc = await prisma.supplierBill.findUnique({
+  const bill = await prisma.supplierBill.findUnique({
     where: { code: documentNumber },
   });
-
-  if (doc) {
-    return { type: 'SUPPLIER_BILL', data: doc };
+  if (bill) {
+    return { type: 'SUPPLIER_BILL' as const, data: bill };
   }
 
   return null;

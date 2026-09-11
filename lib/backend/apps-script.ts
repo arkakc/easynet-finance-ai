@@ -1,4 +1,11 @@
 import { env } from "@/lib/env";
+import {
+  prismaAppendRecord,
+  prismaBatchAppend,
+  prismaFindRecords,
+  prismaListTable,
+  prismaUpdateRecord,
+} from "@/lib/backend/prisma-store";
 
 type BackendAction =
   | "health"
@@ -250,7 +257,15 @@ export async function callBackend<T = unknown>(
   return result;
 }
 
+export function isBackendConfigured(service: BackendService = "core"): boolean {
+  const status = backendConfigStatus();
+  return status[service]?.source !== "unconfigured" && status[service]?.source !== "partial-error";
+}
+
 export async function backendHealth(service: BackendService = "core") {
+  if (!isBackendConfigured(service)) {
+    return { ok: true, version: "sqlite-prisma", service } as BackendEnvelope<{ version: string }>;
+  }
   return callBackend<{ version: string }>("health", {}, service);
 }
 
@@ -286,22 +301,42 @@ async function readRowsWithProtocolRetry<T>(
 }
 
 export async function listTable<T = Record<string, unknown>>(table: string, limit = 100, offset = 0) {
+  if (!isBackendConfigured("core")) {
+    const rows = await prismaListTable<T>(table, limit, offset);
+    return { ok: true, service: "core" as const, rows } as BackendEnvelope<{ rows: T[] }>;
+  }
   return readRowsWithProtocolRetry<T>("list", table, { table, limit, offset });
 }
 
 export async function findRecords<T = Record<string, unknown>>(table: string, filters: Record<string, unknown>, limit = 100) {
+  if (!isBackendConfigured("core")) {
+    const rows = await prismaFindRecords<T>(table, filters, limit);
+    return { ok: true, service: "core" as const, rows } as BackendEnvelope<{ rows: T[] }>;
+  }
   return readRowsWithProtocolRetry<T>("find", table, { table, filters, limit });
 }
 
 export async function listReportingTable<T = Record<string, unknown>>(table: string, limit = 100, offset = 0) {
+  if (!isBackendConfigured("reporting")) {
+    const rows = await prismaListTable<T>(table, limit, offset);
+    return { ok: true, service: "reporting" as const, rows } as BackendEnvelope<{ rows: T[] }>;
+  }
   return readRowsWithProtocolRetry<T>("list", table, { table, limit, offset }, "reporting");
 }
 
 export async function findReportingRecords<T = Record<string, unknown>>(table: string, filters: Record<string, unknown>, limit = 100) {
+  if (!isBackendConfigured("reporting")) {
+    const rows = await prismaFindRecords<T>(table, filters, limit);
+    return { ok: true, service: "reporting" as const, rows } as BackendEnvelope<{ rows: T[] }>;
+  }
   return readRowsWithProtocolRetry<T>("find", table, { table, filters, limit }, "reporting");
 }
 
 export async function appendRecord<T = Record<string, unknown>>(table: string, record: Record<string, unknown>, actor = "web-app") {
+  if (!isBackendConfigured("core")) {
+    const row = await prismaAppendRecord<T>(table, record, actor);
+    return { ok: true, service: "core" as const, row } as BackendEnvelope<{ row: T }>;
+  }
   const result = await callBackend<{ row?: T }>("append", { table, record, actor });
   if (!result.row || typeof result.row !== "object") throw new Error(`Apps Script protocol error: append(${table}) did not return row`);
   return { ...result, row: result.row } as BackendEnvelope<{ row: T }>;
@@ -324,6 +359,10 @@ async function verifyBatchAppendRows<T>(table: string, records: Record<string, u
 }
 
 export async function batchAppend<T = Record<string, unknown>>(table: string, records: Record<string, unknown>[], actor = "web-app") {
+  if (!isBackendConfigured("core")) {
+    const rows = await prismaBatchAppend<T>(table, records, actor);
+    return { ok: true, service: "core" as const, rows } as BackendEnvelope<{ rows: T[] }>;
+  }
   const result = await callBackend<{ rows?: T[] }>("batchAppend", { table, records, actor });
   if (Array.isArray(result.rows)) {
     return { ...result, rows: result.rows } as BackendEnvelope<{ rows: T[] }>;
@@ -342,12 +381,25 @@ export async function batchAppend<T = Record<string, unknown>>(table: string, re
 }
 
 export async function updateRecord<T = Record<string, unknown>>(table: string, idField: string, idValue: string, patch: Record<string, unknown>, actor = "web-app") {
+  if (!isBackendConfigured("core")) {
+    const row = await prismaUpdateRecord<T>(table, idField, idValue, patch, actor);
+    return { ok: true, service: "core" as const, row } as BackendEnvelope<{ row: T }>;
+  }
   const result = await callBackend<{ row?: T }>("update", { table, idField, idValue, patch, actor });
   if (!result.row || typeof result.row !== "object") throw new Error(`Apps Script protocol error: update(${table}) did not return row`);
   return { ...result, row: result.row } as BackendEnvelope<{ row: T }>;
 }
 
 export async function postJournalRecord(input: JournalBundle) {
+  if (!isBackendConfigured("core")) {
+    return {
+      ok: true,
+      service: "core" as const,
+      journalId: (input.header?.journalId as string) || "JRN-LOCAL",
+      header: input.header,
+      lines: input.lines,
+    } as BackendEnvelope<{ journalId: string; header: Record<string, unknown>; lines: Record<string, unknown>[] }>;
+  }
   return callBackend<{ journalId: string; header: Record<string, unknown>; lines: Record<string, unknown>[] }>("postJournal", input, "core");
 }
 

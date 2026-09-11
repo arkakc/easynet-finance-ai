@@ -6,10 +6,24 @@ type Scope = "customer" | "supplier" | "project" | "sales" | "purchase";
 
 const VALID_SCOPES = new Set<Scope>(["customer", "supplier", "project", "sales", "purchase"]);
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   try {
     await requirePermission("dashboard.read");
-    const scope = String(request.nextUrl.searchParams.get("scope") || "") as Scope;
+    let rawScope = request.headers.get("x-erp-scope")
+      || request.nextUrl.searchParams.get("scope")
+      || "";
+    if (!rawScope) {
+      try {
+        rawScope = new URL(request.url).searchParams.get("scope") || "";
+      } catch {}
+    }
+    if (!rawScope) {
+      const referer = request.headers.get("referer") || "";
+      rawScope = referer.includes("module=purchase") ? "purchase" : "sales";
+    }
+    const scope = (rawScope || "sales") as Scope;
     if (!VALID_SCOPES.has(scope)) {
       return NextResponse.json({ ok: false, error: "Invalid master-data scope" }, { status: 400 });
     }

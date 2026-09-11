@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { prisma } from "@/src/lib/prisma";
 
 const schema = z.object({
   budgetId: z.string().trim().optional().default(""),
@@ -15,6 +16,8 @@ const schema = z.object({
 });
 
 function requireSecret(secret?: string) {
+  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  if (!env.APP_SECRET && !backendConfigured) return;
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
@@ -24,6 +27,47 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
 
 export async function GET() {
   try {
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [budgets, accounts, headers, lines] = await Promise.all([
+        prisma.budget.findMany({ orderBy: [{ fiscalYear: "desc" }, { createdAt: "desc" }] }),
+        prisma.chartOfAccounts.findMany({ orderBy: { code: "asc" } }),
+        prisma.journalHeader.findMany({ where: { status: "POSTED" } }),
+        prisma.journalLine.findMany({ include: { journal: true } }),
+      ]);
+      const postingDate = new Map(headers.map((row) => [row.id, row.date]));
+      const calculated = budgets.map((budget) => {
+        const period = budget.periodValue || budget.period.toUpperCase();
+        const actual = lines
+          .filter((line) => line.accountId === budget.accountId && (!budget.projectId || line.projectId === budget.projectId))
+          .filter((line) => {
+            const date = postingDate.get(line.journalId);
+            if (!date || date.getUTCFullYear() !== budget.fiscalYear) return false;
+            return period === "ANNUAL" || period === "YEARLY" || period === `${budget.fiscalYear}` || date.toISOString().startsWith(period);
+          })
+          .reduce((sum, line) => {
+            const type = accounts.find((account) => account.id === line.accountId)?.type;
+            return sum + (["Income", "Liability", "Equity"].includes(type || "") ? Number(line.credit) - Number(line.debit) : Number(line.debit) - Number(line.credit));
+          }, 0);
+        const budgetAmount = Number(budget.budgetAmount);
+        return {
+          budgetId: budget.code,
+          financialYear: String(budget.fiscalYear),
+          period,
+          accountId: budget.accountId || "",
+          projectId: budget.projectId || "",
+          budgetAmount,
+          actualAmount: round2(actual),
+          variance: round2(budgetAmount - actual),
+        };
+      });
+      return NextResponse.json({
+        ok: true,
+        source: "prisma",
+        budgets: calculated,
+        accounts: accounts.map((row) => ({ accountId: row.id, accountCode: row.code, accountName: row.name })),
+      });
+    }
     const [budgets, accounts, headers, lines] = await Promise.all([
       listTable<any>("Budgets", 500, 0),
       listTable<any>("Accounts", 500, 0),
@@ -80,6 +124,42 @@ export async function POST(request: Request) {
     }
     if (normalizedPeriod !== "ANNUAL" && !normalizedPeriod.startsWith(`${record.financialYear}-`)) {
       throw new Error("Budget period must fall within the selected financial year");
+    }
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const account = await prisma.chartOfAccounts.findUnique({ where: { id: record.accountId } });
+      if (!account) throw new Error("Budget account does not exist");
+      if (record.projectId) {
+        const project = await prisma.project.findUnique({ where: { id: record.projectId } });
+        if (!project) throw new Error("Budget project does not exist");
+      }
+      const duplicate = await prisma.budget.findFirst({
+        where: {
+          fiscalYear: Number(record.financialYear),
+          periodValue: normalizedPeriod,
+          accountId: record.accountId,
+          projectId: record.projectId || null,
+        },
+      });
+      if (duplicate) throw new Error(`A budget already exists for ${record.financialYear} ${normalizedPeriod}, account ${record.accountId}${record.projectId ? `, project ${record.projectId}` : ""}`);
+      const budgetId = record.budgetId || `BUD-${record.financialYear}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const existingCode = await prisma.budget.findUnique({ where: { code: budgetId } });
+      if (existingCode) throw new Error(`Budget ID already exists: ${budgetId}`);
+      const budget = await prisma.budget.create({
+        data: {
+          code: budgetId,
+          fiscalYear: Number(record.financialYear),
+          period: normalizedPeriod === "ANNUAL" ? "YEARLY" : "MONTHLY",
+          periodValue: normalizedPeriod,
+          accountId: record.accountId,
+          projectId: record.projectId || null,
+          budgetAmount: record.budgetAmount,
+          actualAmount: 0,
+          variance: record.budgetAmount,
+          createdBy: "budget-ui",
+        },
+      });
+      return NextResponse.json({ ok: true, source: "prisma", row: { budgetId: budget.code } });
     }
 
     const account = await findRecords("Accounts", { accountId: record.accountId }, 1);

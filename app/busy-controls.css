@@ -1,17 +1,31 @@
 button:disabled,
-.button-link[aria-disabled="true"] {
-  opacity: 1;
+.button-link[aria-disabled="true"],
+.link-button[aria-disabled="true"] {
+  opacity: 0.6;
   cursor: not-allowed;
-  background: #cbd5e1 !important;
-  color: #64748b !important;
-  border-color: #cbd5e1 !important;
+  background: #e2e8f0 !important;
+  color: #94a3b8 !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: none !important;
+  transform: none !important;
   pointer-events: none;
 }
 
 input:disabled,
 select:disabled,
 textarea:disabled {
-  background: #f1f5f9;
-  color: #64748b;
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #e2e8f0;
   cursor: not-allowed;
+}
+
+/* Subtle soft pulse for loading elements */
+@keyframes softPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.loading-pulse {
+  animation: softPulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

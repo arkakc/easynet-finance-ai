@@ -145,18 +145,18 @@ export default function TransactionItemLines({
     </datalist>
 
     <div className="table-wrap">
-      <table className="data-table" style={{ minWidth: 1280 }}>
+      <table className="data-table line-items-table" style={{ minWidth: 1280 }}>
         <thead>
           <tr>
-            <th style={{ minWidth: 250 }}>Search / Enter Item</th>
-            <th>Item Code</th>
-            <th style={{ minWidth: 200 }}>Item Name</th>
-            <th>UOM</th>
-            <th>Moving Avg Cost</th>
-            <th>QTY</th>
-            <th>Unit Price</th>
-            <th>Total</th>
-            <th></th>
+            <th style={{ minWidth: 290 }}>Search / Enter Item</th>
+            <th style={{ width: 100 }}>Item Code</th>
+            <th style={{ minWidth: 220 }}>Item Name</th>
+            <th style={{ width: 95 }}>UOM</th>
+            <th style={{ width: 125 }}>Moving Avg Cost</th>
+            <th style={{ width: 100 }}>QTY</th>
+            <th style={{ width: 115 }}>Unit Price</th>
+            <th style={{ width: 110 }}>Total</th>
+            <th style={{ width: 85 }}></th>
           </tr>
         </thead>
         <tbody>
@@ -167,7 +167,7 @@ export default function TransactionItemLines({
             const pendingCreate = !masterOnly && !temporaryQuotation && !linked && line.itemName.trim();
 
             return <tr key={line.lineId || index}>
-              <td>
+              <td style={{ verticalAlign: "top" }}>
                 <input
                   list={datalistId}
                   value={line.itemInput}
@@ -177,16 +177,18 @@ export default function TransactionItemLines({
                   required
                   disabled={disabled}
                 />
-                <span className="small" style={{ display: "block", marginTop: 6 }}>
-                  {linked ? "Linked to Item Master" : masterOnly ? "Select an Item Master record before Save" : temporary ? "Temporary Quotation line — not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
+                <span className={`item-line-hint ${linked ? "hint-linked" : temporary ? "hint-temp" : pendingCreate ? "hint-create" : masterOnly ? "hint-warn" : ""}`}>
+                  {linked ? "✓ Linked to Item Master" : masterOnly ? "Select an Item Master record before Save" : temporary ? "Temporary line · Not saved to Item Master" : pendingCreate ? "New Item Master record will be created on Save" : "Search by Item Code or Item Name"}
                 </span>
               </td>
-              <td>
-                {linked
-                  ? <Link prefetch={false} href={`/stock/item/${encodeURIComponent(linked.itemId || linked.itemCode)}`}><strong>{itemCode(linked)}</strong></Link>
-                  : <strong>{masterOnly ? "SELECT" : temporary ? "TEMP" : "AUTO"}</strong>}
+              <td style={{ verticalAlign: "top" }}>
+                <div className="table-field-align">
+                  {linked
+                    ? <Link prefetch={false} href={`/stock/item/${encodeURIComponent(linked.itemId || linked.itemCode)}`}><strong>{itemCode(linked)}</strong></Link>
+                    : <strong>{masterOnly ? "SELECT" : temporary ? "TEMP" : "AUTO"}</strong>}
+                </div>
               </td>
-              <td>
+              <td style={{ verticalAlign: "top" }}>
                 <input
                   value={line.itemName}
                   onChange={(event) => patchLine(index, { itemName: event.target.value, description: event.target.value, itemInput: linked ? line.itemInput : event.target.value })}
@@ -200,12 +202,16 @@ export default function TransactionItemLines({
                   <option value="NON_STOCK">Non-Stock Item</option>
                 </select>}
               </td>
-              <td><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required disabled={disabled} /></td>
-              <td><input value={money(movingAverage)} readOnly disabled /></td>
-              <td><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required disabled={disabled} /></td>
-              <td><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required disabled={disabled} /></td>
-              <td><strong>{money((Number(line.qty) || 0) * (Number(line.rate) || 0))}</strong></td>
-              <td><button type="button" className="secondary" onClick={() => removeLine(index)} disabled={disabled}>Remove</button></td>
+              <td style={{ verticalAlign: "top" }}><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required disabled={disabled} /></td>
+              <td style={{ verticalAlign: "top" }}><input value={money(movingAverage)} readOnly disabled /></td>
+              <td style={{ verticalAlign: "top" }}><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required disabled={disabled} /></td>
+              <td style={{ verticalAlign: "top" }}><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required disabled={disabled} /></td>
+              <td style={{ verticalAlign: "top" }}>
+                <div className="table-field-align">
+                  <strong>{money((Number(line.qty) || 0) * (Number(line.rate) || 0))}</strong>
+                </div>
+              </td>
+              <td style={{ verticalAlign: "top" }}><button type="button" className="secondary" onClick={() => removeLine(index)} disabled={disabled}>Remove</button></td>
             </tr>;
           })}
         </tbody>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { requireRequestPermission, type Permission } from "@/lib/auth";
 import { POST as approvalsPost } from "@/app/api/approvals/route";
 import { POST as assetsPost } from "@/app/api/assets/route";
@@ -11,6 +12,8 @@ import { POST as schedulesPost } from "@/app/api/payment-schedules/route";
 import { POST as loanActionsPost } from "@/app/api/loans/actions/route";
 import { POST as journalReversePost } from "@/app/api/journals/reverse/route";
 import { POST as setupFinancePost } from "@/app/api/setup/finance/route";
+import { POST as deleteTransactionsPost } from "@/app/api/company/transactions/route";
+import { POST as deleteMasterDataPost } from "@/app/api/company/master-data/route";
 
 type Target =
   | "approvals"
@@ -22,7 +25,9 @@ type Target =
   | "paymentSchedules"
   | "loanActions"
   | "journalReverse"
-  | "setupFinance";
+  | "setupFinance"
+  | "deleteCompanyTransactions"
+  | "deleteCompanyMasterData";
 
 type Handler = (request: Request) => Promise<Response>;
 
@@ -37,6 +42,8 @@ const HANDLERS: Record<Target, Handler> = {
   loanActions: loanActionsPost,
   journalReverse: journalReversePost,
   setupFinance: setupFinancePost,
+  deleteCompanyTransactions: deleteTransactionsPost,
+  deleteCompanyMasterData: deleteMasterDataPost,
 };
 
 function permissionFor(target: Target, body: Record<string, unknown>): Permission {
@@ -68,7 +75,8 @@ export async function POST(request: Request) {
     const body = incoming.body || {};
     requireRequestPermission(request, permissionFor(incoming.target, body));
 
-    if (!env.APP_SECRET) {
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!env.APP_SECRET && backendConfigured) {
       throw new Error("Server compatibility credential is not configured");
     }
 

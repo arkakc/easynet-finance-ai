@@ -157,7 +157,7 @@ export default function DraftSalesInvoiceEditor({ invoice, customerLabel, source
         </div>
 
         <div className="button-row no-print" style={{ marginTop: 20 }}>
-          <button type="submit" disabled={saving}>{saving ? "Saving Sales Invoice…" : "Save Draft Sales Invoice"}</button>
+          <button type="submit" disabled={saving} style={saving ? { opacity: 0.6, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}>{saving ? "Saving..." : "Save Draft Sales Invoice"}</button>
           <Link prefetch={false} className="button-link secondary-link" href={`/transactions/invoice/${encodeURIComponent(invoice.invoiceId)}`}>Cancel</Link>
         </div>
         {status && <div className="small" style={{ marginTop: 10 }}>{status}</div>}

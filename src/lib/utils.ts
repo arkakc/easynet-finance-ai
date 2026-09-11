@@ -10,10 +10,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// Format currency
+// Format currency (Defaults to Papua New Guinea Kina - PGK)
 export function formatCurrency(
   amount: number | string,
-  currency: string = 'USD',
+  currency: string = 'PGK',
   options?: { showSign?: boolean; decimals?: number }
 ): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -22,7 +22,7 @@ export function formatCurrency(
   const decimals = options?.decimals ?? 2;
 
   try {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-PG', {
       style: 'currency',
       currency,
       minimumFractionDigits: decimals,
@@ -31,6 +31,96 @@ export function formatCurrency(
   } catch {
     return `K${num.toFixed(decimals)}`;
   }
+}
+
+// Margin & Markup calculation for SME selling
+export function calculateMargin(costPrice: number, sellingPrice: number) {
+  const cost = Number(costPrice || 0);
+  const price = Number(sellingPrice || 0);
+  const profit = price - cost;
+  const marginPercent = price > 0 ? (profit / price) * 100 : 0;
+  const markupPercent = cost > 0 ? (profit / cost) * 100 : 0;
+  return {
+    profit: parseFloat(profit.toFixed(2)),
+    marginPercent: parseFloat(marginPercent.toFixed(2)),
+    markupPercent: parseFloat(markupPercent.toFixed(2)),
+  };
+}
+
+export function calculateSellingPriceFromMargin(costPrice: number, marginPercent: number): number {
+  const cost = Number(costPrice || 0);
+  const margin = Number(marginPercent || 0);
+  if (margin >= 100) return cost;
+  return parseFloat((cost / (1 - margin / 100)).toFixed(2));
+}
+
+export function calculateSellingPriceFromMarkup(costPrice: number, markupPercent: number): number {
+  const cost = Number(costPrice || 0);
+  const markup = Number(markupPercent || 0);
+  return parseFloat((cost * (1 + markup / 100)).toFixed(2));
+}
+
+// Calculate individual invoice/quote line totals
+export function calculateLineTotals(line: {
+  quantity: number;
+  unitPrice: number;
+  discountPercent?: number;
+  taxRate?: number;
+}) {
+  const qty = Number(line.quantity || 0);
+  const price = Number(line.unitPrice || 0);
+  const discPercent = Number(line.discountPercent || 0);
+  const taxRate = Number(line.taxRate || 0);
+
+  const baseAmount = qty * price;
+  const discountAmount = (baseAmount * discPercent) / 100;
+  const taxableAmount = baseAmount - discountAmount;
+  const taxAmount = (taxableAmount * taxRate) / 100;
+  const totalAmount = taxableAmount + taxAmount;
+
+  return {
+    baseAmount: parseFloat(baseAmount.toFixed(2)),
+    discountAmount: parseFloat(discountAmount.toFixed(2)),
+    amount: parseFloat(taxableAmount.toFixed(2)),
+    taxAmount: parseFloat(taxAmount.toFixed(2)),
+    total: parseFloat(totalAmount.toFixed(2)),
+  };
+}
+
+// Calculate document-level totals (subtotal, taxTotal, discountTotal, total)
+export function calculateTotals(
+  lines: Array<{
+    quantity: number;
+    unitPrice: number;
+    discountPercent?: number;
+  }>,
+  taxRate: number = 10
+) {
+  let subtotal = 0;
+  let discountTotal = 0;
+
+  for (const line of lines) {
+    const qty = Number(line.quantity || 0);
+    const price = Number(line.unitPrice || 0);
+    const discPercent = Number(line.discountPercent || 0);
+
+    const base = qty * price;
+    const disc = (base * discPercent) / 100;
+    const amount = base - disc;
+
+    subtotal += amount;
+    discountTotal += disc;
+  }
+
+  const taxTotal = (subtotal * taxRate) / 100;
+  const total = subtotal + taxTotal;
+
+  return {
+    subtotal: parseFloat(subtotal.toFixed(2)),
+    discountTotal: parseFloat(discountTotal.toFixed(2)),
+    taxTotal: parseFloat(taxTotal.toFixed(2)),
+    total: parseFloat(total.toFixed(2)),
+  };
 }
 
 // Format date

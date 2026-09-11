@@ -144,30 +144,3 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   debug: process.env.NODE_ENV === 'development',
 });
-
-// Extend NextAuth types
-declare module 'next-auth' {
-  interface User {
-    role?: string;
-    permissions?: Permission[];
-  }
-
-  interface Session {
-    user: {
-      id: string;
-      email: string;
-      name?: string;
-      image?: string;
-      role: string;
-      permissions: Permission[];
-    };
-  }
-}
-
-declare module 'next-auth/jwt' {
-  interface JWT {
-    id?: string;
-    role?: string;
-    permissions?: Permission[];
-  }
-}

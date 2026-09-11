@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { prisma } from "@/src/lib/prisma";
 
 const schema = z.object({
   assetId: z.string().trim().optional().default(""),
@@ -26,6 +27,30 @@ function requireSecret(secret?: string) {
 
 export async function GET() {
   try {
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const assets = await prisma.fixedAsset.findMany({ orderBy: { assetId: "asc" } });
+      return NextResponse.json({
+        ok: true,
+        source: "prisma",
+        assets: assets.map((asset) => ({
+          assetId: asset.assetId,
+          assetName: asset.assetName,
+          assetCategory: asset.assetCategory,
+          purchaseDate: asset.purchaseDate.toISOString().slice(0, 10),
+          supplierId: asset.supplierId || "",
+          cost: Number(asset.cost),
+          serialNumber: asset.serialNumber || "",
+          location: asset.location || "",
+          assignedTo: asset.assignedTo || "",
+          usefulLifeMonths: asset.usefulLifeMonths,
+          accumulatedDepreciation: Number(asset.accumulatedDepreciation),
+          netBookValue: Number(asset.netBookValue),
+          status: asset.status,
+          sourceDocumentId: asset.sourceDocumentId || "",
+        })),
+      });
+    }
     const result = await listTable("FixedAssets", 500, 0);
     return NextResponse.json({ ok: true, assets: result.rows });
   } catch (error) {
@@ -38,6 +63,45 @@ export async function POST(request: Request) {
     const body = await request.json() as { secret?: string; record?: unknown };
     requireSecret(body.secret);
     const record = schema.parse(body.record || {});
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      if (record.supplierId) {
+        const supplier = await prisma.supplier.findUnique({ where: { id: record.supplierId } });
+        if (!supplier) throw new Error("Supplier does not exist");
+      }
+      if (!record.sourceDocumentId) {
+        throw new Error("Fixed asset creation requires a retained source document");
+      }
+      const source = await prisma.document.findFirst({
+        where: { OR: [{ id: record.sourceDocumentId }, { code: record.sourceDocumentId }, { documentId: record.sourceDocumentId }] },
+      });
+      if (!source) throw new Error("Source document does not exist");
+      if (!source.fileUrl) throw new Error("Source document binary is not retained in the local database");
+      if (record.serialNumber) {
+        const serial = await prisma.fixedAsset.findFirst({ where: { serialNumber: record.serialNumber } });
+        if (serial) throw new Error(`Asset serial number already exists: ${record.serialNumber}`);
+      }
+      const assetId = record.assetId || `AST-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const duplicate = await prisma.fixedAsset.findUnique({ where: { assetId } });
+      if (duplicate) throw new Error(`Asset ID already exists: ${assetId}`);
+      const asset = await prisma.fixedAsset.create({
+        data: {
+          assetId,
+          assetName: record.assetName,
+          assetCategory: record.assetCategory,
+          purchaseDate: new Date(normalizeAccountingDate(record.purchaseDate)),
+          supplierId: record.supplierId || null,
+          cost: record.cost,
+          serialNumber: record.serialNumber || null,
+          location: record.location || null,
+          assignedTo: record.assignedTo || null,
+          usefulLifeMonths: record.usefulLifeMonths,
+          netBookValue: record.cost,
+          sourceDocumentId: source.id,
+        },
+      });
+      return NextResponse.json({ ok: true, source: "prisma", row: { ...record, assetId, status: asset.status, accumulatedDepreciation: 0, netBookValue: record.cost } });
+    }
     if (record.supplierId) {
       const supplier = await findRecords("Suppliers", { supplierId: record.supplierId }, 1);
       if (!supplier.rows.length) throw new Error("Supplier does not exist");

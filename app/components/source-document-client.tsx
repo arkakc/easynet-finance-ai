@@ -28,8 +28,28 @@ export default function SourceDocumentClient({documentId}:{documentId:string}){
   },[documentId]);
 
   return <div className="document-page">
-    <div className="document-toolbar no-print"><Link href="/documents">← Source Documents</Link><div className="row-actions">{doc?.driveUrl&&<a className="button-link secondary-link" href={doc.driveUrl} target="_blank" rel="noreferrer">Open Original</a>}<PrintButton/></div></div>
-    {error&&<section className="panel warning-panel"><strong>Document unavailable.</strong> {error}</section>}
+    <div className="document-toolbar no-print">
+      <Link href="/documents">← Source Documents</Link>
+      <div className="row-actions">
+        {error && (
+          <details className="system-notice-tab">
+            <summary>
+              <span>ℹ️ System Notice</span>
+              <span className="notice-arrow">▾</span>
+            </summary>
+            <div className="system-notice-dropdown">
+              <strong>Document unavailable:</strong> {error}
+            </div>
+          </details>
+        )}
+        {doc?.driveUrl && (
+          <a className="button-link secondary-link" href={doc.driveUrl} target="_blank" rel="noreferrer">
+            Open Original
+          </a>
+        )}
+        <PrintButton />
+      </div>
+    </div>
     <section className="document-sheet">
       <header className="document-header"><div><div className="eyebrow">SOURCE DOCUMENT / AI EVIDENCE</div><h1>{doc?.documentType||"Source Document"}</h1><div className="document-number">{doc?.documentNumber||documentId}</div></div><div className={`status-pill status-${String(doc?.status||"loading").toLowerCase()}`}>{loading?"LOADING":doc?.status||"REVIEW"}</div></header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:doc?<>

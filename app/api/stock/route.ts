@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { backendConfigStatus } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
@@ -138,6 +140,71 @@ async function compensateJournal(input: {
 export async function GET(request: Request) {
   try {
     const scope = new URL(request.url).searchParams.get("scope") || "full";
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [items, movements, purchaseOrders, poLines] = await Promise.all([
+        prisma.item.findMany({ orderBy: { code: "asc" } }),
+        prisma.stockMovement.findMany({ orderBy: { createdAt: "desc" } }),
+        prisma.purchaseOrder.findMany({ include: { lines: true }, orderBy: { code: "asc" } }),
+        prisma.pOLine.findMany(),
+      ]);
+      const localItems = items.map((item) => {
+        const rows = movements.filter((movement) => movement.itemId === item.id);
+        const qtyIn = rows.filter((row) => ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
+        const qtyOut = rows.filter((row) => ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
+        const stockValue = rows.reduce((sum, row) => sum + (Number(row.totalCost || 0) || Number(row.quantity) * Number(row.unitCost || 0)), 0);
+        return {
+          itemId: item.id,
+          itemCode: item.code,
+          itemName: item.name,
+          itemType: item.type === "GOOD" ? "STOCK" : item.type,
+          uom: item.unit,
+          revenueAccount: item.revenueAccount || "",
+          costAccount: item.costAccount || "",
+          defaultRate: item.sellPrice || 0,
+          taxCode: item.taxCode || "",
+          stockQty: qtyIn - qtyOut,
+          stockValue,
+          deferredRevenueMonths: 0,
+        };
+      });
+      if (scope === "items") return NextResponse.json({ ok: true, source: "prisma", items: localItems, nextItemCode: nextItemCode(localItems) });
+      return NextResponse.json({
+        ok: true,
+        source: "prisma",
+        items: localItems,
+        movements: movements.map((movement) => ({
+          movementId: movement.id,
+          movementDate: movement.createdAt.toISOString(),
+          itemId: movement.itemId,
+          projectId: movement.projectId || "",
+          movementType: movement.type,
+          qtyIn: ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
+          qtyOut: ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
+          unitCost: Number(movement.unitCost || 0),
+          value: Number(movement.totalCost || 0),
+          sourceDocumentId: movement.referenceId || "",
+        })),
+        purchaseOrders: purchaseOrders.map((order) => ({
+          poId: order.id,
+          poNumber: order.code,
+          supplierId: order.supplierId,
+          projectId: order.projectId || "",
+          status: order.status,
+          totalAmount: Number(order.total),
+        })),
+        poLines: poLines.map((line) => ({
+          poLineId: line.id,
+          poId: line.orderId,
+          itemId: line.itemId || "",
+          description: line.description,
+          qty: Number(line.quantity),
+          uom: line.unit,
+          rate: Number(line.unitPrice),
+        })),
+        nextItemCode: nextItemCode(localItems),
+      });
+    }
     if (scope === "items") {
       const items = await listTable<any>("Items", 500, 0);
       return NextResponse.json({

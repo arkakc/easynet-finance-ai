@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
 import { round2, signedMovementValue } from "@/lib/accounting/inventory";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,59 @@ function aggregateQty(rows: Array<{ itemId: string; qty: number | string }>) {
 }
 
 export default async function ControlsPage() {
+  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+
+  if (!backendConfigured) {
+    const [invoices, bills, purchaseOrders, expenses, journals, journalLines] = await Promise.all([
+      prisma.invoice.findMany({ where: { status: { notIn: ["CANCELLED", "VOID"] } } }),
+      prisma.supplierBill.findMany({ where: { status: { not: "CANCELLED" } } }),
+      prisma.purchaseOrder.findMany({ where: { status: { notIn: ["BILLED", "CLOSED", "Cancelled"] } } }),
+      prisma.expense.findMany(),
+      prisma.journalHeader.findMany(),
+      prisma.journalLine.findMany({ include: { journal: true } }),
+    ]);
+    const total = (rows: Array<{ total?: unknown; outstanding?: unknown; taxTotal?: unknown }>, field: "total" | "outstanding" | "taxTotal") =>
+      rows.reduce((sum, row) => sum + n(row[field]), 0);
+    const postedJournals = journals.filter((journal) => journal.status === "POSTED").length;
+    const unbalancedJournals = journals.filter((journal) => Math.abs(n(journal.totalDebit) - n(journal.totalCredit)) > tolerance).length;
+    const postedLines = journalLines.filter((line) => line.journal.status === "POSTED").length;
+
+    return <>
+      <div className="page-head">
+        <div>
+          <h2>Finance Control Centre</h2>
+          <p className="small">Papua New Guinea financial reconciliation and double-entry balance validation.</p>
+        </div>
+        <div className="page-head-actions">
+          <details className="system-notice-tab">
+            <summary>
+              <span>ℹ️ System Notice</span>
+              <span className="notice-arrow">▾</span>
+            </summary>
+            <div className="system-notice-dropdown">
+              <strong>Database connected:</strong> The persistent Prisma database is the active source for local finance controls.
+            </div>
+          </details>
+        </div>
+      </div>
+      <div className="grid">
+        <div className="card"><div className="label">GST Status</div><div className="value small-value">LOCAL</div></div>
+        <div className="card"><div className="label">Invoices</div><div className="value">{invoices.length}</div><div className="small">Outstanding: {money(total(invoices, "outstanding"))}</div></div>
+        <div className="card"><div className="label">Supplier Bills</div><div className="value">{bills.length}</div><div className="small">Outstanding: {money(total(bills, "outstanding"))}</div></div>
+        <div className="card"><div className="label">PO Commitments</div><div className="value">{money(total(purchaseOrders, "total"))}</div></div>
+        <div className="card"><div className="label">Expenses</div><div className="value">{money(total(expenses, "total"))}</div></div>
+        <div className="card"><div className="label">Posted Journals</div><div className="value">{postedJournals}</div><div className="small">Lines: {postedLines}</div></div>
+        <div className="card"><div className="label">Journal Exceptions</div><div className="value">{unbalancedJournals}</div></div>
+        <div className="card"><div className="label">GST on Invoices</div><div className="value">{money(total(invoices, "taxTotal"))}</div></div>
+      </div>
+      <section className="panel">
+        <h3>Control status</h3>
+        <p>Persistent database records are available for review. The control centre uses the Prisma database as its local source of truth.</p>
+        <div className="button-row"><Link className="link-button" href="/dashboard">Back to Dashboard</Link><Link className="link-button secondary-link" href="/journals">Open Journals</Link></div>
+      </section>
+    </>;
+  }
+
   let settings: Setting[] = [];
   let quotes: Quote[] = [];
   let invoices: Invoice[] = [];

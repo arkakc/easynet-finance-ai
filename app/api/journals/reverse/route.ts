@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { findRecords, postJournalRecord, updateRecord } from "@/lib/backend/apps-script";
+import { backendConfigStatus, findRecords, postJournalRecord, updateRecord } from "@/lib/backend/apps-script";
 import { assertAccountsExist, validateBalancedPosting } from "@/lib/accounting/posting";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { prisma } from "@/src/lib/prisma";
 
 const schema = z.object({
   journalId: z.string().trim().min(1),
@@ -16,6 +17,8 @@ const n = (value: unknown) => Number(value || 0);
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
 function requireSecret(secret?: string) {
+  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  if (!env.APP_SECRET && !backendConfigured) return;
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
@@ -131,6 +134,76 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { secret?: string; payload?: unknown };
     requireSecret(body.secret);
     const input = schema.parse(body.payload || {});
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const original = await prisma.journalHeader.findFirst({
+        where: { OR: [{ id: input.journalId }, { code: input.journalId }] },
+        include: { lines: true },
+      });
+      if (!original) throw new Error("Original journal not found");
+      if (original.status !== "POSTED") throw new Error("Only POSTED journals can be reversed");
+      const prior = await prisma.journalHeader.findFirst({ where: { reversalOfJournalId: original.id } });
+      if (prior) throw new Error(`Journal has already been reversed by ${prior.code}`);
+      const type = String(original.sourceDocType || "").toUpperCase();
+      if (["JOURNAL_REVERSAL", "FUNDING_LOAN", "LOAN_INTEREST_ACCRUAL", "LOAN_REPAYMENT"].includes(type)) {
+        throw new Error(`${type} requires a dedicated finance correction workflow and cannot be reversed here`);
+      }
+      if (!original.lines.length) throw new Error("Original journal has no lines");
+      const reversalId = `JRN-REV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const postingDate = new Date(normalizeAccountingDate(input.reversalDate));
+      const reversedLines = original.lines.map((line, index) => ({
+        lineNo: index + 1,
+        accountId: line.accountId,
+        description: `Reversal: ${line.description || original.reference || original.code}`,
+        debit: line.credit,
+        credit: line.debit,
+        amount: line.amount,
+        currency: line.currency,
+        projectId: line.projectId,
+        customerId: line.customerId,
+        supplierId: line.supplierId,
+        taxCode: line.taxCode,
+        taxAmount: line.taxAmount,
+        sortOrder: line.sortOrder,
+      }));
+      const totalDebit = reversedLines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const totalCredit = reversedLines.reduce((sum, line) => sum + Number(line.credit), 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.01) throw new Error("Original journal is not balanced");
+      const reversal = await prisma.$transaction(async (tx) => {
+        const created = await tx.journalHeader.create({
+          data: {
+            code: reversalId,
+            date: postingDate,
+            description: input.reason,
+            reference: input.reason,
+            sourceDocType: "JOURNAL_REVERSAL",
+            sourceDocId: original.id,
+            reversalOfJournalId: original.id,
+            status: "POSTED",
+            currency: original.currency,
+            exchangeRate: original.exchangeRate,
+            totalDebit,
+            totalCredit,
+            isBalanced: true,
+            createdBy: "journal-reversal-ui",
+            approvedBy: "Finance Controller",
+            approvedAt: new Date(),
+            postedAt: new Date(),
+            lines: { create: reversedLines },
+          },
+        });
+        await tx.journalHeader.update({ where: { id: original.id }, data: { status: "REVERSED" } });
+        return created;
+      });
+      return NextResponse.json({
+        ok: true,
+        source: "prisma",
+        originalJournalId: original.code,
+        reversalJournalId: reversal.code,
+        postingDate: normalizeAccountingDate(input.reversalDate),
+        reason: input.reason,
+      });
+    }
 
     const originalResult = await findRecords<any>("JournalHeaders", { journalId: input.journalId }, 1);
     const original = originalResult.rows[0];

@@ -1,4 +1,5 @@
-import { listTable } from "@/lib/backend/apps-script";
+import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -20,18 +21,27 @@ export default async function StatementsPage() {
   let error = "";
 
   try {
-    const [c, s, i, b, p] = await Promise.all([
-      listTable<Customer>("Customers", 500, 0),
-      listTable<Supplier>("Suppliers", 500, 0),
-      listTable<Invoice>("Invoices", 500, 0),
-      listTable<Bill>("SupplierBills", 500, 0),
-      listTable<Payment>("Payments", 500, 0),
-    ]);
-    customers = c.rows;
-    suppliers = s.rows;
-    invoices = i.rows;
-    bills = b.rows;
-    payments = p.rows.filter((row) => row.status === "POSTED");
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    if (!backendConfigured) {
+      const [c, s, i, b, p] = await Promise.all([
+        prisma.customer.findMany(),
+        prisma.supplier.findMany(),
+        prisma.invoice.findMany(),
+        prisma.supplierBill.findMany(),
+        prisma.payment.findMany(),
+      ]);
+      customers = c.map((row) => ({ customerId: row.id, customerName: row.name }));
+      suppliers = s.map((row) => ({ supplierId: row.id, supplierName: row.name }));
+      invoices = i.map((row) => ({ invoiceId: row.id, invoiceNumber: row.code, customerId: row.customerId, invoiceDate: row.issuedDate.toISOString().slice(0, 10), dueDate: row.dueDate?.toISOString().slice(0, 10) || "", totalAmount: Number(row.total), paidAmount: Number(row.amountPaid), outstandingAmount: Number(row.outstanding), status: row.status }));
+      bills = b.map((row) => ({ billId: row.id, billNumber: row.code, supplierId: row.supplierId, billDate: row.billDate.toISOString().slice(0, 10), dueDate: row.dueDate?.toISOString().slice(0, 10) || "", totalAmount: Number(row.total), paidAmount: Number(row.amountPaid), outstandingAmount: Number(row.outstanding), status: row.status }));
+      payments = p.filter((row) => ["CAPTURED", "CLEARED"].includes(row.status)).map((row) => ({ paymentId: row.id, paymentNumber: row.code, paymentType: row.type === "CUSTOMER_RECEIPT" ? "RECEIVE" : "PAY", partyType: row.customerId ? "Customer" : "Supplier", partyId: row.customerId || row.supplierId || "", paymentDate: row.date.toISOString().slice(0, 10), amount: Number(row.amount), reference: row.referenceNumber || "", status: row.status }));
+    } else {
+      const [c, s, i, b, p] = await Promise.all([
+        listTable<Customer>("Customers", 500, 0), listTable<Supplier>("Suppliers", 500, 0),
+        listTable<Invoice>("Invoices", 500, 0), listTable<Bill>("SupplierBills", 500, 0), listTable<Payment>("Payments", 500, 0),
+      ]);
+      customers = c.rows; suppliers = s.rows; invoices = i.rows; bills = b.rows; payments = p.rows.filter((row) => row.status === "POSTED");
+    }
   } catch (err) {
     error = err instanceof Error ? err.message : "Statement load failed";
   }
@@ -62,11 +72,52 @@ export default async function StatementsPage() {
     };
   });
 
+  const totalInvoiced = customerRows.reduce((sum, row) => sum + row.invoiced, 0);
+  const totalReceived = customerRows.reduce((sum, row) => sum + row.received, 0);
+  const totalCustomerOutstanding = customerRows.reduce((sum, row) => sum + row.outstanding, 0);
+  const totalSupplierOutstanding = supplierRows.reduce((sum, row) => sum + row.outstanding, 0);
+
   return (
     <>
-      <h2>Customer & Supplier Statements</h2>
-      <p className="small">Live receivable and payable statement summaries from posted documents and payments.</p>
-      {error && <section className="panel"><strong>Backend warning:</strong> {error}</section>}
+      <div className="page-head">
+        <div>
+          <h2>Customer & Supplier Statements</h2>
+          <p className="small">Papua New Guinea live receivable and payable statement summaries from posted documents.</p>
+        </div>
+        <div className="page-head-actions">
+          <div className="badge">STATEMENTS · PGK</div>
+          {error && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown">
+                <strong>Backend warning:</strong> {error}
+              </div>
+            </details>
+          )}
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <div className="label">Total Invoiced</div>
+          <div className="value">{money(totalInvoiced)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Total Received</div>
+          <div className="value">{money(totalReceived)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Receivables Outstanding</div>
+          <div className="value">{money(totalCustomerOutstanding)}</div>
+        </div>
+        <div className="card">
+          <div className="label">Payables Outstanding</div>
+          <div className="value">{money(totalSupplierOutstanding)}</div>
+        </div>
+      </div>
 
       <section className="panel table-wrap">
         <h3>Customer Balances</h3>

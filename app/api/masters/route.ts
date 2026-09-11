@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { backendConfigStatus } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 import { requirePermission } from "@/lib/auth";
 import {
   appendRecord,
@@ -9,6 +11,12 @@ import {
   listTable,
   updateRecord,
 } from "@/lib/backend/apps-script";
+import {
+  prismaDeleteSupplier,
+  prismaDeleteCustomer,
+  prismaDeleteProject,
+  prismaDeleteItem,
+} from "@/lib/backend/prisma-store";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 
 const optionalText = z.string().trim().optional().default("");
@@ -40,7 +48,7 @@ const supplierSchema = z.object({
 const projectSchema = z.object({
   projectId: optionalText,
   projectName: z.string().trim().min(2),
-  customerId: z.string().trim().min(1),
+  customerId: optionalText,
   startDate: optionalText,
   endDate: optionalText,
   status: z.string().trim().min(1).default("OPEN"),
@@ -60,9 +68,18 @@ function requireAdminSecret(secret?: string) {
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
 
-async function normalizedProject(parsed: z.infer<typeof projectSchema>) {
-  const customer = await findRecords("Customers", { customerId: parsed.customerId }, 1);
-  if (!customer.rows.length) throw new Error("Selected customer does not exist");
+async function normalizedProject(parsed: z.infer<typeof projectSchema>, backendConfigured: boolean) {
+  if (parsed.customerId) {
+    if (backendConfigured) {
+      const customer = await findRecords("Customers", { customerId: parsed.customerId }, 1);
+      if (!customer.rows.length) throw new Error("Selected customer does not exist");
+    } else {
+      const customer = await prisma.customer.findFirst({
+        where: { OR: [{ id: parsed.customerId }, { code: parsed.customerId }] },
+      });
+      if (!customer) throw new Error("Selected customer does not exist");
+    }
+  }
 
   const calculatedTotal = Math.round((parsed.contractNet + parsed.gstAmount + Number.EPSILON) * 100) / 100;
   if (parsed.contractTotal > 0 && Math.abs(parsed.contractTotal - calculatedTotal) > 0.01) {
@@ -107,16 +124,114 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       secret?: string;
-      type?: "customer" | "supplier" | "project";
-      mode?: "create" | "update";
+      type?: "customer" | "supplier" | "project" | "item";
+      mode?: "create" | "update" | "delete";
       record?: unknown;
     };
 
     requireAdminSecret(body.secret);
-    const mode = body.mode === "update" ? "update" : "create";
+    const mode = body.mode === "delete" ? "delete" : body.mode === "update" ? "update" : "create";
+    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
 
     if (body.type === "customer") {
+      if (mode === "delete") {
+        const raw = (body.record || {}) as Record<string, unknown>;
+        const customerId = String(raw.customerId || raw.id || raw.code || "").trim();
+        if (!customerId) throw new Error("Customer ID is required for deletion");
+
+        if (!backendConfigured) {
+          const res = await prismaDeleteCustomer(customerId);
+          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+        }
+
+        const [existing, invoices, quotes, payments, projects] = await Promise.all([
+          findRecords("Customers", { customerId }, 1),
+          findRecords("Invoices", { customerId }, 1),
+          findRecords("Quotes", { customerId }, 1),
+          findRecords("Payments", { partyId: customerId }, 1),
+          findRecords("Projects", { customerId }, 1),
+        ]);
+
+        if (!existing.rows.length) throw new Error("Customer not found");
+
+        const hasLedger = invoices.rows.length > 0 || quotes.rows.length > 0 || payments.rows.length > 0 || projects.rows.length > 0;
+        if (hasLedger) {
+          throw new Error("Cannot delete customer: customer already has accounts ledger entries or transactions.");
+        }
+
+        await updateRecord("Customers", "customerId", customerId, { active: false }, "master-data-ui:delete");
+        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, customerId });
+      }
+
       const parsed = customerSchema.parse(body.record || {});
+      if (!backendConfigured) {
+        if (mode === "update") {
+          if (!parsed.customerId) throw new Error("Customer ID is required for update");
+          const existing = await prisma.customer.findFirst({
+            where: { OR: [{ id: parsed.customerId }, { code: parsed.customerId }] },
+          });
+          if (!existing) throw new Error("Customer not found");
+          const updated = await prisma.customer.update({
+            where: { id: existing.id },
+            data: {
+              name: parsed.customerName,
+              phone: parsed.phone || null,
+              email: parsed.email || null,
+              address: parsed.address || null,
+              taxId: parsed.taxId || null,
+              creditLimit: parsed.creditLimit || null,
+            },
+          });
+          return NextResponse.json({
+            ok: true,
+            type: body.type,
+            mode,
+            row: {
+              customerId: updated.id,
+              customerCode: updated.code,
+              customerName: updated.name,
+              phone: updated.phone || "",
+              email: updated.email || "",
+              address: updated.address || "",
+              taxId: updated.taxId || "",
+              creditTermsDays: 30,
+              creditLimit: Number(updated.creditLimit || 0),
+              currency: "PGK",
+              active: updated.isActive !== false,
+            },
+          });
+        }
+        const created = await prisma.customer.create({
+          data: {
+            code: generatedId("CUS"),
+            name: parsed.customerName,
+            phone: parsed.phone || null,
+            email: parsed.email || null,
+            address: parsed.address || null,
+            taxId: parsed.taxId || null,
+            creditLimit: parsed.creditLimit || null,
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          type: body.type,
+          mode,
+          row: {
+            customerId: created.id,
+            customerCode: created.code,
+            customerName: created.name,
+            phone: created.phone || "",
+            email: created.email || "",
+            address: created.address || "",
+            taxId: created.taxId || "",
+            creditTermsDays: 30,
+            creditLimit: Number(created.creditLimit || 0),
+            currency: "PGK",
+            active: true,
+          },
+        });
+      }
+
       if (mode === "update") {
         if (!parsed.customerId) throw new Error("Customer ID is required for update");
         const existing = await findRecords("Customers", { customerId: parsed.customerId }, 1);
@@ -136,7 +251,100 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "supplier") {
+      if (mode === "delete") {
+        const raw = (body.record || {}) as Record<string, unknown>;
+        const supplierId = String(raw.supplierId || raw.id || raw.code || "").trim();
+        if (!supplierId) throw new Error("Supplier ID is required for deletion");
+
+        if (!backendConfigured) {
+          const res = await prismaDeleteSupplier(supplierId);
+          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+        }
+
+        const [existing, bills, pos, payments, expenses] = await Promise.all([
+          findRecords("Suppliers", { supplierId }, 1),
+          findRecords("SupplierBills", { supplierId }, 1),
+          findRecords("PurchaseOrders", { supplierId }, 1),
+          findRecords("Payments", { partyId: supplierId }, 1),
+          findRecords("Expenses", { supplierId }, 1),
+        ]);
+
+        if (!existing.rows.length) throw new Error("Supplier not found");
+
+        const hasLedger = bills.rows.length > 0 || pos.rows.length > 0 || payments.rows.length > 0 || expenses.rows.length > 0;
+        if (hasLedger) {
+          throw new Error("Cannot delete supplier: supplier already has accounts ledger entries or transactions.");
+        }
+
+        await updateRecord("Suppliers", "supplierId", supplierId, { active: false }, "master-data-ui:delete");
+        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, supplierId });
+      }
+
       const parsed = supplierSchema.parse(body.record || {});
+      if (!backendConfigured) {
+        if (mode === "update") {
+          if (!parsed.supplierId) throw new Error("Supplier ID is required for update");
+          const existing = await prisma.supplier.findFirst({
+            where: { OR: [{ id: parsed.supplierId }, { code: parsed.supplierId }] },
+          });
+          if (!existing) throw new Error("Supplier not found");
+          const updated = await prisma.supplier.update({
+            where: { id: existing.id },
+            data: {
+              name: parsed.supplierName,
+              phone: parsed.phone || null,
+              email: parsed.email || null,
+              address: parsed.address || null,
+              taxId: parsed.taxId || null,
+            },
+          });
+          return NextResponse.json({
+            ok: true,
+            type: body.type,
+            mode,
+            row: {
+              supplierId: updated.id,
+              supplierCode: updated.code,
+              supplierName: updated.name,
+              phone: updated.phone || "",
+              email: updated.email || "",
+              address: updated.address || "",
+              taxId: updated.taxId || "",
+              paymentTermsDays: parsed.paymentTermsDays || 30,
+              currency: "PGK",
+              active: updated.isActive !== false,
+            },
+          });
+        }
+        const created = await prisma.supplier.create({
+          data: {
+            code: generatedId("SUP"),
+            name: parsed.supplierName,
+            phone: parsed.phone || null,
+            email: parsed.email || null,
+            address: parsed.address || null,
+            taxId: parsed.taxId || null,
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          type: body.type,
+          mode,
+          row: {
+            supplierId: created.id,
+            supplierCode: created.code,
+            supplierName: created.name,
+            phone: created.phone || "",
+            email: created.email || "",
+            address: created.address || "",
+            taxId: created.taxId || "",
+            paymentTermsDays: parsed.paymentTermsDays || 30,
+            currency: "PGK",
+            active: true,
+          },
+        });
+      }
+
       if (mode === "update") {
         if (!parsed.supplierId) throw new Error("Supplier ID is required for update");
         const existing = await findRecords("Suppliers", { supplierId: parsed.supplierId }, 1);
@@ -156,8 +364,112 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "project") {
+      if (mode === "delete") {
+        const raw = (body.record || {}) as Record<string, unknown>;
+        const projectId = String(raw.projectId || raw.id || raw.code || "").trim();
+        if (!projectId) throw new Error("Project ID is required for deletion");
+
+        if (!backendConfigured) {
+          const res = await prismaDeleteProject(projectId);
+          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+        }
+
+        const [existing, pos, bills, quotes, invoices, payments, expenses] = await Promise.all([
+          findRecords("Projects", { projectId }, 1),
+          findRecords("PurchaseOrders", { projectId }, 1),
+          findRecords("SupplierBills", { projectId }, 1),
+          findRecords("Quotes", { projectId }, 1),
+          findRecords("Invoices", { projectId }, 1),
+          findRecords("Payments", { projectId }, 1),
+          findRecords("Expenses", { projectId }, 1),
+        ]);
+
+        if (!existing.rows.length) throw new Error("Project not found");
+
+        const hasLedger = pos.rows.length > 0 || bills.rows.length > 0 || quotes.rows.length > 0 || invoices.rows.length > 0 || payments.rows.length > 0 || expenses.rows.length > 0;
+        if (hasLedger) {
+          throw new Error("Cannot delete project: project already has accounts ledger entries or transactions.");
+        }
+
+        await updateRecord("Projects", "projectId", projectId, { status: "CANCELLED" }, "master-data-ui:delete");
+        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, projectId });
+      }
+
       const parsed = projectSchema.parse(body.record || {});
-      const normalizedProjectRecord = await normalizedProject(parsed);
+      const normalizedProjectRecord = await normalizedProject(parsed, backendConfigured);
+      if (!backendConfigured) {
+        if (mode === "update") {
+          if (!parsed.projectId) throw new Error("Project ID is required for update");
+          const existing = await prisma.project.findFirst({
+            where: { OR: [{ id: parsed.projectId }, { code: parsed.projectId }] },
+          });
+          if (!existing) throw new Error("Project not found");
+          const customerMatch = parsed.customerId
+            ? await prisma.customer.findFirst({ where: { OR: [{ id: parsed.customerId }, { code: parsed.customerId }] } })
+            : null;
+          const updated = await prisma.project.update({
+            where: { id: existing.id },
+            data: {
+              name: parsed.projectName,
+              customerId: customerMatch ? customerMatch.id : null,
+              startDate: parsed.startDate ? new Date(parsed.startDate) : null,
+              endDate: parsed.endDate ? new Date(parsed.endDate) : null,
+              budget: parsed.contractTotal || null,
+            },
+          });
+          return NextResponse.json({
+            ok: true,
+            type: body.type,
+            mode,
+            row: {
+              projectId: updated.id,
+              projectCode: updated.code,
+              projectName: updated.name,
+              customerId: updated.customerId || "",
+              startDate: updated.startDate?.toISOString().slice(0, 10) || "",
+              endDate: updated.endDate?.toISOString().slice(0, 10) || "",
+              status: updated.status || "OPEN",
+              contractNet: Number(updated.budget || 0),
+              gstAmount: 0,
+              contractTotal: Number(updated.budget || 0),
+              expectedCost: 0,
+            },
+          });
+        }
+        const customerMatch = parsed.customerId
+          ? await prisma.customer.findFirst({ where: { OR: [{ id: parsed.customerId }, { code: parsed.customerId }] } })
+          : null;
+        const created = await prisma.project.create({
+          data: {
+            code: generatedId("PJ"),
+            name: parsed.projectName,
+            customerId: customerMatch ? customerMatch.id : null,
+            startDate: parsed.startDate ? new Date(parsed.startDate) : null,
+            endDate: parsed.endDate ? new Date(parsed.endDate) : null,
+            budget: parsed.contractTotal || null,
+            status: "ACTIVE",
+          },
+        });
+        return NextResponse.json({
+          ok: true,
+          type: body.type,
+          mode,
+          row: {
+            projectId: created.id,
+            projectCode: created.code,
+            projectName: created.name,
+            customerId: created.customerId || "",
+            startDate: created.startDate?.toISOString().slice(0, 10) || "",
+            endDate: created.endDate?.toISOString().slice(0, 10) || "",
+            status: created.status || "OPEN",
+            contractNet: Number(created.budget || 0),
+            gstAmount: 0,
+            contractTotal: Number(created.budget || 0),
+            expectedCost: 0,
+          },
+        });
+      }
+
       if (mode === "update") {
         if (!parsed.projectId) throw new Error("Project ID is required for update");
         const existing = await findRecords("Projects", { projectId: parsed.projectId }, 1);
@@ -174,6 +486,24 @@ export async function POST(request: Request) {
         "master-data-ui",
       );
       return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
+    }
+
+    if (body.type === "item") {
+      if (mode === "delete") {
+        const raw = (body.record || {}) as Record<string, unknown>;
+        const itemId = String(raw.itemId || raw.id || raw.code || "").trim();
+        if (!itemId) throw new Error("Item ID is required for deletion");
+
+        if (!backendConfigured) {
+          const res = await prismaDeleteItem(itemId);
+          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+        }
+
+        const existing = await findRecords("Items", { itemId }, 1);
+        if (!existing.rows.length) throw new Error("Item not found");
+        await updateRecord("Items", "itemId", itemId, { active: false }, "master-data-ui:delete");
+        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, itemId });
+      }
     }
 
     return NextResponse.json({ ok: false, error: "Unsupported master-data type" }, { status: 400 });

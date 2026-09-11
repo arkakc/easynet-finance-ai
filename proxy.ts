@@ -23,27 +23,40 @@ function optimizedReadRewrite(request:NextRequest){
   const pathname=request.nextUrl.pathname;
 
   if(pathname==="/api/erp/transactions"&&!request.nextUrl.searchParams.has("nextNumberFor")){
-    const url=request.nextUrl.clone();
-    url.pathname="/api/erp/transaction-list";
-    url.search="";
-    url.searchParams.set("scope",module==="purchase"?"purchaseModule":module==="expense"?"expenseModule":"salesModule");
-    return NextResponse.rewrite(url);
+    const scope = module==="purchase"?"purchaseModule":module==="expense"?"expenseModule":"salesModule";
+    const url = new URL(`/api/erp/transaction-list?scope=${scope}`, request.url);
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-erp-scope", scope);
+    return NextResponse.rewrite(url, {
+      request: {
+        headers: requestHeaders,
+      },
+    });
   }
 
   if(pathname==="/api/masters"){
-    const url=request.nextUrl.clone();
-    url.pathname="/api/masters/scoped";
-    url.search="";
-    url.searchParams.set("scope",module==="sales"?"sales":"purchase");
-    return NextResponse.rewrite(url);
+    const scope = module==="sales"?"sales":"purchase";
+    const url = new URL(`/api/masters/scoped?scope=${scope}`, request.url);
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-erp-scope", scope);
+    return NextResponse.rewrite(url, {
+      request: {
+        headers: requestHeaders,
+      },
+    });
   }
 
   return null;
 }
 
 export function proxy(request:NextRequest){
-  const{pathname}=request.nextUrl;
-  if(PUBLIC_PATHS.some(p=>pathname===p||pathname.startsWith(`${p}/`))||pathname.startsWith("/_next/")||pathname==="/favicon.ico")return NextResponse.next();
+  const { pathname } = request.nextUrl;
+  if(
+    PUBLIC_PATHS.some(p=>pathname===p||pathname.startsWith(`${p}/`))||
+    pathname.startsWith("/_next/")||
+    pathname==="/favicon.ico"||
+    /\.(png|jpg|jpeg|svg|webp|gif|ico)$/i.test(pathname)
+  ) return NextResponse.next();
   const user=verifySessionToken(request.cookies.get(sessionCookie.name)?.value);
   if(!user){
     if(pathname.startsWith("/api/"))return NextResponse.json({ok:false,error:"Unauthorized"},{status:401});

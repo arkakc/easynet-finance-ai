@@ -12,6 +12,7 @@ type DashboardPayload = {
   services?: Record<string, BackendStatus>;
   backendError?: string;
   error?: string;
+  mode?: "local" | "backend";
 };
 
 const n = (value: unknown) => {
@@ -36,6 +37,7 @@ export default function DashboardClient() {
   const [rows, setRows] = useState<DashboardKPI[]>([]);
   const [services, setServices] = useState<Record<string, BackendStatus>>({});
   const [backendError, setBackendError] = useState("");
+  const [mode, setMode] = useState<"local" | "backend">("backend");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -54,6 +56,7 @@ export default function DashboardClient() {
           setRows(Array.isArray(body.rows) ? body.rows : []);
           setServices(body.services || {});
           setBackendError(String(body.backendError || ""));
+          setMode(body.mode || "backend");
         } catch (error) {
           if (controller.signal.aborted) return;
           setBackendError(error instanceof Error ? error.message : "Dashboard data load failed");
@@ -92,9 +95,9 @@ export default function DashboardClient() {
   const coreVersion = services.core?.version || "Unavailable";
   const reportingVersion = services.reporting?.version || "Unavailable";
   const documentVersion = services.document?.version || "Unavailable";
-  const coreReady = Boolean(services.core?.ok && coreVersion === "0.5.0");
-  const reportingReady = Boolean(services.reporting?.ok && reportingVersion === "0.4.1");
-  const documentReady = Boolean(services.document?.ok && documentVersion === "0.4.0");
+  const coreReady = mode === "local" || Boolean(services.core?.ok && coreVersion === "0.5.0");
+  const reportingReady = mode === "local" || Boolean(services.reporting?.ok && reportingVersion === "0.4.1");
+  const documentReady = mode === "local" || Boolean(services.document?.ok && documentVersion === "0.4.0");
 
   const activeLoan = String(get("loanStatus")).toUpperCase() === "ACTIVE";
   let nextLoanAccrual = "";
@@ -123,21 +126,118 @@ export default function DashboardClient() {
     ["PO Commitments", displayValue(poCommitments)],
   ];
 
+  const systemMessages: Array<{
+    id: string;
+    type: "info" | "success" | "warning" | "error";
+    icon: string;
+    title: string;
+    text: string;
+  }> = [];
+
+  if (!loaded) {
+    systemMessages.push({
+      id: "loading",
+      type: "info",
+      icon: "⏳",
+      title: "Loading Live Data",
+      text: "The dashboard UI is ready while live reporting and backend values are fetched in the background.",
+    });
+  } else {
+    if (mode === "local") {
+      systemMessages.push({
+        id: "db",
+        type: "success",
+        icon: "✓",
+        title: "Database Connected",
+        text: "Dashboard values are loaded from the persistent Prisma database.",
+      });
+    }
+
+    if (backendError) {
+      systemMessages.push({
+        id: "backend-err",
+        type: "error",
+        icon: "⚠️",
+        title: "Financial Data Notice",
+        text: `${backendError}. Do not rely on dashboard balances until this warning clears.`,
+      });
+    }
+
+    if (!reportingReady) {
+      systemMessages.push({
+        id: "reporting-upgrade",
+        type: "warning",
+        icon: "⚙️",
+        title: "Reporting Backend Upgrade Required",
+        text: `Connected Reporting API is ${reportingVersion}. This feature branch expects v0.4.1 so reversed-document exclusion, credit-note reporting and accounting-truth project profitability are guaranteed only after the Reporting Apps Script is deployed at v0.4.1 and its materializer is refreshed.`,
+      });
+    }
+
+    if (!coreReady) {
+      systemMessages.push({
+        id: "core-version",
+        type: "warning",
+        icon: "⚙️",
+        title: "Core Backend Version Check",
+        text: `Connected Core API is ${coreVersion}; Accounting 0.5 expects Core v0.5.0.`,
+      });
+    }
+
+    if (!documentReady) {
+      systemMessages.push({
+        id: "doc-version",
+        type: "warning",
+        icon: "⚙️",
+        title: "Document Backend Version Check",
+        text: `Connected Document API is ${documentVersion}; this branch expects Document v0.4.0.`,
+      });
+    }
+
+    systemMessages.push({
+      id: "paint-info",
+      type: "info",
+      icon: "ℹ️",
+      title: "Page Synchronization Info",
+      text: "Page UI loads first; live reporting values and backend readiness are populated immediately after the first paint.",
+    });
+  }
+
+  const hasWarnings = systemMessages.some((m) => m.type === "warning" || m.type === "error");
+
   return (
     <>
       <div className="page-head">
         <div>
           <h2>Management Dashboard</h2>
-          <p className="small">Page UI loads first; live reporting values and backend readiness are populated immediately after the first paint.</p>
+          <p className="small">Financial overview and real-time controls for Papua New Guinea SME operations.</p>
         </div>
-        <div className="badge">GST: {gstStatus}</div>
+        <div className="page-head-actions">
+          <div className="badge">GST: {gstStatus}</div>
+          {systemMessages.length > 0 && (
+            <details className="system-notice-tab">
+              <summary>
+                <span>ℹ️ System Notice</span>
+                <span className="notice-arrow">▾</span>
+              </summary>
+              <div className="system-notice-dropdown" style={{ maxHeight: "400px", overflowY: "auto", width: "360px" }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #e2e8f0" }}>
+                  System Notices & Diagnostics
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {systemMessages.map((msg) => (
+                    <div key={msg.id} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "12px" }}>
+                      <span>{msg.icon}</span>
+                      <div>
+                        <strong>{msg.title}:</strong> {msg.text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </details>
+          )}
+        </div>
       </div>
-
-      {!loaded && <section className="panel"><strong>Loading live data…</strong> <span className="small">The dashboard UI is already ready while backend values are fetched.</span></section>}
-      {loaded && backendError && <section className="panel warning-panel"><strong>Financial data unavailable.</strong> {backendError} Do not rely on dashboard balances until this warning clears.</section>}
-      {loaded && !reportingReady && <section className="panel warning-panel"><strong>Reporting backend upgrade required.</strong> Connected Reporting API is {reportingVersion}. This feature branch expects v0.4.1 so reversed-document exclusion, credit-note reporting and accounting-truth project profitability are guaranteed only after the Reporting Apps Script is deployed at v0.4.1 and its materializer is refreshed.</section>}
-      {loaded && !coreReady && <section className="panel warning-panel"><strong>Core backend version check:</strong> connected Core API is {coreVersion}; Accounting 0.5 expects Core v0.5.0.</section>}
-      {loaded && !documentReady && <section className="panel warning-panel"><strong>Document backend version check:</strong> connected Document API is {documentVersion}; this branch expects Document v0.4.0.</section>}
 
       <div className="grid dashboard-grid">
         {kpis.map(([label, value]) => <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
@@ -164,7 +264,7 @@ export default function DashboardClient() {
             <p>Reporting API: <strong>{reportingVersion}</strong> · {reportingReady ? "READY" : "UPGRADE REQUIRED"}</p>
             <p>Document API: <strong>{documentVersion}</strong> · {documentReady ? "READY" : "REVIEW"}</p>
           </>}
-          <p className="small">Version checks run after the UI paints and read the connected Apps Script services directly.</p>
+          <p className="small">{mode === "local" ? "The persistent Prisma database is connected and ready." : "Version checks run after the UI paints against the configured reporting services."}</p>
         </section>
       </div>
 

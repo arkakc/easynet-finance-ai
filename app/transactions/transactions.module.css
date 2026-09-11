@@ -1,13 +1,15 @@
 .chooser {
-  padding: 22px;
+  padding: 24px;
 }
 
 .chooserHeader {
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .chooserHeader h3 {
   margin: 0 0 6px;
+  font-size: 19px;
+  letter-spacing: -0.02em;
 }
 
 .chooserGrid {
@@ -17,30 +19,44 @@
 }
 
 .ctaCard {
-  min-height: 132px;
-  padding: 20px;
-  border-radius: 14px;
+  min-height: 148px;
+  padding: 28px 30px;
+  border-radius: 16px;
   text-align: left;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   white-space: normal;
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.ctaCard:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.09);
+  border-color: #3b82f6;
 }
 
 .ctaTitle {
   display: block;
-  font-size: 18px;
+  font-size: 18.5px;
   font-weight: 750;
   line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: #0f172a;
 }
 
 .ctaCopy {
   display: block;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.45;
-  opacity: 0.82;
+  color: #64748b;
+  opacity: 1;
 }
 
 .contextBar {
@@ -48,11 +64,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 16px;
+  padding: 14px 18px;
 }
 
 .contextTitle {
   font-weight: 700;
+  font-size: 14px;
 }
 
 .sourcePanel {
@@ -60,26 +77,26 @@
 }
 
 .partialReceiptRow td {
-  background: #fff8e6;
+  background: #fffdf5;
 }
 
 .receiptCompleteRow td {
-  background: #eef8f1;
+  background: #f6fcf8;
 }
 
 .outstandingRow td {
-  background: #fff4f4;
+  background: #fef8f8;
 }
 
 .partialPaidRow td {
-  background: #eef6ff;
+  background: #f6fafe;
 }
 
 .partialReceiptRow:hover td,
 .receiptCompleteRow:hover td,
 .outstandingRow:hover td,
 .partialPaidRow:hover td {
-  filter: brightness(.985);
+  background: #f1f5f9;
 }
 
 @media (max-width: 760px) {

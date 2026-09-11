@@ -38,8 +38,8 @@ export async function GET(request: NextRequest) {
             { email: { contains: search } },
           ],
         } : {},
-        role ? { role } : {},
-        status ? { status } : {},
+        role ? { role: role as Role } : {},
+        status ? { status: status as UserStatus } : {},
       ],
     };
 
@@ -298,11 +298,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         entityId: user.id,
         entityCode: user.email,
         description: `User updated by admin: ${user.email}`,
-        changes: {
+        changes: JSON.stringify({
           name: name || existingUser.name,
           role: role || existingUser.role,
           status: status || existingUser.status,
-        },
+        }),
       },
     });
 

@@ -1,6 +1,11 @@
 import { createHmac, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { env } from "@/lib/env";
+import bcrypt from "bcryptjs";
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 12);
+}
 
 export type Role = "System Manager" | "Finance Controller" | "Accounts User" | "Sales User" | "Purchase User" | "Stock User" | "Management" | "Auditor";
 export type Permission = "dashboard.read" | "sales.read" | "sales.write" | "purchase.read" | "purchase.write" | "stock.read" | "stock.write" | "accounts.read" | "accounts.write" | "reports.read" | "users.manage" | "settings.manage" | "post.approve";
@@ -24,7 +29,7 @@ const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TEST_ADMIN: ConfigUser = {
   email: "admin@easynet.local",
   name: "Test System Administrator",
-  passwordHash: "scrypt$easynet-test-admin$cbcc6442f9b6a5b35f8ab0b0c92e161760c0a56deee87e21f92dd1b8027d778c89ebad5a2de05ebb87d8a80cbfcfb209d3dcf56e73c61dd8e92d4eb1f8997f9d",
+  passwordHash: "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a",
   roles: ["System Manager"],
 };
 
