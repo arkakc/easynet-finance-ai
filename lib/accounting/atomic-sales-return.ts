@@ -1,9 +1,10 @@
 import { runAtomicAccounting, type AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { ensurePaymentScheduleInfrastructure, findPaymentSchedules, updatePaymentSchedule } from "@/lib/accounting/payment-schedule-store";
-import { round2 } from "@/lib/accounting/inventory";
+import { round2, round4 } from "@/lib/accounting/inventory";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
+import { resolveWarehouse, syncWarehouseBalance, warehouseInventoryState } from "@/lib/accounting/warehouse-stock";
 
 export type AtomicSalesCreditNoteInput = {
   creditNoteId: string;
@@ -166,14 +167,21 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
             type: "RETURN_IN",
             referenceId: { in: priorCreditIds },
           },
-          select: { itemId: true, quantity: true },
+          select: { itemId: true, quantity: true, warehouseId: true },
         })
       : [];
     const priorReturnedByItem = new Map<string, number>();
+    const priorReturnedByWarehouse = new Map<string, number>();
     for (const movement of priorReturns) {
       priorReturnedByItem.set(
         movement.itemId,
         (priorReturnedByItem.get(movement.itemId) || 0) + Number(movement.quantity || 0),
+      );
+      const warehouseKey = movement.warehouseId || "__DEFAULT__";
+      const key = `${movement.itemId}|${warehouseKey}`;
+      priorReturnedByWarehouse.set(
+        key,
+        (priorReturnedByWarehouse.get(key) || 0) + Number(movement.quantity || 0),
       );
     }
 
@@ -211,40 +219,94 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
         );
       }
 
-      const issuedValue = itemIssues.reduce(
-        (sum, movement) => sum + Math.abs(Number(
+      const issueGroups = new Map<string, {
+        warehouseId: string | null;
+        qty: number;
+        value: number;
+      }>();
+      for (const movement of itemIssues) {
+        const warehouseKey = movement.warehouseId || "__DEFAULT__";
+        const group = issueGroups.get(warehouseKey) || {
+          warehouseId: movement.warehouseId || null,
+          qty: 0,
+          value: 0,
+        };
+        group.qty += Number(movement.quantity || 0);
+        group.value += Math.abs(Number(
           movement.totalCost
           ?? (Number(movement.quantity || 0) * Number(movement.unitCost || 0)),
-        )),
-        0,
-      );
-      const costRate = issuedValue / issuedQty;
-      const value = round2(returnQty * costRate);
-      inventoryDebit = round2(inventoryDebit + value);
+        ));
+        issueGroups.set(warehouseKey, group);
+      }
 
-      const costAccountId = String(line.item.costAccount || "ACC-5100");
-      cogsCredits.set(
-        costAccountId,
-        round2((cogsCredits.get(costAccountId) || 0) + value),
-      );
+      let remainingReturn = returnQty;
+      let fragment = 0;
+      for (const [warehouseKey, group] of issueGroups.entries()) {
+        if (remainingReturn <= 0.0001) break;
+        const priorAtWarehouse = Number(
+          priorReturnedByWarehouse.get(`${line.itemId || ""}|${warehouseKey}`) || 0,
+        );
+        const availableAtWarehouse = Math.max(0, group.qty - priorAtWarehouse);
+        if (availableAtWarehouse <= 0.0001) continue;
 
-      const movementId = `RET-STK-${credit.id}-${String(index + 1).padStart(3, "0")}`;
-      await tx.stockMovement.create({
-        data: {
-          id: movementId,
+        const qtyToReturn = Math.min(remainingReturn, availableAtWarehouse);
+        const costRate = group.qty > 0 ? group.value / group.qty : 0;
+        const value = round2(qtyToReturn * costRate);
+        inventoryDebit = round2(inventoryDebit + value);
+
+        const costAccountId = String(line.item.costAccount || "ACC-5100");
+        cogsCredits.set(
+          costAccountId,
+          round2((cogsCredits.get(costAccountId) || 0) + value),
+        );
+
+        const warehouse = await resolveWarehouse(tx, group.warehouseId);
+        const current = await warehouseInventoryState(
+          tx,
+          line.item.id,
+          warehouse.id,
+          Number(line.item.purchasePrice || 0),
+          group.warehouseId === null,
+        );
+
+        fragment += 1;
+        const movementId = `RET-STK-${credit.id}-${String(index + 1).padStart(3, "0")}-${String(fragment).padStart(2, "0")}`;
+        await tx.stockMovement.create({
+          data: {
+            id: movementId,
+            itemId: line.item.id,
+            warehouseId: warehouse.id,
+            type: "RETURN_IN",
+            quantity: qtyToReturn,
+            unitCost: round4(costRate),
+            totalCost: value,
+            referenceType: "SALES_RETURN",
+            referenceId: credit.id,
+            projectId: credit.projectId || original.projectId || null,
+            createdAt: new Date(credit.issuedDate),
+            createdBy: input.createdBy || "sales-return:stock",
+          },
+        });
+        createdReturnIds.push(movementId);
+
+        const nextQty = round4(current.qty + qtyToReturn);
+        const nextValue = round2(current.value + value);
+        await syncWarehouseBalance(tx, {
           itemId: line.item.id,
-          type: "RETURN_IN",
-          quantity: returnQty,
-          unitCost: round2(costRate),
-          totalCost: value,
-          referenceType: "SALES_RETURN",
-          referenceId: credit.id,
-          projectId: credit.projectId || original.projectId || null,
-          createdAt: new Date(credit.issuedDate),
-          createdBy: input.createdBy || "sales-return:stock",
-        },
-      });
-      createdReturnIds.push(movementId);
+          warehouseId: warehouse.id,
+          quantity: nextQty,
+          value: nextValue,
+          rate: nextQty > 0 ? round4(nextValue / nextQty) : round4(costRate),
+        });
+
+        remainingReturn = round4(remainingReturn - qtyToReturn);
+      }
+
+      if (remainingReturn > 0.0001) {
+        throw new Error(
+          `Return quantity for ${line.item.code} could not be matched back to the original issuing warehouse(s)`,
+        );
+      }
     }
 
     if (inventoryDebit > 0) {
