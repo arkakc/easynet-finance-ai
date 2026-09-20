@@ -94,6 +94,7 @@ async function reverseAllocationSettlement(
     status: string;
   },
   actor: string,
+  reversalDate: Date,
 ) {
   if (allocation.status !== "POSTED") {
     throw new Error("Payment allocation is not active");
@@ -135,6 +136,7 @@ async function reverseAllocationSettlement(
     data: {
       status: "REVERSED",
       reversedBy: actor,
+      reversalDate,
       reversedAt: new Date(),
     },
   });
@@ -148,6 +150,7 @@ async function synchronizeSourceAfterReversal(
     reference: string | null;
   },
   actor: string,
+  reversalDate: Date,
 ) {
   const type = String(original.sourceDocType || "").toUpperCase();
   const reference = sourceReference(original);
@@ -203,7 +206,7 @@ async function synchronizeSourceAfterReversal(
     if (allocation.allocationType !== "ADVANCE") {
       throw new Error("Only advance allocation journals can be reversed through this allocation workflow");
     }
-    await reverseAllocationSettlement(tx, allocation, actor);
+    await reverseAllocationSettlement(tx, allocation, actor, reversalDate);
     return;
   }
 
@@ -230,7 +233,7 @@ async function synchronizeSourceAfterReversal(
     }
 
     for (const allocation of allocations) {
-      await reverseAllocationSettlement(tx, allocation, actor);
+      await reverseAllocationSettlement(tx, allocation, actor, reversalDate);
     }
 
     await tx.payment.update({
@@ -304,7 +307,7 @@ export async function reversePostedJournal(
 
     // Source/subledger correction and the counter-entry commit together.
     // Any failure rolls the complete reversal back.
-    await synchronizeSourceAfterReversal(tx, original, input.createdBy || "journal-reversal-ui");
+    await synchronizeSourceAfterReversal(tx, original, input.createdBy || "journal-reversal-ui", postingDate);
 
     const reversal = await tx.journalHeader.create({
       data: {
