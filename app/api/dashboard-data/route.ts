@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
-import { backendConfigStatus, backendHealthAll, listReportingTable } from "@/lib/backend/apps-script";
 import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
 import { pngToday } from "@/lib/accounting/period-close";
 import { prisma } from "@/src/lib/prisma";
@@ -59,31 +58,13 @@ async function localDashboardData() {
 export async function GET() {
   try {
     await requirePermission("dashboard.read");
-    const configuration = backendConfigStatus();
-    const backendConfigured = Object.values(configuration).some((service) => service.source !== "unconfigured");
-
-    if (!backendConfigured) {
-      return NextResponse.json({ ok: true, mode: "local", ...(await localDashboardData()), backendError: "" });
-    }
-
-    const [reportingResult, healthResult] = await Promise.allSettled([
-      listReportingTable<DashboardKPI>("ReportDashboardKPI", 100, 0),
-      backendHealthAll(),
-    ]);
-
-    const rows = reportingResult.status === "fulfilled" ? reportingResult.value.rows : [];
-    const services = healthResult.status === "fulfilled" ? healthResult.value : {};
-    let backendError = "";
-
-    if (reportingResult.status === "rejected") {
-      backendError = reportingResult.reason instanceof Error
-        ? reportingResult.reason.message
-        : "Reporting backend read failed";
-    } else if (!rows.length) {
-      backendError = "Reporting summary is empty. Refresh the Reporting database materializer.";
-    }
-
-    return NextResponse.json({ ok: true, rows, services, backendError });
+    return NextResponse.json({
+      ok: true,
+      mode: "prisma",
+      coreAuthority: "prisma",
+      ...(await localDashboardData()),
+      backendError: "",
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Dashboard data load failed";
     return NextResponse.json(
