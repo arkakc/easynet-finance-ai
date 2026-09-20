@@ -25,6 +25,7 @@ type BackendService = "core" | "reporting" | "document";
 type BackendEnvelope<T = unknown> = {
   ok: boolean;
   error?: string;
+  service?: BackendService;
 } & T;
 
 type JournalBundle = {
