@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { requirePermission } from "@/lib/auth";
 import {
@@ -165,7 +164,9 @@ export async function POST(request: Request) {
 
     requireAdminSecret(body.secret);
     const mode = body.mode === "delete" ? "delete" : body.mode === "update" ? "update" : "create";
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
 
     if (body.type === "customer") {
       if (mode === "delete") {
