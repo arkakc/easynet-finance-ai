@@ -16,11 +16,6 @@ async function sourceFiles(root: string): Promise<string[]> {
 }
 
 async function assertNoHiddenCoreRouter() {
-  const allowedBackendConfigStatus = new Set([
-    path.normalize("lib/backend/apps-script.ts"),
-    path.normalize("app/api/health/backend-split/route.ts"),
-    path.normalize("app/api/erp/actions/route.ts"),
-  ]);
   const files = [
     ...await sourceFiles(path.join(process.cwd(), "app")),
     ...await sourceFiles(path.join(process.cwd(), "lib")),
@@ -30,13 +25,23 @@ async function assertNoHiddenCoreRouter() {
   for (const file of files) {
     const relative = path.normalize(path.relative(process.cwd(), file));
     const source = await fs.readFile(file, "utf8");
+
     if (relative !== path.normalize("lib/backend/apps-script.ts") && /\bcallBackend\s*\(/.test(source)) {
       violations.push(`${relative}: direct callBackend() use`);
     }
-    if (source.includes("backendConfigStatus") && !allowedBackendConfigStatus.has(relative)) {
-      violations.push(`${relative}: backendConfigStatus may select a second core data path`);
+
+    // The dangerous legacy pattern treated *any* configured Apps Script
+    // service (core/reporting/document) as permission to switch operational
+    // data away from Prisma. Reporting/document-specific diagnostics are fine;
+    // an all-service switch is not.
+    if (/Object\.values\s*\(\s*backendConfigStatus\s*\(\s*\)\s*\)\s*\.some/.test(source)) {
+      violations.push(`${relative}: all-service backend switch can redirect core data`);
+    }
+    if (/Object\.values\s*\(\s*configuration\s*\)\s*\.some/.test(source) && source.includes("backendConfigStatus")) {
+      violations.push(`${relative}: configuration-wide backend switch can redirect core data`);
     }
   }
+
   if (violations.length) {
     throw new Error(`Single-source architecture violations:\n${violations.join("\n")}`);
   }
