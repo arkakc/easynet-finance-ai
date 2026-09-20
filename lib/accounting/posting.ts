@@ -4,6 +4,9 @@ import { resolveCostCenterValue } from "@/lib/accounting/cost-centers";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import {
   expensePosting,
+  inventoryAdjustmentPosting,
+  inventoryIssuePosting,
+  purchaseReceiptPosting,
   roundPostingAmount,
   salesInvoicePostingByLines,
   supplierBillPostingByLines,
@@ -14,6 +17,9 @@ import {
 
 export {
   expensePosting,
+  inventoryAdjustmentPosting,
+  inventoryIssuePosting,
+  purchaseReceiptPosting,
   salesInvoicePostingByLines,
   supplierBillPostingByLines,
   supplierBillPostingMixed,
@@ -189,33 +195,6 @@ export function supplierBillPosting(input: {
   });
 }
 
-export function purchaseReceiptPosting(input: {
-  inventoryValue: number;
-  supplierId?: string;
-  projectId?: string;
-  inventoryAccountId?: string;
-  stockReceivedButNotBilledAccountId?: string;
-}) {
-  const value = round2(input.inventoryValue);
-  const lines: PostingLine[] = [
-    {
-      accountId: input.inventoryAccountId || INITIAL_ACCOUNT_IDS.inventory,
-      debit: value,
-      supplierId: input.supplierId,
-      projectId: input.projectId,
-      description: "Inventory received",
-    },
-    {
-      accountId: input.stockReceivedButNotBilledAccountId || INITIAL_ACCOUNT_IDS.grni,
-      credit: value,
-      supplierId: input.supplierId,
-      projectId: input.projectId,
-      description: "Stock received but not billed",
-    },
-  ];
-  validateBalancedPosting(lines);
-  return lines;
-}
 
 export function receiptPosting(input: {
   amount: number;
@@ -247,79 +226,7 @@ export function supplierPaymentPosting(input: {
   ];
 }
 
-export function inventoryIssuePosting(input: {
-  amount: number;
-  costAccountId: string;
-  projectId?: string;
-  description?: string;
-  inventoryAccountId?: string;
-}) {
-  const amount = round2(input.amount);
-  return [
-    { accountId: input.costAccountId, debit: amount, projectId: input.projectId, description: input.description || "Inventory issue / cost of goods sold" },
-    { accountId: input.inventoryAccountId || INITIAL_ACCOUNT_IDS.inventory, credit: amount, projectId: input.projectId, description: "Inventory reduction" },
-  ];
-}
 
-export function inventoryAdjustmentPosting(input: {
-  amountDelta: number;
-  projectId?: string;
-  type: "LANDED_COST" | "REVALUATION" | "NRV_WRITEDOWN" | "ADJUSTMENT_IN" | "ADJUSTMENT_OUT" | "RETURN_IN" | "RETURN_OUT" | "PROJECT_ISSUE";
-  costAccountId?: string;
-  inventoryAccountId?: string;
-  stockAdjustmentAccountId?: string;
-  expensesIncludedInValuationAccountId?: string;
-}) {
-  const delta = round2(input.amountDelta);
-  if (!delta) throw new Error("Inventory adjustment amount cannot be zero");
-  const inventoryAccountId = input.inventoryAccountId || INITIAL_ACCOUNT_IDS.inventory;
-  const stockAdjustmentAccountId = input.stockAdjustmentAccountId || INITIAL_ACCOUNT_IDS.inventoryAdjustmentLoss;
-  const valuationClearingAccountId = input.expensesIncludedInValuationAccountId || INITIAL_ACCOUNT_IDS.landedCostClearing;
-
-  if (input.type === "LANDED_COST") {
-    if (delta <= 0) throw new Error("Landed cost must increase inventory value");
-    return [
-      { accountId: inventoryAccountId, debit: delta, projectId: input.projectId, description: "Landed cost capitalized to inventory" },
-      { accountId: valuationClearingAccountId, credit: delta, projectId: input.projectId, description: "Landed cost clearing" },
-    ];
-  }
-
-  if (input.type === "NRV_WRITEDOWN") {
-    if (delta >= 0) throw new Error("NRV write-down must reduce inventory value");
-    const amount = Math.abs(delta);
-    return [
-      { accountId: stockAdjustmentAccountId, debit: amount, projectId: input.projectId, description: "NRV inventory write-down" },
-      { accountId: inventoryAccountId, credit: amount, projectId: input.projectId, description: "Inventory write-down" },
-    ];
-  }
-
-  if (input.type === "REVALUATION") {
-    if (delta > 0) {
-      return [
-        { accountId: inventoryAccountId, debit: delta, projectId: input.projectId, description: "Inventory revaluation increase" },
-        { accountId: INITIAL_ACCOUNT_IDS.inventoryRevaluationGain, credit: delta, projectId: input.projectId, description: "Inventory revaluation gain" },
-      ];
-    }
-    const amount = Math.abs(delta);
-    return [
-      { accountId: stockAdjustmentAccountId, debit: amount, projectId: input.projectId, description: "Inventory revaluation loss" },
-      { accountId: inventoryAccountId, credit: amount, projectId: input.projectId, description: "Inventory revaluation decrease" },
-    ];
-  }
-
-  const accountId = input.costAccountId || stockAdjustmentAccountId;
-  if (delta > 0) {
-    return [
-      { accountId: inventoryAccountId, debit: delta, projectId: input.projectId, description: "Inventory quantity/value increase" },
-      { accountId: INITIAL_ACCOUNT_IDS.inventoryRevaluationGain, credit: delta, projectId: input.projectId, description: "Inventory adjustment gain" },
-    ];
-  }
-  const amount = Math.abs(delta);
-  return [
-    { accountId, debit: amount, projectId: input.projectId, description: "Inventory issue / adjustment cost" },
-    { accountId: inventoryAccountId, credit: amount, projectId: input.projectId, description: "Inventory quantity/value decrease" },
-  ];
-}
 
 export function deferredRevenueRecognitionPosting(input: {
   amount: number;
