@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 import { requirePermission } from "@/lib/auth";
@@ -38,7 +38,9 @@ function requireSecret(secret?: string) {
 export async function GET() {
   try {
     await requirePermission("stock.read");
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const assets = await prisma.fixedAsset.findMany({ orderBy: { assetId: "asc" } });
       return NextResponse.json({
@@ -75,7 +77,9 @@ export async function GET() {
 
 async function postAssetDepreciation(raw: unknown) {
   const record = depreciationSchema.parse(raw || {});
-  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
   if (backendConfigured) throw new Error("Fixed asset depreciation posting is currently supported in local Prisma mode only");
 
   const asset = await prisma.fixedAsset.findFirst({ where: { OR: [{ id: record.assetId }, { assetId: record.assetId }] } });
@@ -139,7 +143,9 @@ export async function POST(request: Request) {
     if (body.action === "depreciate") return NextResponse.json({ ok: true, ...(await postAssetDepreciation(body.record)) });
 
     const record = schema.parse(body.record || {});
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       if (record.supplierId) {
         const supplier = await prisma.supplier.findUnique({ where: { id: record.supplierId } });
