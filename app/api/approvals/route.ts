@@ -96,9 +96,14 @@ export async function POST(request: Request) {
       await assertSalesInvoiceStockPolicy(row);
     }
 
-    await updateRecord(config.table, config.idField, input.recordId, { status: "APPROVED" }, `finance-controller:${input.note || "approve"}`);
-
     if (creditNote) {
+      await updateRecord(
+        config.table,
+        config.idField,
+        input.recordId,
+        { status: "APPROVED" },
+        `finance-controller:${input.note || "approve"}`,
+      );
       try {
         const approvedCredit = (await findRecords<any>("Invoices", { invoiceId: input.recordId }, 1)).rows[0];
         await postSalesCreditNote(approvedCredit);
@@ -107,17 +112,35 @@ export async function POST(request: Request) {
         throw error;
       }
     } else if (ACCOUNTING_TYPES.has(input.recordType)) {
+      // Approval + document/subledger mutation + GL posting are one Prisma
+      // transaction. Do not pre-approve here and do not use compensating
+      // status rollbacks: a posting failure rolls the approval back itself.
       const internalRequest = new Request(request.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "post", payload: { recordType: input.recordType, recordId: input.recordId }, secret: body.secret }),
+        body: JSON.stringify({
+          action: "post",
+          payload: {
+            recordType: input.recordType,
+            recordId: input.recordId,
+            approveAtomically: true,
+          },
+          secret: body.secret,
+        }),
       });
       const postingResponse = await legacyTransactionPost(internalRequest);
       const postingBody = await postingResponse.json();
       if (!postingResponse.ok || !postingBody.ok) {
-        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:approval-posting-rollback");
-        throw new Error(postingBody.error || "Accounting posting failed during approval");
+        throw new Error(postingBody.error || "Accounting posting failed during atomic approval");
       }
+    } else {
+      await updateRecord(
+        config.table,
+        config.idField,
+        input.recordId,
+        { status: "APPROVED" },
+        `finance-controller:${input.note || "approve"}`,
+      );
     }
 
     const finalRow = (await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1)).rows[0];
