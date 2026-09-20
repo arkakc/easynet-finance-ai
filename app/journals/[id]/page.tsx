@@ -39,7 +39,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="document-page">
       <div className="document-toolbar no-print">
-        <Link href="/journals">← Back to Posted Journals</Link>
+        <Link href="/journals">← Back to Journals</Link>
       </div>
 
       <section className="document-sheet">
@@ -49,7 +49,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
             <h1>Journal Entry</h1>
             <div className="document-number">{header.code}</div>
           </div>
-          <div className="status-pill status-posted">{header.status || "POSTED"}</div>
+          <div className={`status-pill ${header.status === "POSTED" ? "status-posted" : ""}`}>{header.status || "POSTED"}</div>
         </header>
 
         <div className="document-meta">
