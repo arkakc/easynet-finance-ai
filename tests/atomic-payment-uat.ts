@@ -13,7 +13,7 @@ async function main() {
 
   process.env.EASYNET_PRISMA_DATASOURCE_URL = `file:${temporaryDatabase.replace(/\\/g, "/")}`;
 
-  const [{ finalizePaymentAtomic }, { prisma }] = await Promise.all([
+  const [{ allocateAdvanceAtomic, finalizePaymentAtomic }, { prisma }] = await Promise.all([
     import("../lib/accounting/atomic-payment"),
     import("../src/lib/prisma"),
   ]);
@@ -197,6 +197,170 @@ async function main() {
       throw new Error("Duplicate payment finalization changed AR settlement");
     }
 
+    const advanceLiability = await prisma.chartOfAccounts.upsert({
+      where: { code: "UAT-PAY-ADV" },
+      update: { type: AccountTypeGL.LIABILITY, normalBalance: NormalBalance.CREDIT, parentId: null, isActive: true },
+      create: {
+        code: "UAT-PAY-ADV",
+        name: "UAT Customer Advance",
+        type: AccountTypeGL.LIABILITY,
+        normalBalance: NormalBalance.CREDIT,
+        isActive: true,
+      },
+    });
+
+    const advanceInvoice = await prisma.invoice.create({
+      data: {
+        code: `UAT-PAY-ADV-INV-${process.pid}`,
+        customerId: customer.id,
+        issuedDate: new Date("2099-02-10T00:00:00+10:00"),
+        subtotal: 60,
+        total: 60,
+        amountPaid: 0,
+        outstanding: 60,
+        status: "SENT",
+        glPosted: true,
+        createdBy: "atomic-payment-uat",
+      },
+    });
+
+    const advancePayment = await prisma.payment.create({
+      data: {
+        code: `UAT-PAY-ADV-${process.pid}`,
+        type: PaymentType.CUSTOMER_RECEIPT,
+        date: new Date("2099-02-09T00:00:00+10:00"),
+        amount: 30,
+        paymentMethod: "BANK",
+        depositAccount: `ACC-${bank.code}`,
+        status: PaymentStatus.CLEARED,
+        customerId: customer.id,
+        journalId: `UAT-ADV-SOURCE-JRN-${process.pid}`,
+        createdBy: "atomic-payment-uat",
+      },
+    });
+
+    let failedAdvanceAllocationRolledBack = false;
+    try {
+      await allocateAdvanceAtomic({
+        paymentId: advancePayment.id,
+        againstDocumentType: "Sales Invoice",
+        againstDocumentId: advanceInvoice.id,
+        postingDate: "2099-02-10",
+        documentNumber: advancePayment.code,
+        createdBy: "atomic-payment-uat",
+        approvedBy: "atomic-payment-uat",
+        lines: [
+          { accountId: `ACC-${advanceLiability.code}`, debit: 30, customerId: customer.id, description: "Apply customer advance" },
+          { accountId: "ACC-UAT-PAY-MISSING-AR", credit: 30, customerId: customer.id, description: "Settle receivable" },
+        ],
+      });
+    } catch (error) {
+      failedAdvanceAllocationRolledBack = /missing accounts/i.test(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (!failedAdvanceAllocationRolledBack) {
+      throw new Error("Invalid advance allocation did not fail as expected");
+    }
+
+    const [advancePaymentAfterFailure, advanceInvoiceAfterFailure, failedAdvanceJournal] = await Promise.all([
+      prisma.payment.findUnique({ where: { id: advancePayment.id } }),
+      prisma.invoice.findUnique({ where: { id: advanceInvoice.id } }),
+      prisma.journalHeader.findFirst({
+        where: {
+          sourceDocType: "CUSTOMER_ADVANCE_ALLOCATION",
+          sourceDocId: `${advancePayment.id}-${advanceInvoice.id}`,
+        },
+      }),
+    ]);
+
+    if (!advancePaymentAfterFailure || advancePaymentAfterFailure.invoiceId) {
+      throw new Error("Advance payment linkage survived a failed allocation");
+    }
+    if (
+      !advanceInvoiceAfterFailure
+      || Number(advanceInvoiceAfterFailure.amountPaid) !== 0
+      || Number(advanceInvoiceAfterFailure.outstanding) !== 60
+      || advanceInvoiceAfterFailure.status !== "SENT"
+    ) {
+      throw new Error("Advance allocation AR settlement survived a failed posting");
+    }
+    if (failedAdvanceJournal) {
+      throw new Error("Advance allocation journal survived a failed posting");
+    }
+
+    const advanceSuccess = await allocateAdvanceAtomic({
+      paymentId: advancePayment.id,
+      againstDocumentType: "Sales Invoice",
+      againstDocumentId: advanceInvoice.id,
+      postingDate: "2099-02-10",
+      documentNumber: advancePayment.code,
+      createdBy: "atomic-payment-uat",
+      approvedBy: "atomic-payment-uat",
+      lines: [
+        { accountId: `ACC-${advanceLiability.code}`, debit: 30, customerId: customer.id, description: "Apply customer advance" },
+        { accountId: `ACC-${receivable.code}`, credit: 30, customerId: customer.id, description: "Settle receivable" },
+      ],
+    });
+
+    const [allocatedPayment, allocatedInvoice, advanceJournal] = await Promise.all([
+      prisma.payment.findUnique({ where: { id: advancePayment.id } }),
+      prisma.invoice.findUnique({ where: { id: advanceInvoice.id } }),
+      prisma.journalHeader.findUnique({ where: { code: advanceSuccess.journalId } }),
+    ]);
+
+    if (!allocatedPayment || allocatedPayment.invoiceId !== advanceInvoice.id) {
+      throw new Error("Advance payment was not linked to the Sales Invoice");
+    }
+    if (
+      !allocatedInvoice
+      || allocatedInvoice.status !== "PARTIAL"
+      || Number(allocatedInvoice.amountPaid) !== 30
+      || Number(allocatedInvoice.outstanding) !== 30
+    ) {
+      throw new Error("Advance allocation did not settle AR atomically");
+    }
+    if (
+      !advanceJournal
+      || advanceJournal.status !== "POSTED"
+      || Number(advanceJournal.totalDebit) !== 30
+      || Number(advanceJournal.totalCredit) !== 30
+    ) {
+      throw new Error("Advance allocation journal was not committed correctly");
+    }
+
+    const duplicateAdvance = await allocateAdvanceAtomic({
+      paymentId: advancePayment.id,
+      againstDocumentType: "Sales Invoice",
+      againstDocumentId: advanceInvoice.id,
+      postingDate: "2099-02-10",
+      documentNumber: advancePayment.code,
+      lines: [
+        { accountId: `ACC-${advanceLiability.code}`, debit: 30 },
+        { accountId: `ACC-${receivable.code}`, credit: 30 },
+      ],
+    });
+    const advanceJournalCount = await prisma.journalHeader.count({
+      where: {
+        sourceDocType: "CUSTOMER_ADVANCE_ALLOCATION",
+        sourceDocId: `${advancePayment.id}-${advanceInvoice.id}`,
+      },
+    });
+    const advanceInvoiceAfterDuplicate = await prisma.invoice.findUnique({
+      where: { id: advanceInvoice.id },
+    });
+
+    if (!duplicateAdvance.alreadyAllocated || advanceJournalCount !== 1) {
+      throw new Error("Duplicate advance allocation was not idempotent");
+    }
+    if (
+      !advanceInvoiceAfterDuplicate
+      || Number(advanceInvoiceAfterDuplicate.amountPaid) !== 30
+      || Number(advanceInvoiceAfterDuplicate.outstanding) !== 30
+    ) {
+      throw new Error("Duplicate advance allocation double-settled AR");
+    }
+
     console.log(JSON.stringify({
       database: "temporary clone",
       liveDatabaseChanged: false,
@@ -210,6 +374,14 @@ async function main() {
       paymentJournalLinked: committedPayment.journalId === committedJournal.code,
       duplicateFinalizationBlocked: duplicate.alreadyFinalized === true && journalCount === 1,
       duplicateDidNotDoubleSettle: Number(invoiceAfterDuplicate.outstanding) === 75,
+      failedAdvanceAllocationRolledBack,
+      failedAdvanceLinkRolledBack: advancePaymentAfterFailure.invoiceId === null,
+      failedAdvanceSettlementRolledBack: Number(advanceInvoiceAfterFailure.outstanding) === 60,
+      successfulAdvanceAllocationCommitted: allocatedPayment.invoiceId === advanceInvoice.id,
+      successfulAdvanceSettlementCommitted: Number(allocatedInvoice.outstanding) === 30,
+      successfulAdvanceJournalCommitted: advanceJournal.status === "POSTED",
+      duplicateAdvanceAllocationBlocked: duplicateAdvance.alreadyAllocated === true && advanceJournalCount === 1,
+      duplicateAdvanceDidNotDoubleSettle: Number(advanceInvoiceAfterDuplicate.outstanding) === 30,
     }, null, 2));
   } finally {
     await prisma.$disconnect();
