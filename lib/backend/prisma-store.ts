@@ -312,6 +312,17 @@ function mapPayment(pay: any) {
       : rawStatus === "CAPTURED" || rawStatus === "CLEARED"
         ? "POSTED"
         : rawStatus;
+  const allocations = Array.isArray(pay.allocations)
+    ? pay.allocations.filter((row: any) => String(row.status || "").toUpperCase() === "POSTED")
+    : [];
+  const directAllocations = allocations.filter((row: any) => String(row.allocationType || "") === "DIRECT");
+  const direct = directAllocations.length === 1 ? directAllocations[0] : null;
+  const allocatedAmount = allocations.reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0);
+  const draftInvoiceId = rawStatus === "PENDING" || rawStatus === "AUTHORIZED" ? pay.invoiceId : null;
+  const draftBillId = rawStatus === "PENDING" || rawStatus === "AUTHORIZED" ? pay.billId : null;
+  const againstInvoiceId = direct?.invoiceId || draftInvoiceId || "";
+  const againstBillId = direct?.billId || draftBillId || "";
+
   return {
     paymentId: pay.id,
     paymentNumber: pay.code,
@@ -328,11 +339,14 @@ function mapPayment(pay: any) {
     paymentMethod: pay.paymentMethod || "Cash",
     cashBankAccountId: pay.depositAccount || "ACC-1110",
     reference: pay.referenceNumber || "",
-    againstDocumentType: pay.invoiceId ? "Sales Invoice" : pay.billId ? "Supplier Invoice" : "",
-    againstDocumentId: pay.invoiceId || pay.billId || "",
+    againstDocumentType: againstInvoiceId ? "Sales Invoice" : againstBillId ? "Supplier Invoice" : "",
+    againstDocumentId: againstInvoiceId || againstBillId || "",
     sourceDocumentId: pay.sourceDocId || "",
     status,
     journalId: pay.journalId || "",
+    allocationCount: allocations.length,
+    allocatedAmount,
+    unallocatedAmount: Math.max(0, Number(pay.amount || 0) - allocatedAmount),
     createdAt: pay.createdAt?.toISOString?.() || String(pay.createdAt || ""),
   };
 }
@@ -576,7 +590,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { customer: true, supplier: true, project: true },
+        include: { customer: true, supplier: true, project: true, allocations: { where: { status: "POSTED" } } },
       });
       return rows.map(mapPayment).filter(Boolean) as T[];
     }
@@ -1546,7 +1560,7 @@ export async function prismaUpdateRecord<T = any>(
           billId,
         },
       });
-      const hydrated = await prisma.payment.findUnique({ where: { id: updated.id }, include: { customer: true, supplier: true, project: true } });
+      const hydrated = await prisma.payment.findUnique({ where: { id: updated.id }, include: { customer: true, supplier: true, project: true, allocations: { where: { status: "POSTED" } } } });
       return mapPayment(hydrated) as T;
     }
 
