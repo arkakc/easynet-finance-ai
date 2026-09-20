@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { AccountTypeGL, NormalBalance, PrismaClient } from "@prisma/client";
 import { reversePostedJournal } from "../lib/accounting/journal-reversal";
 import { buildFinancialStatements } from "../lib/accounting/financial-statements";
 import { databasePath, verifyLiveDatabase } from "../lib/system/database-backup";
@@ -37,9 +37,30 @@ async function main() {
       include: { children: { select: { id: true } } },
       orderBy: { code: "asc" },
     });
-    const asset = accounts.find((row) => row.type === "ASSET" && row.children.length === 0);
-    const expense = accounts.find((row) => row.type === "EXPENSE" && row.children.length === 0);
-    if (!asset || !expense) throw new Error("UAT requires one active leaf ASSET and EXPENSE account");
+    const existingAsset = accounts.find((row) => row.type === "ASSET" && row.children.length === 0);
+    const existingExpense = accounts.find((row) => row.type === "EXPENSE" && row.children.length === 0);
+    const asset = existingAsset || await client.chartOfAccounts.upsert({
+      where: { code: "UAT-REV-ASSET" },
+      update: { isActive: true },
+      create: {
+        code: "UAT-REV-ASSET",
+        name: "UAT Journal Reversal Asset",
+        type: AccountTypeGL.ASSET,
+        normalBalance: NormalBalance.DEBIT,
+        isActive: true,
+      },
+    });
+    const expense = existingExpense || await client.chartOfAccounts.upsert({
+      where: { code: "UAT-REV-EXP" },
+      update: { isActive: true },
+      create: {
+        code: "UAT-REV-EXP",
+        name: "UAT Journal Reversal Expense",
+        type: AccountTypeGL.EXPENSE,
+        normalBalance: NormalBalance.DEBIT,
+        isActive: true,
+      },
+    });
 
     const asOfText = "2026-09-30";
     const asOfDate = new Date("2026-09-30T23:59:59+10:00");
@@ -100,6 +121,27 @@ async function main() {
       earlierDateBlocked = /earlier than the original/i.test(error instanceof Error ? error.message : String(error));
     }
     if (!earlierDateBlocked) throw new Error("Reversal before the original posting date was not blocked");
+
+    await client.globalSettings.update({
+      where: { key: "posting_lock_date" },
+      data: { value: "2026-09-16" },
+    });
+    let lockedPeriodBlocked = false;
+    try {
+      await reversePostedJournal({
+        journalId: original.code,
+        reversalDate: "2026-09-16",
+        reason: "UAT locked-period guard",
+      }, client);
+    } catch (error) {
+      lockedPeriodBlocked = /locked through/i.test(error instanceof Error ? error.message : String(error));
+    }
+    if (!lockedPeriodBlocked) throw new Error("Reversal inside the posting lock was not blocked");
+
+    await client.globalSettings.update({
+      where: { key: "posting_lock_date" },
+      data: { value: "2026-08-31" },
+    });
 
     const result = await reversePostedJournal({
       journalId: original.code,
@@ -172,6 +214,7 @@ async function main() {
       reversalStatus: reversal.status,
       linked: reversal.reversalOfJournalId === original.id,
       earlierDateBlocked,
+      lockedPeriodBlocked,
       glNeutralized: afterAsset === beforeAsset && afterExpense === beforeExpense,
       financialStatementsNeutralized:
         afterStatements.profitAndLoss.totals.netProfit === beforeStatements.profitAndLoss.totals.netProfit,
