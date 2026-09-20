@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
@@ -160,7 +159,9 @@ export async function GET(request: Request) {
   try {
     await requirePermission("stock.read");
     const scope = new URL(request.url).searchParams.get("scope") || "full";
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const [items, movements, purchaseOrders, poLines] = await Promise.all([
         prisma.item.findMany({ orderBy: { code: "asc" } }),
