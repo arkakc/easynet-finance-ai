@@ -30,7 +30,7 @@ export async function postStockMovementAtomic(input:{
   movementId:string; postingDate:string; itemRef:string; projectRef?:string;
   movementType:"PROJECT_ISSUE"|"ADJUSTMENT_IN"|"ADJUSTMENT_OUT"|"RETURN_IN"|"RETURN_OUT";
   qty:number; unitCost?:number; sourceDocumentId?:string;
-  inventoryAccountId:string; costAccountId:string; stockAdjustmentAccountId:string;
+  inventoryAccountId:string; defaultCostAccountId:string; stockAdjustmentAccountId:string;
   expensesIncludedInValuationAccountId:string; createdBy?:string; approvedBy?:string;
 }) {
   return runAtomicAccounting(async({tx,postJournal})=>{
@@ -49,16 +49,17 @@ export async function postStockMovementAtomic(input:{
     if(input.movementType==="ADJUSTMENT_IN" && !(effective>0)) throw new Error("Adjustment In requires a positive Unit Cost");
     const value=round2(input.qty*effective);
 
+    const costAccountId=String(item.costAccount||input.defaultCostAccountId);
     let lines:PostingLine[];
     if(["PROJECT_ISSUE","RETURN_OUT"].includes(input.movementType)) {
-      lines=inventoryIssuePosting({amount:value,costAccountId:input.costAccountId,projectId:project?.code||project?.id,description:input.movementType==="PROJECT_ISSUE"?"Project material issue":"Inventory return out",inventoryAccountId:input.inventoryAccountId});
+      lines=inventoryIssuePosting({amount:value,costAccountId,projectId:project?.code||project?.id,description:input.movementType==="PROJECT_ISSUE"?"Project material issue":"Inventory return out",inventoryAccountId:input.inventoryAccountId});
     } else if(input.movementType==="RETURN_IN") {
       lines=[
         {accountId:input.inventoryAccountId,debit:value,projectId:project?.code||project?.id,description:"Inventory returned in"},
         {accountId:input.costAccountId,credit:value,projectId:project?.code||project?.id,description:"Reverse prior inventory cost"},
       ];
     } else {
-      lines=inventoryAdjustmentPosting({amountDelta:isIncoming?value:-value,projectId:project?.code||project?.id,type:input.movementType,costAccountId:input.costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
+      lines=inventoryAdjustmentPosting({amountDelta:isIncoming?value:-value,projectId:project?.code||project?.id,type:input.movementType,costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
     }
 
     const movement=await tx.stockMovement.create({data:{
@@ -78,7 +79,7 @@ export async function postStockMovementAtomic(input:{
 export async function postStockValueAdjustmentAtomic(input:{
   movementId:string; postingDate:string; itemRef:string; projectRef?:string;
   adjustmentType:"LANDED_COST"|"REVALUATION"|"NRV_WRITEDOWN"; amount:number; targetUnitCost:number; sourceDocumentId?:string;
-  inventoryAccountId:string; costAccountId:string; stockAdjustmentAccountId:string; expensesIncludedInValuationAccountId:string;
+  inventoryAccountId:string; defaultCostAccountId:string; stockAdjustmentAccountId:string; expensesIncludedInValuationAccountId:string;
   createdBy?:string; approvedBy?:string;
 }) {
   return runAtomicAccounting(async({tx,postJournal})=>{
@@ -97,7 +98,7 @@ export async function postStockValueAdjustmentAtomic(input:{
     if(input.adjustmentType==="REVALUATION" && Math.abs(delta)<0.005) throw new Error("Revaluation does not change inventory value");
     if(round2(current.value+delta)<-0.005) throw new Error("Inventory adjustment would create a negative inventory value");
 
-    const lines=inventoryAdjustmentPosting({amountDelta:delta,projectId:input.projectRef,type:input.adjustmentType,costAccountId:input.costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
+    const lines=inventoryAdjustmentPosting({amountDelta:delta,projectId:input.projectRef,type:input.adjustmentType,costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
     const nextRate=round4(Math.max(0,(current.value+delta)/current.qty));
     const movement=await tx.stockMovement.create({data:{
       id:input.movementId,itemId:item.id,type:input.adjustmentType as MovementType,quantity:0,unitCost:nextRate,totalCost:delta,
