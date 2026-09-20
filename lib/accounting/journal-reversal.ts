@@ -58,6 +58,7 @@ function assertDirectReversalType(sourceDocType: string | null) {
   if (type === "JOURNAL_REVERSAL") {
     throw new Error("A reversal journal cannot itself be reversed from this workflow");
   }
+  if (type.startsWith("MANUAL_")) return type;
   if (!DIRECT_REVERSAL_TYPES.has(type)) {
     throw new Error(
       `${type} requires its dedicated correction workflow; direct GL reversal is blocked to protect the related subledger`,
