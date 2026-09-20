@@ -33,6 +33,7 @@ import {
   weightedRate,
 } from "@/lib/accounting/inventory";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoice";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -310,129 +311,76 @@ async function postSalesInvoice(row: any) {
   }
 
   await ensureAccountingInfrastructure();
-  const [lineResult, itemResult, movementResult, policy, defaults] = await Promise.all([
+  const [lineResult, itemResult, policy, defaults] = await Promise.all([
     findRecords<any>("InvoiceLines", { invoiceId: row.invoiceId }, 500),
     listTable<any>("Items", 500, 0),
-    listTable<any>("StockMovements", 500, 0),
     deferredRevenuePolicy(),
     loadConfiguredPostingAccounts(),
   ]);
   if (!lineResult.rows.length) throw new Error("Invoice has no lines");
+
   const items = new Map(itemResult.rows.map((item: any) => [String(item.itemId || ""), item]));
-  const sourceDocumentId = String(row.sourceDocumentId || "");
-  const deliveryIssueRows = sourceDocumentId
-    ? movementResult.rows.filter((movement: any) => String(movement.sourceDocumentId || "") === sourceDocumentId && String(movement.movementType || "") === "SALES_DELIVERY")
-    : [];
-  const stockAlreadyIssuedByDeliveryNote = deliveryIssueRows.length > 0;
-
-  const requestedByItem = new Map<string, number>();
-  for (const line of lineResult.rows) {
+  const revenueLines = lineResult.rows.map((line: any) => {
     const item = items.get(String(line.itemId || ""));
-    if (!stockAlreadyIssuedByDeliveryNote && itemType(item) === "STOCK") {
-      const itemId = String(line.itemId || "");
-      requestedByItem.set(itemId, (requestedByItem.get(itemId) || 0) + Number(line.qty || 0));
-    }
-  }
-
-  const stateByItem = new Map<string, ReturnType<typeof inventoryState>>();
-  for (const [itemId, requested] of requestedByItem.entries()) {
-    const item = items.get(itemId);
-    const movements = movementResult.rows.filter((movement: any) => String(movement.itemId || "") === itemId);
-    const state = inventoryState(movements, Number(item?.defaultRate || 0));
-    if (requested > state.qty + 0.0001) throw new Error(`Insufficient stock for ${item?.itemCode || itemId}. On hand ${state.qty}, required ${requested}`);
-    stateByItem.set(itemId, state);
-  }
-
-  const existingIssues = stockAlreadyIssuedByDeliveryNote ? deliveryIssueRows : movementResult.rows.filter((movement: any) => String(movement.sourceDocumentId || "") === String(row.invoiceId) && String(movement.movementType || "") === "SALES_ISSUE");
-  const stockLines = stockAlreadyIssuedByDeliveryNote ? [] : lineResult.rows.filter((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK");
-  if (!stockAlreadyIssuedByDeliveryNote && existingIssues.length && existingIssues.length !== stockLines.length) throw new Error("Partial stock issue already exists for this Sales Invoice; manual review required");
-
-  const issueRows = stockLines.map((line: any, index: number) => {
-    const itemId = String(line.itemId || "");
-    const state = stateByItem.get(itemId)!;
-    const value = round2(Number(line.qty || 0) * state.rate);
+    const accountId = String(line.revenueAccountId || item?.revenueAccount || defaults.defaultIncomeAccount);
     return {
-      movementId: `SI-STK-${row.invoiceId}-${String(index + 1).padStart(3, "0")}`,
-      movementDate: String(row.invoiceDate),
-      itemId,
-      projectId: row.projectId || "",
-      movementType: "SALES_ISSUE",
-      qtyIn: 0,
-      qtyOut: Number(line.qty || 0),
-      unitCost: state.rate,
-      value,
-      sourceDocumentId: row.invoiceId,
+      accountId,
+      amount: Number(line.netAmount || 0),
+      description: String(line.description || "Sales revenue"),
+      deferred: itemType(item) !== "STOCK" && Number(policy[accountId] || 0) > 1,
     };
   });
 
-  const schedules = await deferredSchedulesForInvoice(row, lineResult.rows, items, policy, defaults.defaultIncomeAccount);
-  const existingSchedules = schedules.length ? await findRecords<any>("PaymentSchedules", { sourceId: row.invoiceId, sourceType: "DEFERRED_REVENUE" }, 500) : { rows: [] as any[] };
-  const existingScheduleIds = new Set(existingSchedules.rows.map((schedule: any) => String(schedule.scheduleId || "")));
-  const schedulesToCreate = schedules.filter((schedule) => !existingScheduleIds.has(schedule.scheduleId));
-  if (schedulesToCreate.length) await batchAppend("PaymentSchedules", schedulesToCreate, "deferred-revenue-schedule");
-
-  let createdIssues = false;
-  try {
-    if (!existingIssues.length && issueRows.length) {
-      await batchAppend("StockMovements", issueRows, "sales-invoice-stock");
-      createdIssues = true;
-    }
-
-    const revenueLines = lineResult.rows.map((line: any) => {
+  const stockLines = lineResult.rows
+    .filter((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK")
+    .map((line: any) => {
       const item = items.get(String(line.itemId || ""));
-      const accountId = String(line.revenueAccountId || item?.revenueAccount || defaults.defaultIncomeAccount);
       return {
-        accountId,
-        amount: Number(line.netAmount || 0),
-        description: String(line.description || "Sales revenue"),
-        deferred: itemType(item) !== "STOCK" && Number(policy[accountId] || 0) > 1,
-      };
-    });
-    const cogsLines = stockLines.map((line: any) => {
-      const item = items.get(String(line.itemId || ""));
-      const state = stateByItem.get(String(line.itemId || ""))!;
-      return {
-        accountId: String(item?.costAccount || defaults.defaultCostOfGoodsSoldAccount),
-        amount: round2(Number(line.qty || 0) * state.rate),
+        itemId: String(line.itemId || ""),
+        quantity: Number(line.qty || 0),
+        costAccountId: String(item?.costAccount || defaults.defaultCostOfGoodsSoldAccount),
+        fallbackRate: Number(item?.defaultRate || 0),
         description: String(line.description || "Cost of goods sold"),
       };
     });
 
-    const journal = await postJournal({
-      postingDate: String(row.invoiceDate), documentType: "SALES_INVOICE", documentId: row.invoiceId,
-      documentNumber: row.invoiceNumber, reference: `Sales invoice ${row.invoiceNumber}`, projectId: row.projectId,
-      lines: salesInvoicePostingByLines({
-        total: Number(row.totalAmount), gst: Number(row.gstAmount), customerId: row.customerId,
-        projectId: row.projectId, revenueLines, cogsLines,
-        receivableAccountId: defaults.defaultReceivableAccount,
-        deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
-        inventoryAccountId: defaults.defaultInventoryAccount,
-      }),
-    });
+  const schedules = await deferredSchedulesForInvoice(
+    row,
+    lineResult.rows,
+    items,
+    policy,
+    defaults.defaultIncomeAccount,
+  );
 
-    await updateRecord("Invoices", "invoiceId", row.invoiceId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-    return { recordType: "invoice", recordId: row.invoiceId, status: "POSTED", journalId: journal.journalId, stockLines: stockAlreadyIssuedByDeliveryNote ? deliveryIssueRows.length : issueRows.length, stockSource: stockAlreadyIssuedByDeliveryNote ? "DELIVERY_NOTE" : "INVOICE", deferredSchedules: schedules.length };
-  } catch (error) {
-    if (createdIssues && issueRows.length) {
-      const rollback = issueRows.map((issue: any, index: number) => ({
-        movementId: `RB-${issue.movementId}-${String(index + 1).padStart(2, "0")}`,
-        movementDate: issue.movementDate, itemId: issue.itemId, projectId: issue.projectId,
-        movementType: "SALES_ISSUE_ROLLBACK", qtyIn: issue.qtyOut, qtyOut: 0,
-        unitCost: issue.unitCost, value: issue.value, sourceDocumentId: row.invoiceId,
-      }));
-      try { await batchAppend("StockMovements", rollback, "sales-invoice-stock-rollback"); } catch { /* audit trail remains in Exceptions below */ }
-    }
-    for (const schedule of schedulesToCreate) {
-      try { await updateRecord("PaymentSchedules", "scheduleId", schedule.scheduleId, { status: "CANCELLED" }, "sales-invoice-posting-rollback"); } catch { /* best effort */ }
-    }
-    try {
-      await appendRecord("Exceptions", {
-        severity: "HIGH", module: "Accounting", recordType: "Sales Invoice", recordId: row.invoiceId,
-        message: error instanceof Error ? error.message : "Sales Invoice posting failed", status: "OPEN", assignedTo: "Finance Controller",
-      }, "sales-invoice-posting");
-    } catch { /* best effort */ }
-    throw error;
-  }
+  const posted = await finalizeSalesInvoiceAtomic({
+    invoiceId: row.invoiceId,
+    postingDate: String(row.invoiceDate),
+    documentNumber: String(row.invoiceNumber || row.invoiceId),
+    reference: `Sales invoice ${row.invoiceNumber || row.invoiceId}`,
+    customerId: String(row.customerId || ""),
+    projectId: String(row.projectId || ""),
+    sourceDocumentId: String(row.sourceDocumentId || ""),
+    total: Number(row.totalAmount || 0),
+    gst: Number(row.gstAmount || 0),
+    revenueLines,
+    stockLines,
+    receivableAccountId: defaults.defaultReceivableAccount,
+    deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    deferredSchedules: schedules,
+    createdBy: "sales-invoice-posting",
+    approvedBy: "Finance Controller",
+  });
+
+  return {
+    recordType: "invoice",
+    recordId: row.invoiceId,
+    status: posted.alreadyPosted ? "already-posted" : "POSTED",
+    journalId: posted.journalId,
+    stockLines: posted.stockLines,
+    stockSource: posted.stockSource,
+    deferredSchedules: posted.deferredSchedules,
+  };
 }
 
 async function postSupplierBill(row: any) {
