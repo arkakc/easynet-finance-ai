@@ -157,13 +157,10 @@ async function synchronizeSourceAfterReversal(
     if (!invoice) {
       throw new Error("Linked Sales Invoice was not found; reversal aborted to protect AR reconciliation");
     }
-    const activePayments = await tx.payment.count({
-      where: {
-        invoiceId: invoice.id,
-        status: { notIn: ["REVERSED", "FAILED", "CANCELLED"] },
-      },
+    const activeAllocations = await tx.paymentAllocation.count({
+      where: { invoiceId: invoice.id, status: "POSTED" },
     });
-    if (Number(invoice.amountPaid || 0) > 0.001 || activePayments > 0) {
+    if (Number(invoice.amountPaid || 0) > 0.001 || activeAllocations > 0) {
       throw new Error("Reverse allocated customer receipts before reversing this sales invoice");
     }
     await tx.invoice.update({
@@ -178,13 +175,10 @@ async function synchronizeSourceAfterReversal(
     if (!bill) {
       throw new Error("Linked Supplier Bill was not found; reversal aborted to protect AP reconciliation");
     }
-    const activePayments = await tx.payment.count({
-      where: {
-        billId: bill.id,
-        status: { notIn: ["REVERSED", "FAILED", "CANCELLED"] },
-      },
+    const activeAllocations = await tx.paymentAllocation.count({
+      where: { billId: bill.id, status: "POSTED" },
     });
-    if (Number(bill.amountPaid || 0) > 0.001 || activePayments > 0) {
+    if (Number(bill.amountPaid || 0) > 0.001 || activeAllocations > 0) {
       throw new Error("Reverse allocated supplier payments before reversing this supplier bill");
     }
     await tx.supplierBill.update({
@@ -344,6 +338,21 @@ export async function reversePostedJournal(
       if (allocation) {
         await tx.paymentAllocation.update({
           where: { id: allocation.id },
+          data: { reversalJournalId: reversal.code },
+        });
+      }
+    }
+
+    if (["CUSTOMER_RECEIPT", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
+      const paymentRef = sourceReference(original);
+      const payment = await findPayment(tx, paymentRef);
+      if (payment) {
+        await tx.paymentAllocation.updateMany({
+          where: {
+            paymentId: payment.id,
+            status: "REVERSED",
+            reversalJournalId: null,
+          },
           data: { reversalJournalId: reversal.code },
         });
       }
