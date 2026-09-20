@@ -111,7 +111,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       where: { issuedDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
       include: {
         customer: { select: { code: true, name: true } },
-        payments: { where: { date: { lte: asOfDate }, status: { in: ["AUTHORIZED", "CAPTURED", "CLEARED"] } }, select: { type: true, amount: true, s65aDeduction: true } },
+        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, status: "POSTED" }, select: { amount: true } },
         originalCreditNotes: { where: { issueDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
@@ -120,7 +120,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       where: { billDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
       include: {
         supplier: { select: { code: true, name: true } },
-        payments: { where: { date: { lte: asOfDate }, status: { in: ["AUTHORIZED", "CAPTURED", "CLEARED"] } }, select: { type: true, amount: true } },
+        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, status: "POSTED" }, select: { amount: true } },
         refunds: { where: { refundDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
@@ -155,13 +155,13 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
 
   const receivableRows: AgingRow[] = invoices.map((invoice) => {
     const aging = bucketFor(invoice.dueDate, asOfDate);
-    const receipts = invoice.payments.reduce((sum, payment) => sum + (payment.type === "CUSTOMER_REFUND" ? -1 : 1) * (Number(payment.amount) + Number(payment.s65aDeduction)), 0);
+    const receipts = invoice.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
     const credits = invoice.originalCreditNotes.reduce((sum, credit) => sum + Number(credit.total), 0);
     return { id: invoice.id, code: invoice.code, partyCode: invoice.customer.code, partyName: invoice.customer.name, dueDate: invoice.dueDate?.toISOString().slice(0, 10) || null, overdueDays: aging.days, bucket: aging.bucket, outstanding: round(Math.max(0, Number(invoice.total) - receipts - credits)) };
   }).filter((invoice) => invoice.outstanding >= 0.005);
   const payableRows: AgingRow[] = bills.map((bill) => {
     const aging = bucketFor(bill.dueDate, asOfDate);
-    const payments = bill.payments.reduce((sum, payment) => sum + (payment.type === "SUPPLIER_REFUND" ? -1 : 1) * Number(payment.amount), 0);
+    const payments = bill.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
     const credits = bill.refunds.reduce((sum, refund) => sum + Number(refund.total), 0);
     return { id: bill.id, code: bill.code, partyCode: bill.supplier.code, partyName: bill.supplier.name, dueDate: bill.dueDate?.toISOString().slice(0, 10) || null, overdueDays: aging.days, bucket: aging.bucket, outstanding: round(Math.max(0, Number(bill.total) - payments - credits)) };
   }).filter((bill) => bill.outstanding >= 0.005);
