@@ -3,6 +3,7 @@ import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { resolveCostCenterValue } from "@/lib/accounting/cost-centers";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import {
+  expensePosting,
   roundPostingAmount,
   salesInvoicePostingByLines,
   supplierBillPostingByLines,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/accounting/posting-rules";
 
 export {
+  expensePosting,
   salesInvoicePostingByLines,
   supplierBillPostingByLines,
   supplierBillPostingMixed,
@@ -342,24 +344,6 @@ export function deferredRevenueRecognitionPosting(input: {
       description: "Recognized revenue",
     },
   ];
-  validateBalancedPosting(lines);
-  return lines;
-}
-
-export function expensePosting(input: {
-  total: number;
-  net: number;
-  gst: number;
-  supplierId?: string;
-  projectId?: string;
-  expenseAccountId: string;
-  cashBankAccountId: string;
-}) {
-  const lines: PostingLine[] = [
-    { accountId: input.expenseAccountId, debit: input.net, supplierId: input.supplierId, projectId: input.projectId, description: "Expense" },
-  ];
-  if (input.gst) lines.push({ accountId: INITIAL_ACCOUNT_IDS.inputGst, debit: input.gst, supplierId: input.supplierId, projectId: input.projectId, taxCode: "GST", description: "Input GST" });
-  lines.push({ accountId: input.cashBankAccountId, credit: input.total, supplierId: input.supplierId, projectId: input.projectId, description: "Expense payment" });
   validateBalancedPosting(lines);
   return lines;
 }
