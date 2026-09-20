@@ -27,6 +27,7 @@
     "lint": "eslint .",
     "test:period-close": "tsx tests/period-close-uat.ts",
     "test:journal-reversal": "tsx tests/journal-reversal-uat.ts",
+    "test:single-source": "tsx tests/single-source-of-truth-uat.ts",
     "test:financial-statements": "tsx tests/financial-statements-uat.ts",
     "test:cash-flow": "tsx tests/cash-flow-uat.ts",
     "test:subledger-recovery": "tsx tests/subledger-recovery-uat.ts",
