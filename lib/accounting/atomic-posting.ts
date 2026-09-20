@@ -15,6 +15,7 @@ export type AtomicPostingLine = {
 };
 
 export type AtomicPostingRequest = {
+  journalId?: string;
   postingDate: string;
   documentType: string;
   documentId: string;
@@ -163,7 +164,7 @@ export async function postJournalInTransaction(
     };
   });
 
-  const journalCode = documentSeriesId("Journal");
+  const journalCode = String(request.journalId || "").trim() || documentSeriesId("Journal");
   const createdBy = request.createdBy || "finance-ui";
   const approvedBy = request.approvedBy || "Finance Controller";
 
