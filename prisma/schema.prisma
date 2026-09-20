@@ -742,8 +742,8 @@ model Payment {
   notes            String?
   customerId       String?
   supplierId       String?
-  invoiceId        String? // Against invoice
-  billId           String? // Against bill; multiple partial payments are allowed
+  invoiceId        String? // Legacy draft intent only; posted settlement authority is PaymentAllocation
+  billId           String? // Legacy draft intent only; posted settlement authority is PaymentAllocation
   creditNoteId     String?
   projectId        String?
   depositAccount   String? // Bank account
