@@ -1,5 +1,6 @@
 import { prisma } from "@/src/lib/prisma";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 
 export function generatedCode(prefix: string) {
   return documentSeriesId(prefix);
@@ -636,91 +637,52 @@ export async function prismaPostJournal(input: LocalJournalBundle) {
   if (!journalCode) throw new Error("Journal ID is required");
   if (!input.lines.length) throw new Error("A journal requires at least one line");
 
-  const requestedCodes = [...new Set(input.lines.map((line) => String(line.accountId || "").replace(/^ACC-/i, "").trim()))];
-  const accounts = await prisma.chartOfAccounts.findMany({
-    where: { code: { in: requestedCodes } },
-    include: { children: { select: { id: true } } },
+  const existing = await prisma.journalHeader.findUnique({
+    where: { code: journalCode },
+    include: { lines: { include: { account: true }, orderBy: { lineNo: "asc" } } },
   });
-  const accountsByCode = new Map(accounts.map((account) => [account.code, account]));
-  const missing = requestedCodes.filter((code) => !accountsByCode.has(code));
-  if (missing.length) throw new Error(`Cannot post journal: missing accounts ${missing.join(", ")}`);
-  const inactive = accounts.filter((account) => !account.isActive).map((account) => account.code);
-  if (inactive.length) throw new Error(`Cannot post journal: inactive accounts ${inactive.join(", ")}`);
-  const groups = accounts.filter((account) => account.children.length > 0).map((account) => account.code);
-  if (groups.length) throw new Error(`Cannot post journal directly to group/control accounts: ${groups.join(", ")}`);
+  if (existing) {
+    return {
+      journalId: existing.code,
+      header: mapJournalHeader(existing),
+      lines: existing.lines.map(mapJournalLine),
+    };
+  }
 
-  const normalizedLines = input.lines.map((line, index) => {
-    const debit = Number(line.debit || 0);
-    const credit = Number(line.credit || 0);
-    if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 || (debit > 0 && credit > 0) || (debit === 0 && credit === 0)) {
-      throw new Error(`Invalid journal line ${index + 1}`);
-    }
-    const accountCode = String(line.accountId || "").replace(/^ACC-/i, "").trim();
-    return { ...line, debit, credit, accountId: accountsByCode.get(accountCode)!.id, lineNo: Number(line.lineNo || index + 1) };
+  const posted = await runAtomicAccounting(async ({ postJournal }) => postJournal({
+    journalId: journalCode,
+    postingDate: String(input.header.postingDate || ""),
+    documentType: String(input.header.documentType || "JOURNAL"),
+    documentId: String(input.header.documentId || journalCode),
+    documentNumber: String(input.header.documentNumber || journalCode),
+    reference: String(input.header.reference || ""),
+    projectId: String(input.header.projectId || ""),
+    createdBy: String(input.header.createdBy || input.actor || "finance-ui"),
+    approvedBy: String(input.header.approvedBy || "") || undefined,
+    lines: input.lines.map((line) => ({
+      accountId: String(line.accountId || ""),
+      debit: Number(line.debit || 0),
+      credit: Number(line.credit || 0),
+      customerId: String(line.customerId || "") || undefined,
+      supplierId: String(line.supplierId || "") || undefined,
+      projectId: String(line.projectId || input.header.projectId || "") || undefined,
+      taxCode: String(line.taxCode || "") || undefined,
+      costCenter: String(line.costCenter || "") || undefined,
+      description: String(line.description || input.header.reference || input.header.documentNumber || "Journal entry"),
+    })),
+  }));
+
+  const created = await prisma.journalHeader.findUnique({
+    where: { id: posted.id },
+    include: { lines: { include: { account: true }, orderBy: { lineNo: "asc" } } },
   });
-  const totalDebit = normalizedLines.reduce((sum, line) => sum + line.debit, 0);
-  const totalCredit = normalizedLines.reduce((sum, line) => sum + line.credit, 0);
-  if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) throw new Error("Journal is not balanced");
+  if (!created) throw new Error("Atomic journal commit could not be reloaded");
 
-  const postingDate = new Date(String(input.header.postingDate || ""));
-  if (Number.isNaN(postingDate.getTime())) throw new Error("A valid posting date is required");
-  const existing = await prisma.journalHeader.findUnique({ where: { code: journalCode } });
-  if (existing) return { journalId: existing.code, header: mapJournalHeader(existing), lines: [] };
-
-  const created = await prisma.$transaction(async (tx) => {
-    const journal = await tx.journalHeader.create({
-      data: {
-        code: journalCode,
-        date: postingDate,
-        description: String(input.header.reference || input.header.documentNumber || input.header.documentType || "Journal"),
-        reference: String(input.header.documentNumber || "") || null,
-        sourceDocType: String(input.header.documentType || "") || null,
-        sourceDocId: String(input.header.documentId || "") || null,
-        status: "POSTED",
-        currency: "PGK",
-        totalDebit,
-        totalCredit,
-        isBalanced: true,
-        createdBy: String(input.header.createdBy || input.actor || "finance-ui"),
-        approvedBy: String(input.header.approvedBy || "") || null,
-        approvedAt: input.header.approvedBy ? new Date() : null,
-        postedAt: new Date(),
-        lines: {
-          create: normalizedLines.map((line) => ({
-            lineNo: line.lineNo,
-            accountId: line.accountId,
-            description: String((line as Record<string, unknown>).description || "Journal entry"),
-            debit: line.debit,
-            credit: line.credit,
-            amount: Math.max(line.debit, line.credit),
-            currency: "PGK",
-            projectId: String((line as Record<string, unknown>).projectId || "") || null,
-            customerId: String((line as Record<string, unknown>).customerId || "") || null,
-            supplierId: String((line as Record<string, unknown>).supplierId || "") || null,
-            taxCode: String((line as Record<string, unknown>).taxCode || "") || null,
-            costCenter: String((line as Record<string, unknown>).costCenter || "") || null,
-          })),
-        },
-      },
-      include: { lines: { include: { account: true }, orderBy: { lineNo: "asc" } }, _count: { select: { lines: true } } },
-    });
-    const actor = String(input.header.createdBy || input.actor || "").trim();
-    const user = actor ? await tx.user.findUnique({ where: { email: actor } }) : null;
-    if (user) {
-      await tx.auditLog.create({
-        data: {
-          action: "POST",
-          entityType: "Journal",
-          entityId: journal.id,
-          entityCode: journal.code,
-          description: `Posted ${journal.sourceDocType || "journal"} ${journal.sourceDocId || journal.code}`,
-          userId: user.id,
-        },
-      });
-    }
-    return journal;
-  });
-  return { journalId: created.code, header: mapJournalHeader(created), lines: created.lines.map(mapJournalLine) };
+  return {
+    journalId: created.code,
+    header: mapJournalHeader(created),
+    lines: created.lines.map(mapJournalLine),
+  };
 }
 
 export async function prismaFindRecords<T = any>(
