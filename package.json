@@ -32,6 +32,7 @@
     "test:atomic-payment": "tsx tests/atomic-payment-uat.ts",
     "test:atomic-sales-invoice": "tsx tests/atomic-sales-invoice-uat.ts",
     "test:atomic-supplier-bill": "tsx tests/atomic-supplier-bill-uat.ts",
+    "test:atomic-expense": "tsx tests/atomic-expense-uat.ts",
     "test:financial-statements": "tsx tests/financial-statements-uat.ts",
     "test:cash-flow": "tsx tests/cash-flow-uat.ts",
     "test:subledger-recovery": "tsx tests/subledger-recovery-uat.ts",
