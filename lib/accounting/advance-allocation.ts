@@ -1,5 +1,7 @@
-import { appendRecord, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
-import { postJournal } from "@/lib/accounting/posting";
+import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
+import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
+import { findPaymentSchedules, insertPaymentSchedule } from "@/lib/accounting/payment-schedule-store";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { round2 } from "@/lib/accounting/inventory";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
@@ -93,83 +95,199 @@ export async function allocateAdvancePartial(input: {
   amount?: number;
   allocationDate?: string;
 }) {
-  const payment = (await findRecords<any>("Payments", { paymentId: input.paymentId }, 1)).rows[0];
-  if (!payment) throw new Error("Advance Payment Entry not found");
-  if (String(payment.status || "").toUpperCase() !== "POSTED" || !String(payment.journalId || "").trim()) {
-    throw new Error("Advance Payment Entry must be finalized before allocation");
-  }
-  const partyType = String(payment.partyType || "") as AdvancePartyType;
-  if (!(["Customer", "Supplier"] as string[]).includes(partyType)) throw new Error("Unsupported advance party type");
-  const customer = partyType === "Customer";
-  if (customer && input.againstDocumentType !== "Sales Invoice") throw new Error("Customer advances can only be allocated to Sales Invoices");
-  if (!customer && input.againstDocumentType !== "Supplier Invoice") throw new Error("Supplier advances can only be allocated to Supplier Invoices");
-
-  const table = customer ? "Invoices" : "SupplierBills";
-  const idField = customer ? "invoiceId" : "billId";
-  const source = (await findRecords<any>(table, { [idField]: input.againstDocumentId }, 1)).rows[0];
-  if (!source) throw new Error(`${input.againstDocumentType} not found`);
-  const sourceStatus = String(source.status || "").toUpperCase();
-  if (!["POSTED", "PARTLY_PAID", "PAID"].includes(sourceStatus)) {
-    throw new Error(`${input.againstDocumentType} must be posted before advance allocation`);
-  }
-  if (customer && String(source.customerId || "") !== String(payment.partyId || "")) throw new Error("Advance customer does not match Sales Invoice customer");
-  if (!customer && String(source.supplierId || "") !== String(payment.partyId || "")) throw new Error("Advance supplier does not match Supplier Invoice supplier");
-
-  const summary = await advanceAllocationSummary(payment);
-  if (summary.remainingAmount <= 0.001) throw new Error("This advance has no unallocated balance remaining");
-  const outstanding = Number(source.outstandingAmount ?? source.totalAmount ?? 0);
-  if (outstanding <= 0.001) throw new Error(`${input.againstDocumentType} has no outstanding balance`);
-  const requested = Number(input.amount || 0);
-  const amount = round2(requested > 0 ? requested : Math.min(summary.remainingAmount, outstanding));
-  if (!(amount > 0)) throw new Error("Allocation amount must be greater than zero");
-  if (amount > summary.remainingAmount + 0.001) throw new Error(`Allocation exceeds unallocated advance balance K${summary.remainingAmount.toFixed(2)}`);
-  if (amount > outstanding + 0.001) throw new Error(`Allocation exceeds document outstanding balance K${outstanding.toFixed(2)}`);
-
   const allocationId = documentSeriesId("Allocation");
   const allocationDate = String(input.allocationDate || localDate());
-  const lines = customer
-    ? [
-        { accountId: "ACC-2150", debit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Apply customer advance" },
-        { accountId: "ACC-1130", credit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Receivable from advance" },
-      ]
-    : [
-        { accountId: "ACC-2110", debit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Payable from advance" },
-        { accountId: "ACC-1160", credit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Apply supplier advance" },
-      ];
 
-  const journal = await postJournal({
-    postingDate: allocationDate,
-    documentType: customer ? "CUSTOMER_ADVANCE_ALLOCATION" : "SUPPLIER_ADVANCE_ALLOCATION",
-    documentId: allocationId,
-    documentNumber: String(payment.paymentNumber || payment.paymentId),
-    reference: `Allocate ${payment.paymentNumber || payment.paymentId} to ${input.againstDocumentId}`,
-    projectId: payment.projectId,
-    lines,
+  return runAtomicAccounting(async ({ tx, postJournal }) => {
+    const payment = await tx.payment.findFirst({
+      where: { OR: [{ id: input.paymentId }, { code: input.paymentId }] },
+      include: {
+        customer: { select: { code: true } },
+        supplier: { select: { code: true } },
+        project: { select: { code: true } },
+      },
+    });
+    if (!payment) throw new Error("Advance Payment Entry not found");
+    if (payment.status !== "CLEARED" || !payment.journalId) {
+      throw new Error("Advance Payment Entry must be finalized before allocation");
+    }
+
+    const customer = Boolean(payment.customerId);
+    const partyType: AdvancePartyType = customer ? "Customer" : "Supplier";
+    if (customer && input.againstDocumentType !== "Sales Invoice") {
+      throw new Error("Customer advances can only be allocated to Sales Invoices");
+    }
+    if (!customer && input.againstDocumentType !== "Supplier Invoice") {
+      throw new Error("Supplier advances can only be allocated to Supplier Invoices");
+    }
+
+    const sourceType = allocationSourceType(partyType);
+    const schedules = await findPaymentSchedules(sourceType, payment.id, tx);
+    const scheduledAllocated = round2(
+      schedules
+        .filter((row) => String(row.status || "").toUpperCase() === POSTED_ALLOCATION)
+        .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    );
+
+    // A direct payment->document link belongs to the older full-allocation
+    // model. Do not permit partial-ledger allocations on top of that state.
+    const legacyAllocated = (payment.invoiceId || payment.billId) && scheduledAllocated <= 0.001
+      ? Number(payment.amount || 0)
+      : 0;
+    const allocatedAmount = round2(Math.max(scheduledAllocated, legacyAllocated));
+    const remainingAmount = round2(Math.max(0, Number(payment.amount || 0) - allocatedAmount));
+    if (remainingAmount <= 0.001) throw new Error("This advance has no unallocated balance remaining");
+
+    const invoice = customer
+      ? await tx.invoice.findFirst({
+          where: { OR: [{ id: input.againstDocumentId }, { code: input.againstDocumentId }] },
+        })
+      : null;
+    const bill = !customer
+      ? await tx.supplierBill.findFirst({
+          where: { OR: [{ id: input.againstDocumentId }, { code: input.againstDocumentId }] },
+        })
+      : null;
+
+    if (customer && !invoice) throw new Error("Sales Invoice not found");
+    if (!customer && !bill) throw new Error("Supplier Invoice not found");
+    if (invoice && payment.customerId !== invoice.customerId) {
+      throw new Error("Advance customer does not match Sales Invoice customer");
+    }
+    if (bill && payment.supplierId !== bill.supplierId) {
+      throw new Error("Advance supplier does not match Supplier Invoice supplier");
+    }
+    if (invoice && !["SENT", "PARTIAL", "PAID"].includes(invoice.status)) {
+      throw new Error("Sales Invoice must be posted before advance allocation");
+    }
+    if (bill && !["SENT", "PARTIAL", "PAID"].includes(bill.status)) {
+      throw new Error("Supplier Invoice must be posted before advance allocation");
+    }
+
+    const outstanding = round2(Number(invoice?.outstanding ?? bill?.outstanding ?? 0));
+    if (outstanding <= 0.001) {
+      throw new Error(`${input.againstDocumentType} has no outstanding balance`);
+    }
+    const requested = Number(input.amount || 0);
+    const amount = round2(requested > 0 ? requested : Math.min(remainingAmount, outstanding));
+    if (!(amount > 0)) throw new Error("Allocation amount must be greater than zero");
+    if (amount > remainingAmount + 0.001) {
+      throw new Error(`Allocation exceeds unallocated advance balance K${remainingAmount.toFixed(2)}`);
+    }
+    if (amount > outstanding + 0.001) {
+      throw new Error(`Allocation exceeds document outstanding balance K${outstanding.toFixed(2)}`);
+    }
+
+    const partyRef = customer
+      ? (payment.customer?.code || payment.customerId || "")
+      : (payment.supplier?.code || payment.supplierId || "");
+    const projectRef = payment.project?.code || payment.projectId || "";
+    const lines = customer
+      ? [
+          {
+            accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
+            debit: amount,
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Apply customer advance",
+          },
+          {
+            accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
+            credit: amount,
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Receivable from advance",
+          },
+        ]
+      : [
+          {
+            accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
+            debit: amount,
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Payable from advance",
+          },
+          {
+            accountId: INITIAL_ACCOUNT_IDS.supplierAdvances,
+            credit: amount,
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Apply supplier advance",
+          },
+        ];
+
+    if (invoice) {
+      const paid = round2(Number(invoice.amountPaid || 0) + amount);
+      const after = round2(Math.max(0, Number(invoice.total || 0) - paid));
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          amountPaid: paid,
+          outstanding: after,
+          status: after <= 0.001 ? "PAID" : "PARTIAL",
+        },
+      });
+    }
+    if (bill) {
+      const paid = round2(Number(bill.amountPaid || 0) + amount);
+      const after = round2(Math.max(0, Number(bill.total || 0) - paid));
+      await tx.supplierBill.update({
+        where: { id: bill.id },
+        data: {
+          amountPaid: paid,
+          outstanding: after,
+          status: after <= 0.001 ? "PAID" : "PARTIAL",
+        },
+      });
+    }
+
+    await insertPaymentSchedule({
+      scheduleId: allocationId,
+      sourceType,
+      sourceId: payment.id,
+      projectId: projectRef,
+      partyId: partyRef,
+      milestone: invoice?.id || bill!.id,
+      dueDate: allocationDate,
+      percentage: 0,
+      amount,
+      status: POSTED_ALLOCATION,
+    }, "advance-allocation", tx);
+
+    const journal = await postJournal({
+      postingDate: allocationDate,
+      documentType: sourceType,
+      documentId: allocationId,
+      documentNumber: payment.code,
+      reference: `Allocate ${payment.code} to ${input.againstDocumentId}`,
+      projectId: projectRef,
+      createdBy: "advance-allocation",
+      approvedBy: "Finance Controller",
+      lines,
+    });
+
+    const refreshedRows = await findPaymentSchedules(sourceType, payment.id, tx);
+    const nowAllocated = round2(
+      refreshedRows
+        .filter((row) => String(row.status || "").toUpperCase() === POSTED_ALLOCATION)
+        .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    );
+    const documentOutstanding = round2(Number(
+      invoice
+        ? (await tx.invoice.findUnique({ where: { id: invoice.id }, select: { outstanding: true } }))?.outstanding || 0
+        : (await tx.supplierBill.findUnique({ where: { id: bill!.id }, select: { outstanding: true } }))?.outstanding || 0,
+    ));
+
+    return {
+      paymentId: payment.id,
+      againstDocumentId: invoice?.id || bill!.id,
+      journalId: journal.journalId,
+      allocationId,
+      allocatedAmount: amount,
+      remainingAdvance: round2(Math.max(0, Number(payment.amount || 0) - nowAllocated)),
+      documentOutstanding,
+      documentStatus: documentOutstanding <= 0.001 ? "PAID" : "PARTLY_PAID",
+    };
   });
-
-  await appendRecord("PaymentSchedules", {
-    scheduleId: allocationId,
-    sourceType: allocationSourceType(partyType),
-    sourceId: payment.paymentId,
-    projectId: payment.projectId || "",
-    partyId: payment.partyId || "",
-    milestone: input.againstDocumentId,
-    dueDate: allocationDate,
-    percentage: 0,
-    amount,
-    status: "POSTED",
-  }, "advance-allocation");
-
-  const settlement = await synchronizeSettlement(partyType, input.againstDocumentId);
-  const refreshed = await advanceAllocationSummary(payment);
-  return {
-    paymentId: payment.paymentId,
-    againstDocumentId: input.againstDocumentId,
-    journalId: journal.journalId,
-    allocationId,
-    allocatedAmount: amount,
-    remainingAdvance: refreshed.remainingAmount,
-    documentOutstanding: settlement.outstandingAmount,
-    documentStatus: settlement.status,
-  };
 }
+
