@@ -414,6 +414,9 @@ export async function rejectPendingManualJournal(
     if (journal.status !== "PENDING") {
       throw new Error(`Only PENDING manual journals can be rejected. Current status: ${journal.status}`);
     }
+    if (journal.createdBy.trim().toLowerCase() === checker.email.trim().toLowerCase()) {
+      throw new Error("Maker-checker control: the creator cannot reject their own submitted manual journal");
+    }
 
     const updated = await tx.journalHeader.update({
       where: { id: journal.id },
