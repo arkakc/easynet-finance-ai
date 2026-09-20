@@ -1,6 +1,6 @@
 import type { AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
-import { inventoryState, round2 } from "@/lib/accounting/inventory";
+import { round2, round4 } from "@/lib/accounting/inventory";
 import { salesInvoicePostingByLines } from "@/lib/accounting/posting-rules";
 import {
   ensurePaymentScheduleInfrastructure,
@@ -8,6 +8,7 @@ import {
   insertPaymentSchedule,
 } from "@/lib/accounting/payment-schedule-store";
 import { prisma } from "@/src/lib/prisma";
+import { resolveWarehouse, syncWarehouseBalance, warehouseInventoryState } from "@/lib/accounting/warehouse-stock";
 
 export type AtomicSalesInvoiceRevenueLine = {
   accountId: string;
@@ -22,6 +23,7 @@ export type AtomicSalesInvoiceStockLine = {
   costAccountId: string;
   fallbackRate?: number;
   description?: string;
+  warehouseRef?: string;
 };
 
 export type AtomicSalesInvoiceInput = {
@@ -32,6 +34,7 @@ export type AtomicSalesInvoiceInput = {
   customerId: string;
   projectId?: string;
   sourceDocumentId?: string;
+  warehouseRef?: string;
   total: number;
   gst: number;
   revenueLines: AtomicSalesInvoiceRevenueLine[];
@@ -44,39 +47,6 @@ export type AtomicSalesInvoiceInput = {
   createdBy?: string;
   approvedBy?: string;
 };
-
-const incomingTypes = new Set([
-  "PURCHASE_IN",
-  "PURCHASE_RECEIPT",
-  "SALES_ISSUE_ROLLBACK",
-  "ADJUSTMENT_IN",
-  "RETURN_IN",
-  "TRANSFER_IN",
-]);
-const outgoingTypes = new Set([
-  "SALES_DELIVERY",
-  "SALES_ISSUE",
-  "SALE_OUT",
-  "PROJECT_ISSUE",
-  "ADJUSTMENT_OUT",
-  "RETURN_OUT",
-  "TRANSFER_OUT",
-]);
-const adjustmentTypes = new Set(["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"]);
-
-function movementRows(rows: Array<{ type: string; quantity: unknown; totalCost: unknown }>) {
-  return rows.map((row) => {
-    const type = String(row.type || "").toUpperCase();
-    const quantity = Number(row.quantity || 0);
-    const value = Number(row.totalCost || 0);
-    return {
-      qtyIn: incomingTypes.has(type) ? quantity : 0,
-      qtyOut: outgoingTypes.has(type) ? quantity : 0,
-      value: adjustmentTypes.has(type) ? 0 : Math.abs(value),
-      valueAdjustment: adjustmentTypes.has(type) ? value : 0,
-    };
-  });
-}
 
 export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput) {
   // Infrastructure DDL is outside the business transaction; schedule rows
@@ -150,17 +120,20 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
         });
         if (!item) throw new Error(`Sales Invoice stock item not found: ${requested.itemId}`);
 
-        const movements = await tx.stockMovement.findMany({
-          where: { itemId: item.id },
-          orderBy: { createdAt: "asc" },
-          select: { type: true, quantity: true, totalCost: true },
-        });
-        const state = inventoryState(
-          movementRows(movements),
+        const warehouse = await resolveWarehouse(
+          tx,
+          requested.warehouseRef || input.warehouseRef,
+        );
+        const state = await warehouseInventoryState(
+          tx,
+          item.id,
+          warehouse.id,
           Number(requested.fallbackRate ?? item.purchasePrice ?? item.sellPrice ?? 0),
         );
         if (quantity > state.qty + 0.0001) {
-          throw new Error(`Insufficient stock for ${item.code}. On hand ${state.qty}, required ${quantity}`);
+          throw new Error(
+            `Insufficient stock for ${item.code} in ${warehouse.code}. On hand ${state.qty}, required ${quantity}`,
+          );
         }
 
         const value = round2(quantity * state.rate);
@@ -169,6 +142,7 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
           data: {
             id: movementId,
             itemId: item.id,
+            warehouseId: warehouse.id,
             type: "SALES_ISSUE",
             quantity,
             unitCost: state.rate,
@@ -181,6 +155,17 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
           },
         });
         createdMovementIds.push(movementId);
+
+        const nextQty = round4(state.qty - quantity);
+        const nextValue = round2(state.value - value);
+        await syncWarehouseBalance(tx, {
+          itemId: item.id,
+          warehouseId: warehouse.id,
+          quantity: nextQty,
+          value: nextValue,
+          rate: nextQty > 0 ? round4(nextValue / nextQty) : state.rate,
+        });
+
         cogsLines.push({
           accountId: requested.costAccountId,
           amount: value,
