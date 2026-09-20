@@ -40,6 +40,8 @@
     "payment-allocations:preview": "tsx scripts/backfill-payment-allocations.ts",
     "payment-allocations:backfill": "tsx scripts/backfill-payment-allocations.ts --apply",
     "test:payment-allocation": "tsx tests/payment-allocation-uat.ts",
+    "warehouse-stock:preview": "tsx scripts/backfill-warehouse-stock.ts",
+    "warehouse-stock:backfill": "tsx scripts/backfill-warehouse-stock.ts --apply",
     "test:financial-statements": "tsx tests/financial-statements-uat.ts",
     "test:cash-flow": "tsx tests/cash-flow-uat.ts",
     "test:subledger-recovery": "tsx tests/subledger-recovery-uat.ts",
