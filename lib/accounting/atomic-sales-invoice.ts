@@ -1,7 +1,7 @@
 import type { AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { inventoryState, round2 } from "@/lib/accounting/inventory";
-import { salesInvoicePostingByLines } from "@/lib/accounting/posting";
+import { salesInvoicePostingByLines } from "@/lib/accounting/posting-rules";
 import {
   ensurePaymentScheduleInfrastructure,
   findPaymentSchedules,
