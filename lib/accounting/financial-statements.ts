@@ -111,7 +111,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       where: { issuedDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
       include: {
         customer: { select: { code: true, name: true } },
-        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, status: "POSTED" }, select: { amount: true } },
+        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, OR: [{ reversalDate: null }, { reversalDate: { gt: asOfDate } }] }, select: { amount: true } },
         originalCreditNotes: { where: { issueDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
