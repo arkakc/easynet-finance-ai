@@ -186,18 +186,29 @@ async function normalizeLines(
   return { ...totals, lines };
 }
 
+type PersistedPendingJournal = {
+  id: string;
+  code: string;
+  date: Date;
+  status: string;
+  sourceDocType: string | null;
+  sourceDocId: string | null;
+  totalDebit: Prisma.Decimal;
+  totalCredit: Prisma.Decimal;
+  createdBy: string;
+  lines: Array<{
+    id: string;
+    lineNo: number;
+    accountId: string;
+    debit: Prisma.Decimal;
+    credit: Prisma.Decimal;
+    description: string;
+  }>;
+};
+
 async function validatePersistedPendingJournal(
   tx: Prisma.TransactionClient,
-  journal: Awaited<ReturnType<Prisma.TransactionClient["journalHeader"]["findFirst"]>> & {
-    lines?: Array<{
-      id: string;
-      lineNo: number;
-      accountId: string;
-      debit: Prisma.Decimal;
-      credit: Prisma.Decimal;
-      description: string;
-    }>;
-  },
+  journal: PersistedPendingJournal,
 ) {
   if (!journal || !journal.lines) throw new Error("Manual journal not found");
   const postingDate = journal.date.toLocaleDateString("en-CA", {
