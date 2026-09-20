@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requirePermission } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { POST as legacyTransactionPost } from "@/app/api/transactions/route";
@@ -49,6 +50,7 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
 
 export async function GET() {
   try {
+    await requirePermission("post.approve");
     const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses] = await Promise.all([
       listTable<any>("Quotes", 500, 0), listTable<any>("Invoices", 500, 0), listTable<any>("PurchaseOrders", 500, 0),
       listTable<any>("SupplierBills", 500, 0), listTable<any>("Payments", 500, 0), listTable<any>("Expenses", 500, 0),
@@ -63,7 +65,11 @@ export async function GET() {
     ].sort((a, b) => createdValue(b.createdAt || b.date) - createdValue(a.createdAt || a.date));
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Approval queue load failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Approval queue load failed";
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    );
   }
 }
 

@@ -4,18 +4,24 @@ import { env } from "@/lib/env";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, backendConfigStatus, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { toPublicBankAccount, upsertCompanyBankAccounts } from "@/lib/accounting/bank-accounts";
 
 const ALLOWED_KEYS = [
   "company_name",
   "company_short_name",
+  "company_country",
+  "company_registration_no",
   "base_currency",
   "currency",
   "financial_year_period",
   "financial_year_start_month",
+  "posting_lock_date",
   "fiscal_year_start",
   "gst_status",
   "gst_number",
   "company_tin",
+  "gst_evidence_note",
   "gst_evidence_doc_id",
   "gst_evidence_doc_name",
   "company_bank_name",
@@ -29,6 +35,21 @@ const singleSettingSchema = z.object({
   notes: z.string().trim().optional().default(""),
 });
 
+const bankAccountSchema = z.object({
+  id: z.string().trim().optional(),
+  displayName: z.string().trim().max(140).optional().default(""),
+  bankName: z.string().trim().min(1).max(140),
+  accountNumber: z.string().trim().min(1).max(80),
+  bsb: z.string().trim().max(40).optional().default(""),
+  currency: z.string().trim().regex(/^[A-Z]{3}$/).optional().default("PGK"),
+  linkedAccountCode: z.string().trim().max(40).optional().default(""),
+  isActive: z.boolean().optional().default(true),
+});
+
+function publicAccountId(code: string) {
+  return `ACC-${code}`;
+}
+
 export async function GET() {
   try {
     await requirePermission("settings.manage");
@@ -37,7 +58,7 @@ export async function GET() {
 
     if (!backendConfigured) {
       // Prisma / SQLite fallback
-      const [dbSettings, documents] = await Promise.all([
+      const [dbSettings, documents, bankAccounts, bankLedgerAccounts] = await Promise.all([
         prisma.globalSettings.findMany({ orderBy: { key: "asc" } }),
         prisma.document.findMany({
           where: {
@@ -49,6 +70,15 @@ export async function GET() {
           },
           orderBy: { createdAt: "desc" },
           take: 10,
+        }),
+        prisma.bankAccount.findMany({
+          where: { isActive: true },
+          orderBy: [{ createdAt: "asc" }],
+          include: { chartOfAccounts: true },
+        }),
+        prisma.chartOfAccounts.findMany({
+          where: { isActive: true, type: "ASSET", children: { none: {} } },
+          orderBy: { code: "asc" },
         }),
       ]);
 
@@ -75,23 +105,6 @@ export async function GET() {
       if (!map.has("company_tin") && map.has("gst_number")) {
         map.set("company_tin", { ...map.get("gst_number")!, key: "company_tin" });
       }
-      if (!map.has("financial_year_period")) {
-        map.set("financial_year_period", {
-          key: "financial_year_period",
-          value: "FY 2026 (01 Jan 2026 - 31 Dec 2026)",
-          notes: "Current Papua New Guinea statutory financial year",
-          updatedAt: new Date().toISOString(),
-        });
-      }
-      if (!map.has("gst_status")) {
-        map.set("gst_status", {
-          key: "gst_status",
-          value: "UNVERIFIED",
-          notes: "Do not treat GST registration as verified until evidence is retained",
-          updatedAt: new Date().toISOString(),
-        });
-      }
-
       const rows = Array.from(map.values());
       const hasGstEvidence = documents.length > 0;
 
@@ -99,6 +112,13 @@ export async function GET() {
         ok: true,
         source: "prisma",
         settings: rows,
+        bankAccounts: bankAccounts.map(toPublicBankAccount),
+        bankLedgerAccounts: bankLedgerAccounts.map((account) => ({
+          accountId: publicAccountId(account.code),
+          accountCode: account.code,
+          accountName: account.name,
+          currency: account.currency,
+        })),
         hasGstEvidence,
         documents: documents.map((d) => ({
           id: d.id,
@@ -157,6 +177,7 @@ export async function POST(request: Request) {
       setting?: { key: string; value: string; notes?: string };
       settings?: Array<{ key: string; value: string; notes?: string }>;
       retainedDoc?: { name: string; fileUrl?: string; documentType?: string };
+      bankAccounts?: unknown;
     };
 
     if (!isAuthorized) {
@@ -225,8 +246,7 @@ export async function POST(request: Request) {
               where: { OR: [{ email: authUser?.email || "admin@easynet.local" }, { role: "SYSTEM_MANAGER" }] },
             });
             const creatorId = adminUser?.id || (await prisma.user.findFirst())?.id || "cmtvi3zjl0001ld0gwkiz807y";
-            const docCount = await prisma.document.count();
-            const code = `DOC-GST-${String(docCount + 1).padStart(4, "0")}`;
+            const code = documentSeriesId("Document");
             await prisma.document.create({
               data: {
                 code,
@@ -277,49 +297,58 @@ export async function POST(request: Request) {
       gstStatusItem.value = normalizedStatus;
     }
 
+    const parsedBankAccounts = body.bankAccounts === undefined
+      ? null
+      : z.array(bankAccountSchema).parse(body.bankAccounts);
+
     // Save to Database
     if (!backendConfigured) {
       // Upsert into Prisma GlobalSettings
-      for (const item of itemsToSave) {
-        await prisma.globalSettings.upsert({
-          where: { key: item.key },
-          create: {
-            key: item.key,
-            value: item.value,
-            description: item.notes || null,
-            updatedBy: authUser?.name || "System Admin",
-          },
-          update: {
-            value: item.value,
-            description: item.notes || null,
-            updatedBy: authUser?.name || "System Admin",
-            updatedAt: new Date(),
-          },
-        });
+      const savedBankAccounts = await prisma.$transaction(async (tx) => {
+        for (const item of itemsToSave) {
+          await tx.globalSettings.upsert({
+            where: { key: item.key },
+            create: {
+              key: item.key,
+              value: item.value,
+              description: item.notes || null,
+              updatedBy: authUser?.name || "System Admin",
+            },
+            update: {
+              value: item.value,
+              description: item.notes || null,
+              updatedBy: authUser?.name || "System Admin",
+              updatedAt: new Date(),
+            },
+          });
 
-        // Maintain aliases
-        if (item.key === "base_currency") {
-          await prisma.globalSettings.upsert({
-            where: { key: "currency" },
-            create: { key: "currency", value: item.value, description: "Primary currency", updatedBy: authUser?.name },
-            update: { value: item.value, updatedAt: new Date() },
-          });
+          // Maintain aliases
+          if (item.key === "base_currency") {
+            await tx.globalSettings.upsert({
+              where: { key: "currency" },
+              create: { key: "currency", value: item.value, description: "Primary currency", updatedBy: authUser?.name },
+              update: { value: item.value, updatedAt: new Date() },
+            });
+          }
+          if (item.key === "gst_number") {
+            await tx.globalSettings.upsert({
+              where: { key: "company_tin" },
+              create: { key: "company_tin", value: item.value, description: "IRC TIN", updatedBy: authUser?.name },
+              update: { value: item.value, updatedAt: new Date() },
+            });
+          }
+          if (item.key === "financial_year_period") {
+            await tx.globalSettings.upsert({
+              where: { key: "fiscal_year_start" },
+              create: { key: "fiscal_year_start", value: "01-01", description: "Fiscal year start", updatedBy: authUser?.name },
+              update: { value: "01-01", updatedAt: new Date() },
+            });
+          }
         }
-        if (item.key === "gst_number") {
-          await prisma.globalSettings.upsert({
-            where: { key: "company_tin" },
-            create: { key: "company_tin", value: item.value, description: "IRC TIN", updatedBy: authUser?.name },
-            update: { value: item.value, updatedAt: new Date() },
-          });
-        }
-        if (item.key === "financial_year_period") {
-          await prisma.globalSettings.upsert({
-            where: { key: "fiscal_year_start" },
-            create: { key: "fiscal_year_start", value: "01-01", description: "Fiscal year start", updatedBy: authUser?.name },
-            update: { value: "01-01", updatedAt: new Date() },
-          });
-        }
-      }
+        return parsedBankAccounts
+          ? upsertCompanyBankAccounts(tx, parsedBankAccounts, authUser?.email || authUser?.name || "System Admin")
+          : [];
+      });
 
       const allSettings = await prisma.globalSettings.findMany();
       return NextResponse.json({
@@ -327,6 +356,7 @@ export async function POST(request: Request) {
         source: "prisma",
         message: `Successfully saved ${itemsToSave.length} setting(s).`,
         row: itemsToSave[0],
+        bankAccounts: savedBankAccounts,
         settings: allSettings.map((s) => ({
           key: s.key,
           value: s.value || "",

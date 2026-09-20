@@ -6,12 +6,22 @@ import { useRouter } from "next/navigation";
 
 type RecordType = "quote" | "invoice" | "purchaseOrder" | "supplierBill" | "payment" | "expense";
 
-export default function DocumentWorkflowActions({ recordType, recordId, status }: { recordType: RecordType; recordId: string; status: string }) {
+export default function DocumentWorkflowActions({
+  recordType,
+  recordId,
+  status,
+  onApproved,
+}: {
+  recordType: RecordType;
+  recordId: string;
+  status: string;
+  onApproved?: () => Promise<void> | void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const current = String(status || "DRAFT").toUpperCase();
-  const controlledCreditNote = recordType === "invoice" && String(recordId || "").toUpperCase().startsWith("CRN-");
+  const controlledCreditNote = recordType === "invoice" && String(recordId || "").toUpperCase().startsWith("CN-");
 
   async function approve() {
     setBusy(true);
@@ -35,6 +45,7 @@ export default function DocumentWorkflowActions({ recordType, recordId, status }
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval failed");
       setMessage(controlledCreditNote ? "Sales Credit Note / Return approved and posted." : "Document approved.");
+      await onApproved?.();
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Approval failed");

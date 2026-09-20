@@ -16,6 +16,7 @@ import {
   JournalStatus,
 } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { INITIAL_CHART_OF_ACCOUNTS } from '../lib/accounting/chart-of-accounts';
 
 const prisma = new PrismaClient();
 
@@ -331,7 +332,7 @@ async function main() {
     { code: '4110', name: 'Website Design & Development Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'Business websites, e-commerce, and corporate web portals' },
     { code: '4120', name: 'Digital Marketing & Lead Generation Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'Meta, Google advertising, and social media lead funnels' },
     { code: '4130', name: 'WhatsApp Business & Automation Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'WhatsApp Business API, chatbot automation & CRM routing' },
-    { code: '4140', name: 'ERP Implementation & Consulting Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'ERPNext & Zoho deployments, accounting, inventory, HR' },
+    { code: '4140', name: 'ERP Implementation & Consulting Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'ERP & Zoho deployments, accounting, inventory, HR' },
     { code: '4150', name: 'Custom Application Development Revenue', type: AccountTypeGL.REVENUE, parentId: '4100', normalBalance: NormalBalance.CREDIT, description: 'Bespoke operational software & API integrations' },
 
     // 4200 - ICT Infrastructure & Managed Services
@@ -378,7 +379,7 @@ async function main() {
     { code: '6110', name: 'Salaries & Wages (Core Office & Tech)', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT, description: 'Regular staff payroll' },
     { code: '6120', name: 'Nasfund Superannuation (8.4% Employer)', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT, description: 'Statutory 8.4% employer superannuation contribution' },
     { code: '6130', name: 'Staff Overtime & Field Work Allowances', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT },
-    { code: '6140', name: 'Staff Training & Technical Certifications', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT, description: 'Fortinet, Microsoft, AWS, ERPNext credentials' },
+    { code: '6140', name: 'Staff Training & Technical Certifications', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT, description: 'Fortinet, Microsoft, AWS, ERP credentials' },
     { code: '6150', name: 'Staff Protective Equipment (PPE) & Uniforms', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT, description: 'Helmets, boots, vests for field site work' },
     { code: '6160', name: 'Staff Welfare & Medical Costs', type: AccountTypeGL.EXPENSE, parentId: '6100', normalBalance: NormalBalance.DEBIT },
 
@@ -448,6 +449,60 @@ async function main() {
 
   console.log(`✓ Created ${accounts.length} customized Chart of Accounts for Easynet IT Solutions`);
 
+  // The active accounting engine posts to the canonical ACC-xxxx chart. Keep
+  // the local seed aligned with that contract so a fresh database passes the
+  // accounting self-test without relying on runtime repair.
+  const canonicalCodes = new Set(INITIAL_CHART_OF_ACCOUNTS.map((account) => account.accountCode));
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    const parentCode = account.parentAccount.replace(/^ACC-/, '') || undefined;
+    const typeByName: Record<string, AccountTypeGL> = {
+      Asset: AccountTypeGL.ASSET,
+      Liability: AccountTypeGL.LIABILITY,
+      Equity: AccountTypeGL.EQUITY,
+      Income: AccountTypeGL.REVENUE,
+      Expense: AccountTypeGL.EXPENSE,
+      'Contra Asset': AccountTypeGL.CONTRA_ASSET,
+      'Contra Liability': AccountTypeGL.CONTRA_LIABILITY,
+    };
+    const type = typeByName[account.accountType] || AccountTypeGL.ASSET;
+    const normalBalance = ["Liability", "Equity", "Income", "Contra Asset"].includes(account.accountType)
+      ? NormalBalance.CREDIT
+      : NormalBalance.DEBIT;
+    await prisma.chartOfAccounts.upsert({
+      where: { code: account.accountCode },
+      update: {
+        name: account.accountName,
+        type,
+        normalBalance,
+        isActive: account.active,
+        ...(parentCode ? { parent: { connect: { code: parentCode } } } : { parent: { disconnect: true } }),
+      },
+      create: {
+        code: account.accountCode,
+        name: account.accountName,
+        type,
+        normalBalance,
+        isActive: account.active,
+        isSystem: true,
+        currency: 'PGK',
+        ...(parentCode ? { parent: { connect: { code: parentCode } } } : {}),
+      },
+    });
+  }
+  const seededAccounts = await prisma.chartOfAccounts.findMany({ select: { id: true, code: true } });
+  const accountIdByCode = new Map(seededAccounts.map((account) => [account.code, account.id]));
+  const parentCodes = new Set(INITIAL_CHART_OF_ACCOUNTS.map((account) => account.parentAccount.replace(/^ACC-/, '')).filter(Boolean));
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    if (parentCodes.has(account.accountCode)) continue;
+    const accountId = accountIdByCode.get(account.accountCode);
+    const parentId = accountIdByCode.get(account.parentAccount.replace(/^ACC-/, ''));
+    if (!accountId || !parentId) continue;
+    await prisma.chartOfAccounts.updateMany({
+      where: { parentId: accountId, code: { notIn: [...canonicalCodes] } },
+      data: { parentId },
+    });
+  }
+
   // ============================================
   // 6. BANK ACCOUNTS
   // ============================================
@@ -515,10 +570,18 @@ async function main() {
   ];
 
   for (const b of bankAccounts) {
+    const ledgerCodeByBank: Record<string, string> = {
+      'BANK-BSP': '1121',
+      'BANK-KINA': '1122',
+      'BANK-WPNG': '1123',
+      'BANK-USD': '1124',
+      'CASH-POM': '1111',
+    };
+    const ledgerAccountId = accountIdByCode.get(ledgerCodeByBank[b.code]);
     await prisma.bankAccount.upsert({
       where: { code: b.code },
-      update: b,
-      create: b,
+      update: { ...b, chartOfAccountsId: ledgerAccountId || null },
+      create: { ...b, chartOfAccountsId: ledgerAccountId || null },
     });
   }
 
@@ -538,7 +601,7 @@ async function main() {
     // Software & Digital Services
     { code: 'SVC-WEB-CORP', name: 'Corporate Multi-Page Website', description: 'Custom responsive corporate website with SEO, hosting setup & staff training', category: 'Software Services', sku: 'SVC-WEB-CORP', unit: 'PROJECT', type: ItemType.SERVICE, sellPrice: 4800 },
     { code: 'SVC-WHATSAPP-API', name: 'WhatsApp Business Automation Setup', description: 'WhatsApp Business API integration, auto-replies, lead routing & AI chatbot', category: 'Software Services', sku: 'SVC-WA-API', unit: 'SETUP', type: ItemType.SERVICE, sellPrice: 2200 },
-    { code: 'SVC-ERP-DEPLOY', name: 'ERPNext / Zoho Implementation', description: 'Full ERP deployment for accounting, inventory, purchasing, POS and payroll in PNG', category: 'Software Services', sku: 'SVC-ERP-DEP', unit: 'PROJECT', type: ItemType.SERVICE, sellPrice: 16000 },
+    { code: 'SVC-ERP-DEPLOY', name: 'ERP / Zoho Implementation', description: 'Full ERP deployment for accounting, inventory, purchasing, POS and payroll in PNG', category: 'Software Services', sku: 'SVC-ERP-DEP', unit: 'PROJECT', type: ItemType.SERVICE, sellPrice: 16000 },
 
     // ICT Infrastructure Services
     { code: 'SVC-STARLINK-INST', name: 'Starlink Commercial Installation & Failover', description: 'Satellite dish mounting, cabling, router integration & failover network config', category: 'Infrastructure Services', sku: 'SVC-STARLINK', unit: 'SITE', type: ItemType.SERVICE, sellPrice: 1850 },
@@ -816,7 +879,7 @@ async function main() {
     {
       code: 'INV-2026-0002',
       date: new Date('2026-09-01'),
-      description: 'Tax Invoice: Highlands Fresh Agriculture ERPNext Milestone 1',
+      description: 'Tax Invoice: Highlands Fresh Agriculture ERP Milestone 1',
       reference: 'INV-2026-0002',
       sourceDocType: 'INVOICE',
       status: JournalStatus.POSTED,
@@ -825,7 +888,7 @@ async function main() {
       postedAt: new Date('2026-09-01T10:00:00Z'),
       lines: [
         { code: '1131', debit: 22000, credit: 0, description: 'Highlands Fresh Agriculture Group - Total Due' },
-        { code: '4140', debit: 0, credit: 20000, description: 'ERPNext deployment, inventory & accounts setup' },
+        { code: '4140', debit: 0, credit: 20000, description: 'ERP deployment, inventory & accounts setup' },
         { code: '2121', debit: 0, credit: 2000, description: 'IRC 10% GST Output Tax' },
       ],
     },

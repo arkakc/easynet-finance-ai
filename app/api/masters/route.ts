@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -18,6 +17,7 @@ import {
   prismaDeleteItem,
 } from "@/lib/backend/prisma-store";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const optionalText = z.string().trim().optional().default("");
 const optionalNumber = z.coerce.number().finite().nonnegative().optional().default(0);
@@ -60,7 +60,32 @@ const projectSchema = z.object({
 });
 
 function generatedId(prefix: string) {
-  return `${prefix}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  return documentSeriesId(prefix);
+}
+
+async function syncPrimaryContact(input: {
+  customerId?: string;
+  supplierId?: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+}) {
+  const name = String(input.name || "").trim();
+  const where = input.customerId ? { customerId: input.customerId } : { supplierId: input.supplierId };
+  const existing = await prisma.contact.findFirst({
+    where,
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+  });
+  if (!name) {
+    if (existing?.isPrimary) await prisma.contact.delete({ where: { id: existing.id } });
+    return;
+  }
+  const data = { name, email: String(input.email || "").trim() || null, phone: String(input.phone || "").trim() || null, isPrimary: true };
+  if (existing) {
+    await prisma.contact.update({ where: { id: existing.id }, data });
+  } else {
+    await prisma.contact.create({ data: { ...data, ...(input.customerId ? { customerId: input.customerId } : { supplierId: input.supplierId }) } });
+  }
 }
 
 function requireAdminSecret(secret?: string) {
@@ -94,6 +119,15 @@ async function normalizedProject(parsed: z.infer<typeof projectSchema>, backendC
     endDate,
     contractTotal: parsed.contractTotal || calculatedTotal,
   };
+}
+
+function prismaProjectStatus(value: string) {
+  const normalized = String(value || "ACTIVE").trim().toUpperCase().replace(/\s+/g, "_");
+  if (normalized === "OPEN") return "ACTIVE" as const;
+  if (normalized === "PLANNING" || normalized === "ACTIVE" || normalized === "ON_HOLD" || normalized === "COMPLETED" || normalized === "CANCELLED") {
+    return normalized;
+  }
+  return "ACTIVE" as const;
 }
 
 export async function GET() {
@@ -179,22 +213,26 @@ export async function POST(request: Request) {
               email: parsed.email || null,
               address: parsed.address || null,
               taxId: parsed.taxId || null,
+              paymentTerms: parsed.creditTermsDays || 30,
               creditLimit: parsed.creditLimit || null,
             },
           });
+          await syncPrimaryContact({ customerId: updated.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
           return NextResponse.json({
             ok: true,
             type: body.type,
             mode,
             row: {
-              customerId: updated.id,
+              customerId: updated.code,
+              internalCustomerId: updated.id,
               customerCode: updated.code,
               customerName: updated.name,
+              contactPerson: parsed.contactPerson,
               phone: updated.phone || "",
               email: updated.email || "",
               address: updated.address || "",
               taxId: updated.taxId || "",
-              creditTermsDays: 30,
+              creditTermsDays: updated.paymentTerms || 30,
               creditLimit: Number(updated.creditLimit || 0),
               currency: "PGK",
               active: updated.isActive !== false,
@@ -209,22 +247,26 @@ export async function POST(request: Request) {
             email: parsed.email || null,
             address: parsed.address || null,
             taxId: parsed.taxId || null,
+            paymentTerms: parsed.creditTermsDays || 30,
             creditLimit: parsed.creditLimit || null,
           },
         });
+        await syncPrimaryContact({ customerId: created.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
         return NextResponse.json({
           ok: true,
           type: body.type,
           mode,
           row: {
-            customerId: created.id,
+            customerId: created.code,
+            internalCustomerId: created.id,
             customerCode: created.code,
             customerName: created.name,
+            contactPerson: parsed.contactPerson,
             phone: created.phone || "",
             email: created.email || "",
             address: created.address || "",
             taxId: created.taxId || "",
-            creditTermsDays: 30,
+            creditTermsDays: created.paymentTerms || 30,
             creditLimit: Number(created.creditLimit || 0),
             currency: "PGK",
             active: true,
@@ -296,21 +338,25 @@ export async function POST(request: Request) {
               email: parsed.email || null,
               address: parsed.address || null,
               taxId: parsed.taxId || null,
+              paymentTerms: parsed.paymentTermsDays || 30,
             },
           });
+          await syncPrimaryContact({ supplierId: updated.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
           return NextResponse.json({
             ok: true,
             type: body.type,
             mode,
             row: {
-              supplierId: updated.id,
+              supplierId: updated.code,
+              internalSupplierId: updated.id,
               supplierCode: updated.code,
               supplierName: updated.name,
+              contactPerson: parsed.contactPerson,
               phone: updated.phone || "",
               email: updated.email || "",
               address: updated.address || "",
               taxId: updated.taxId || "",
-              paymentTermsDays: parsed.paymentTermsDays || 30,
+              paymentTermsDays: updated.paymentTerms || 30,
               currency: "PGK",
               active: updated.isActive !== false,
             },
@@ -324,21 +370,25 @@ export async function POST(request: Request) {
             email: parsed.email || null,
             address: parsed.address || null,
             taxId: parsed.taxId || null,
+            paymentTerms: parsed.paymentTermsDays || 30,
           },
         });
+        await syncPrimaryContact({ supplierId: created.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
         return NextResponse.json({
           ok: true,
           type: body.type,
           mode,
           row: {
-            supplierId: created.id,
+            supplierId: created.code,
+            internalSupplierId: created.id,
             supplierCode: created.code,
             supplierName: created.name,
+            contactPerson: parsed.contactPerson,
             phone: created.phone || "",
             email: created.email || "",
             address: created.address || "",
             taxId: created.taxId || "",
-            paymentTermsDays: parsed.paymentTermsDays || 30,
+            paymentTermsDays: created.paymentTerms || 30,
             currency: "PGK",
             active: true,
           },
@@ -415,6 +465,7 @@ export async function POST(request: Request) {
               startDate: parsed.startDate ? new Date(parsed.startDate) : null,
               endDate: parsed.endDate ? new Date(parsed.endDate) : null,
               budget: parsed.contractTotal || null,
+              status: prismaProjectStatus(parsed.status),
             },
           });
           return NextResponse.json({
@@ -422,10 +473,11 @@ export async function POST(request: Request) {
             type: body.type,
             mode,
             row: {
-              projectId: updated.id,
+              projectId: updated.code,
+              internalProjectId: updated.id,
               projectCode: updated.code,
               projectName: updated.name,
-              customerId: updated.customerId || "",
+              customerId: parsed.customerId || "",
               startDate: updated.startDate?.toISOString().slice(0, 10) || "",
               endDate: updated.endDate?.toISOString().slice(0, 10) || "",
               status: updated.status || "OPEN",
@@ -447,7 +499,7 @@ export async function POST(request: Request) {
             startDate: parsed.startDate ? new Date(parsed.startDate) : null,
             endDate: parsed.endDate ? new Date(parsed.endDate) : null,
             budget: parsed.contractTotal || null,
-            status: "ACTIVE",
+            status: prismaProjectStatus(parsed.status),
           },
         });
         return NextResponse.json({
@@ -455,10 +507,11 @@ export async function POST(request: Request) {
           type: body.type,
           mode,
           row: {
-            projectId: created.id,
+            projectId: created.code,
+            internalProjectId: created.id,
             projectCode: created.code,
             projectName: created.name,
-            customerId: created.customerId || "",
+            customerId: parsed.customerId || "",
             startDate: created.startDate?.toISOString().slice(0, 10) || "",
             endDate: created.endDate?.toISOString().slice(0, 10) || "",
             status: created.status || "OPEN",

@@ -17,7 +17,7 @@ const qtyText=(value:unknown)=>n(value).toLocaleString(undefined,{maximumFractio
 const signedValue=(movement:Movement)=>{const explicit=n(movement.valueAdjustment);if(Math.abs(explicit)>0.0000001)return explicit;const value=Math.abs(n(movement.value));if(n(movement.qtyIn)>0)return value;if(n(movement.qtyOut)>0)return -value;return 0;};
 function localDate(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));return `${values.year}-${values.month}-${values.day}`;}
 function approvedLifecycle(status:unknown){return ["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED"].includes(String(status||"").toUpperCase());}
-function receiptNumber(movementId:string){const match=movementId.match(/^(PR-\d{4}-[A-Z0-9]+)-\d{3}$/);return match?.[1]||movementId;}
+function receiptNumber(movementId:string){const match=movementId.match(/^((?:PR-\d{5}-\d{4})|(?:PR-\d{4}-[A-Z0-9]+))-\d{3}$/);return match?.[1]||movementId;}
 
 export default function StockWorkspaceV5(){
   const[mode,setMode]=useState<Mode>("menu");

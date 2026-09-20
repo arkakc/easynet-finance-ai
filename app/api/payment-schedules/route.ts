@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { requirePermission } from "@/lib/auth";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   sourceType: z.enum(["QUOTE", "INVOICE", "PROJECT"]),
@@ -23,10 +24,12 @@ function requireSecret(secret?: string) {
 
 export async function GET() {
   try {
+    await requirePermission("sales.read");
     const result = await listTable("PaymentSchedules", 500, 0);
     return NextResponse.json({ ok: true, schedules: result.rows });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Schedule read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Schedule read failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
 
@@ -66,7 +69,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const scheduleId = `SCH-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const scheduleId = documentSeriesId("Schedule");
     const dueDate = record.dueDate ? normalizeAccountingDate(record.dueDate) : "";
     const result = await appendRecord("PaymentSchedules", { ...record, dueDate, scheduleId, status: "PENDING" }, "schedule-ui");
     return NextResponse.json({ ok: true, row: result.row, totalPercentage });

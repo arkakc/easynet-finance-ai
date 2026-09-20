@@ -7,6 +7,7 @@
 
 import { prisma } from '@/lib/prisma';
 import { getOrCreateAccount } from './accounting.service';
+import { documentSeriesId } from '@/lib/accounting/document-numbering';
 import { z } from 'zod';
 
 export const createEmployeeSchema = z.object({
@@ -93,7 +94,7 @@ export async function processPayrollRun(
     throw new Error('No active employees found to process payroll');
   }
 
-  const payrollCode = `PAY-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
+  const payrollCode = documentSeriesId('Payroll');
 
   let totalGross = 0;
   let totalSwt = 0;
@@ -151,13 +152,16 @@ export async function processPayrollRun(
   });
 
   // Automatically post double-entry General Ledger entry for Payroll
-  const grossExpenseAcc = await getOrCreateAccount('6000', 'Salaries & Wages Gross Expense', 'EXPENSE');
-  const superExpenseAcc = await getOrCreateAccount('6010', 'Employer Superannuation Expense (8.4%)', 'EXPENSE');
-  const swtPayableAcc = await getOrCreateAccount('2210', 'IRC SWT Tax Deductions Payable', 'LIABILITY');
-  const superPayableAcc = await getOrCreateAccount('2220', 'Superannuation Fund Payable (14.4%)', 'LIABILITY');
-  const wagesPayableAcc = await getOrCreateAccount('2230', 'Net Wages Payable / Bank Clearing', 'LIABILITY');
+  // Reuse the controlled PNG chart of accounts. These codes already exist in
+  // the seeded COA; creating legacy 6000/2210-style duplicates would split
+  // payroll reporting and make the month-end control unreliable.
+  const grossExpenseAcc = await getOrCreateAccount('6110', 'Salaries & Wages (Core Office & Tech)', 'EXPENSE');
+  const superExpenseAcc = await getOrCreateAccount('6120', 'Nasfund Superannuation (8.4% Employer)', 'EXPENSE');
+  const swtPayableAcc = await getOrCreateAccount('2124', 'IRC Salary & Wages Tax (SWT) Payable', 'LIABILITY');
+  const superPayableAcc = await getOrCreateAccount('2131', 'Nasfund Superannuation Payable', 'LIABILITY');
+  const wagesPayableAcc = await getOrCreateAccount('2132', 'Accrued Salaries & Net Wages', 'LIABILITY');
 
-  const journalCode = `JRN-PAY-${payrollRun.code}`;
+  const journalCode = documentSeriesId('Journal');
   const totalDebit = totalGross + totalEmployerSuper;
   const totalCredit = totalNet + totalSwt + (totalEmployerSuper + totalEmployeeSuper);
 

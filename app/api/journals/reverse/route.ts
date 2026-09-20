@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -6,6 +5,7 @@ import { backendConfigStatus, findRecords, postJournalRecord, updateRecord } fro
 import { assertAccountsExist, validateBalancedPosting } from "@/lib/accounting/posting";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   journalId: z.string().trim().min(1),
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
         throw new Error(`${type} requires a dedicated finance correction workflow and cannot be reversed here`);
       }
       if (!original.lines.length) throw new Error("Original journal has no lines");
-      const reversalId = `JRN-REV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const reversalId = documentSeriesId("Journal Reversal");
       const postingDate = new Date(normalizeAccountingDate(input.reversalDate));
       const reversedLines = original.lines.map((line, index) => ({
         lineNo: index + 1,
@@ -231,7 +231,7 @@ export async function POST(request: Request) {
     validateBalancedPosting(reversedPostingLines);
     await assertAccountsExist(reversedPostingLines);
 
-    const reversalId = `JRN-REV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const reversalId = documentSeriesId("Journal Reversal");
     const now = new Date().toISOString();
     const postingDate = normalizeAccountingDate(input.reversalDate);
 

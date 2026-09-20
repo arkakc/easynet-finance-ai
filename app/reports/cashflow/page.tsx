@@ -1,151 +1,94 @@
+"use client";
+
 import Link from "next/link";
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
-import { prisma } from "@/src/lib/prisma";
+import { useCallback, useEffect, useState } from "react";
+import type { CashFlowStatement } from "@/lib/accounting/cash-flow";
 
-export const dynamic = "force-dynamic";
+const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
+const pngToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
-type Header = { journalId: string; postingDate: string; documentType: string; documentNumber: string; reference: string; status: string };
-type Line = { journalId: string; accountId: string; debit: number | string; credit: number | string };
+export default function CashFlowPage() {
+  const [from, setFrom] = useState("");
+  const [asOf, setAsOf] = useState(pngToday);
+  const [statement, setStatement] = useState<CashFlowStatement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-const n = (value: unknown) => Number(value || 0);
-const money = (value: unknown) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(n(value));
-const normalized = (value: unknown) => String(value || "").trim().toUpperCase();
-
-function category(documentType: string) {
-  const type = normalized(documentType);
-  if (["FUNDING_LOAN", "LOAN_REPAYMENT"].includes(type)) return "Financing";
-  if (["ASSET_PURCHASE", "ASSET_DISPOSAL"].includes(type)) return "Investing";
-  return "Operating";
-}
-
-export default async function CashFlowPage() {
-  let headers: Header[] = [];
-  let lines: Line[] = [];
-  let error = "";
-  try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
-    if (!backendConfigured) {
-      const [h, l] = await Promise.all([
-        prisma.journalHeader.findMany({ where: { status: "POSTED" } }),
-        prisma.journalLine.findMany({ include: { account: true } }),
-      ]);
-      headers = h.map((row) => ({ journalId: row.code, postingDate: row.date.toISOString(), documentType: row.sourceDocType || "JOURNAL", documentNumber: row.sourceDocId || "", reference: row.reference || row.description, status: row.status }));
-      const codeById = new Map(h.map((row) => [row.id, row.code]));
-      lines = l.map((row) => ({ journalId: codeById.get(row.journalId) || row.journalId, accountId: `ACC-${row.account.code}`, debit: Number(row.debit), credit: Number(row.credit) }));
-    } else {
-      const [h, l] = await Promise.all([listTable<Header>("JournalHeaders", 500, 0), listTable<Line>("JournalLines", 500, 0)]);
-      headers = h.rows.filter((row) => normalized(row.status) === "POSTED"); lines = l.rows;
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({ asOf });
+      if (from) query.set("from", from);
+      const response = await fetch(`/api/reports/cash-flow?${query.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Cash-flow statement could not be loaded");
+      setStatement(payload.statement);
+    } catch (reason) {
+      setStatement(null);
+      setError(reason instanceof Error ? reason.message : "Cash-flow statement could not be loaded");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    error = err instanceof Error ? err.message : "Cash-flow load failed";
-  }
+  }, [asOf, from]);
 
-  const cashAccounts = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
-  const rows = headers.map((header) => {
-    const cashMovement = lines
-      .filter((line) => String(line.journalId) === String(header.journalId) && cashAccounts.has(String(line.accountId)))
-      .reduce((sum, line) => sum + n(line.debit) - n(line.credit), 0);
-    return { ...header, cashMovement, category: category(header.documentType) };
-  }).filter((row) => Math.abs(row.cashMovement) > 0.0001).sort((a, b) => String(a.postingDate).localeCompare(String(b.postingDate)));
-
-  const operating = rows.filter((r) => r.category === "Operating").reduce((sum, r) => sum + r.cashMovement, 0);
-  const investing = rows.filter((r) => r.category === "Investing").reduce((sum, r) => sum + r.cashMovement, 0);
-  const financing = rows.filter((r) => r.category === "Financing").reduce((sum, r) => sum + r.cashMovement, 0);
-  const net = operating + investing + financing;
+  useEffect(() => { void load(); }, [load]);
 
   return (
     <>
       <div className="page-head">
-        <div>
-          <h2>Statement of Cash Flows</h2>
-          <p className="small">Operating, investing and financing liquidity movement derived exclusively from POSTED journals.</p>
-        </div>
+        <div><h2>Statement of Cash Flows</h2><p className="small">Direct-method cash movements across every mapped cash and bank GL account.</p></div>
         <div className="page-head-actions">
-          {error && (
-            <details className="system-notice-tab">
-              <summary>
-                <span>ℹ️ System Notice</span>
-                <span className="notice-arrow">▾</span>
-              </summary>
-              <div className="system-notice-dropdown">
-                <strong>Cash-flow notice:</strong> {error}
-              </div>
-            </details>
-          )}
-          <Link prefetch={false} className="button-link secondary-link" href="/reports">
-            ← Financial Reports
-          </Link>
-          <Link prefetch={false} className="button-link secondary-link" href="/controls">
-            Integrity Controls
-          </Link>
-          <span className="badge">PGK (K)</span>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports">Financial Statements</Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/controls">Integrity Controls</Link>
         </div>
       </div>
 
-      <div className="grid">
-        <div className="card">
-          <div className="label">Operating Cash Flow</div>
-          <div className="value">{money(operating)}</div>
+      <section className="panel">
+        <div className="form-grid">
+          <label>Period From<input type="date" value={from} max={asOf} onChange={(event) => setFrom(event.target.value)} /><span className="small">Blank uses the configured fiscal-year start.</span></label>
+          <label>As At<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>
         </div>
-        <div className="card">
-          <div className="label">Investing Cash Flow</div>
-          <div className="value">{money(investing)}</div>
-        </div>
-        <div className="card">
-          <div className="label">Financing Cash Flow</div>
-          <div className="value">{money(financing)}</div>
-        </div>
-        <div className="card">
-          <div className="label">Net Cash Movement</div>
-          <div className="value">{money(net)}</div>
-        </div>
-      </div>
+        <div className="button-row"><button type="button" onClick={() => void load()} disabled={loading}>{loading ? "Running…" : "Run Statement"}</button></div>
+      </section>
 
-      <section className="panel table-wrap">
-        <div className="form-title-row">
-          <h3>Cash & Bank Movements</h3>
-          <span className="auto-badge">{rows.length} Posted Entries</span>
+      {error && <section className="panel warning-panel"><strong>Cash-flow unavailable.</strong> {error}</section>}
+      {statement && <>
+        <div className="grid dashboard-grid">
+          <div className="card"><div className="label">Opening Cash</div><div className="value">{money(statement.totals.openingCash)}</div></div>
+          <div className="card"><div className="label">Operating Cash Flow</div><div className="value">{money(statement.totals.operating)}</div></div>
+          <div className="card"><div className="label">Investing Cash Flow</div><div className="value">{money(statement.totals.investing)}</div></div>
+          <div className="card"><div className="label">Financing Cash Flow</div><div className="value">{money(statement.totals.financing)}</div></div>
+          <div className="card"><div className="label">Net Cash Change</div><div className="value">{money(statement.totals.netChange)}</div></div>
+          <div className="card"><div className="label">Closing Cash</div><div className="value">{money(statement.totals.closingCash)}</div></div>
+          <div className="card"><div className="label">GL Closing Cash</div><div className="value">{money(statement.control.ledgerClosingCash)}</div></div>
+          <div className="card"><div className="label">Control Difference</div><div className="value">{money(statement.control.difference)}</div><span className="auto-badge">{statement.control.balanced ? "BALANCED" : "REVIEW"}</span></div>
         </div>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Posting Date</th>
-              <th>Category</th>
-              <th>Document Type</th>
-              <th>Reference</th>
-              <th>Inflow (PGK)</th>
-              <th>Outflow (PGK)</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.journalId}>
-                <td>{row.postingDate}</td>
+
+        <section className="panel table-wrap">
+          <div className="form-title-row"><div><h3>Cash & Bank Movements</h3><p className="small">Period {statement.period.from} to {statement.period.asOf}. Opening journals are carried into opening cash, not reported as operating inflow.</p></div><span className="auto-badge">{statement.rows.length} entries</span></div>
+          <table className="data-table">
+            <thead><tr><th>Date</th><th>Journal</th><th>Category</th><th>Source</th><th>Reference / Description</th><th>Inflow</th><th>Outflow</th></tr></thead>
+            <tbody>
+              {statement.rows.map((row) => <tr key={row.journalId}>
+                <td>{row.date}</td>
+                <td><Link href={`/journals/${encodeURIComponent(row.journalId)}`}><strong>{row.journalCode}</strong></Link></td>
                 <td><span className="auto-badge">{row.category}</span></td>
                 <td>{row.documentType}</td>
-                <td>
-                  <strong>{row.documentNumber || "—"}</strong>
-                  <br />
-                  <span className="small">{row.reference || "—"}</span>
-                </td>
-                <td>{row.cashMovement > 0 ? money(row.cashMovement) : "—"}</td>
-                <td>{row.cashMovement < 0 ? money(Math.abs(row.cashMovement)) : "—"}</td>
-                <td>
-                  <Link className="button-link secondary-link" href={`/journals/${encodeURIComponent(row.journalId)}`}>
-                    View Journal
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={7}>No posted cash or bank movements found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+                <td>{row.reference || "—"}<br /><span className="small">{row.description}</span></td>
+                <td>{row.movement > 0 ? money(row.movement) : "—"}</td>
+                <td>{row.movement < 0 ? money(Math.abs(row.movement)) : "—"}</td>
+              </tr>)}
+              {!statement.rows.length && <tr><td colSpan={7}>No posted cash movements in this period.</td></tr>}
+            </tbody>
+          </table>
+        </section>
+
+        <section className="panel table-wrap">
+          <div className="form-title-row"><h3>Included Cash Accounts</h3><span className="badge">{statement.cashAccounts.length} GL accounts</span></div>
+          <table className="data-table"><thead><tr><th>Code</th><th>Name</th></tr></thead><tbody>{statement.cashAccounts.map((account) => <tr key={account.code}><td><strong>{account.code}</strong></td><td>{account.name}</td></tr>)}</tbody></table>
+        </section>
+      </>}
     </>
   );
 }

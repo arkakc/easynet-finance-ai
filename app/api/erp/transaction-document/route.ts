@@ -41,7 +41,7 @@ export async function GET(request:NextRequest){
     const[itemResult,customerResult,supplierResult,projectResult,accountResult]=await Promise.all([
       config.lineTable?listTable<any>("Items",500,0):Promise.resolve({rows:[] as any[]}),
       customerId?findRecords<any>("Customers",{customerId},1):Promise.resolve({rows:[] as any[]}),
-      supplierId?findRecords<any>("Suppliers",{supplierId},1):Promise.resolve({rows:[] as any[]}),
+      supplierId?listTable<any>("Suppliers",500,0):Promise.resolve({rows:[] as any[]}),
       projectId?findRecords<any>("Projects",{projectId},1):Promise.resolve({rows:[] as any[]}),
       accountId?findRecords<any>("Accounts",{accountId},1):Promise.resolve({rows:[] as any[]}),
     ]);

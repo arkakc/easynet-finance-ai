@@ -1,5 +1,8 @@
 import { prisma } from "@/src/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { deleteCompanyTransactions } from "./delete-transactions";
+
+type DbClient = typeof prisma | Prisma.TransactionClient;
 
 export type MasterDataSummary = {
   chartOfAccounts: number;
@@ -17,7 +20,7 @@ export type MasterDataSummary = {
   totalMasterRecords: number;
 };
 
-export async function getMasterDataSummary(): Promise<MasterDataSummary> {
+export async function getMasterDataSummary(client: DbClient = prisma): Promise<MasterDataSummary> {
   const [
     chartOfAccounts,
     customers,
@@ -32,18 +35,18 @@ export async function getMasterDataSummary(): Promise<MasterDataSummary> {
     globalSettings,
     users,
   ] = await Promise.all([
-    prisma.chartOfAccounts.count(),
-    prisma.customer.count(),
-    prisma.supplier.count(),
-    prisma.contact.count(),
-    prisma.item.count(),
-    prisma.bankAccount.count(),
-    prisma.taxCode.count(),
-    prisma.currency.count(),
-    prisma.employee.count(),
-    prisma.project.count(),
-    prisma.globalSettings.count(),
-    prisma.user.count(),
+    client.chartOfAccounts.count(),
+    client.customer.count(),
+    client.supplier.count(),
+    client.contact.count(),
+    client.item.count(),
+    client.bankAccount.count(),
+    client.taxCode.count(),
+    client.currency.count(),
+    client.employee.count(),
+    client.project.count(),
+    client.globalSettings.count(),
+    client.user.count(),
   ]);
 
   const totalMasterRecords =
@@ -84,24 +87,33 @@ export type DeleteMasterDataOptions = {
   preserveAdminUser?: boolean;
   ipAddress?: string;
   userAgent?: string;
+  // Injectable Prisma client for isolated UAT clones; production callers use the default singleton.
+  database?: typeof prisma;
 };
 
 export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) {
-  // Step 1: Ensure all dependent transactional data is wiped first
-  await deleteCompanyTransactions({
-    adminEmail: options.adminEmail,
-    adminName: options.adminName,
-    resetStockQuantities: true,
-    ipAddress: options.ipAddress,
-    userAgent: options.userAgent,
-  });
+  const database = options.database || prisma;
+  const masterSummaryBefore = await getMasterDataSummary(database);
 
-  const masterSummaryBefore = await getMasterDataSummary();
+  // Transactions and master data must be removed in one transaction. Otherwise a
+  // failed master delete could leave the company half-wiped after transactions
+  // have already been committed.
+  const result = await database.$transaction(async (tx) => {
+    // Step 1: Ensure all dependent transactional data is wiped first
+    await deleteCompanyTransactions({
+      adminEmail: options.adminEmail,
+      adminName: options.adminName,
+      resetStockQuantities: true,
+      ipAddress: options.ipAddress,
+      userAgent: options.userAgent,
+      transactionClient: tx,
+    });
 
-  // Step 2: Atomic deletion of all Master Data records
-  const result = await prisma.$transaction(async (tx) => {
+    // Step 2: Atomic deletion of all Master Data records
     // 1. Delete Contacts & Projects
     await tx.contact.deleteMany({});
+    // Budgets reference projects, customers and chart-of-accounts rows.
+    await tx.budget.deleteMany({});
     await tx.project.deleteMany({});
 
     // 2. Delete Fixed Assets
@@ -138,53 +150,27 @@ export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) 
     // 9. Delete Global Settings & Company Profile
     await tx.globalSettings.deleteMany({});
 
-    // 10. Handle User accounts
-    let preservedAdminId: string | null = null;
-    if (options.preserveAdminUser !== false) {
-      const adminUser = await tx.user.findFirst({
-        where: {
-          OR: [
-            { email: options.adminEmail.toLowerCase() },
-            { role: "SYSTEM_MANAGER" },
-            { email: "admin@easynet.local" },
-          ],
-        },
-      });
+    // 10. Delete all retained source documents for a true fresh-company reset.
+    // Approval requests were already cleared by the transaction wipe.
+    await tx.favorite.deleteMany({});
+    await tx.document.deleteMany({});
 
-      if (adminUser) {
-        preservedAdminId = adminUser.id;
-        // Delete all other users
-        await tx.user.deleteMany({
-          where: { id: { not: adminUser.id } },
-        });
-        // Clear non-admin sessions & accounts
-        await tx.session.deleteMany({
-          where: { userId: { not: adminUser.id } },
-        });
-        await tx.userPreferences.deleteMany({
-          where: { userId: { not: adminUser.id } },
-        });
-        await tx.favorite.deleteMany({
-          where: { userId: { not: adminUser.id } },
-        });
-      }
-    } else {
-      // If full wipe without preservation, clear all sessions and preferences
-      await tx.session.deleteMany({});
-      await tx.userPreferences.deleteMany({});
-      await tx.favorite.deleteMany({});
-      await tx.account.deleteMany({});
-      // Keep at least one admin account to prevent absolute lock-out
-      const primaryAdmin = await tx.user.findFirst({
-        where: { email: "admin@easynet.local" },
-      });
-      if (primaryAdmin) {
-        preservedAdminId = primaryAdmin.id;
-        await tx.user.deleteMany({ where: { id: { not: primaryAdmin.id } } });
-      }
-    }
+    // 11. Handle User accounts. Audit logs have foreign keys to User; reassign
+    // them before deleting non-admin users.
+    const adminUser = await tx.user.findFirst({
+      where: options.preserveAdminUser !== false
+        ? { OR: [{ email: options.adminEmail.toLowerCase() }, { role: "SYSTEM_MANAGER" }, { email: "admin@easynet.local" }] }
+        : { email: "admin@easynet.local" },
+    });
+    if (!adminUser) throw new Error("Cannot complete factory reset: a primary System Manager account is required");
+    const preservedAdminId = adminUser.id;
+    await tx.auditLog.updateMany({ where: { userId: { not: preservedAdminId } }, data: { userId: preservedAdminId } });
+    await tx.session.deleteMany({ where: { userId: { not: preservedAdminId } } });
+    await tx.userPreferences.deleteMany({ where: { userId: { not: preservedAdminId } } });
+    await tx.favorite.deleteMany({ where: { userId: { not: preservedAdminId } } });
+    await tx.user.deleteMany({ where: { id: { not: preservedAdminId } } });
 
-    // 11. Record immutable audit log entry
+    // 12. Record immutable audit log entry
     const audit = await tx.auditLog.create({
       data: {
         action: "DELETE_COMPANY_MASTER_DATA",

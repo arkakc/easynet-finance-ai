@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { postJournal, type PostingLine } from "@/lib/accounting/posting";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { round2 } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 export type SalesReturnLineInput = { itemId: string; qty: number };
 
@@ -11,15 +11,7 @@ function year() {
 }
 
 async function nextCreditNoteNumber() {
-  const prefix = `CN-${year()}-`;
-  const rows = await listTable<any>("Invoices", 500, 0);
-  const max = (rows.rows || []).reduce((current: number, row: any) => {
-    const value = String(row.invoiceNumber || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("CN", Number(year()));
 }
 
 function itemType(item: any) {
@@ -105,7 +97,7 @@ export async function createSalesCreditNote(input: {
   }
   if (!creditLines.length) throw new Error("Return quantity must be greater than zero");
 
-  const invoiceId = `CRN-${year()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const invoiceId = documentSeriesId("CN", Number(year()));
   const invoiceNumber = await nextCreditNoteNumber();
   const netAmount = round2(creditLines.reduce((sum, line) => sum + Number(line.netAmount || 0), 0));
   const gstAmount = round2(creditLines.reduce((sum, line) => sum + Number(line.gstAmount || 0), 0));
@@ -133,7 +125,7 @@ export async function createSalesCreditNote(input: {
     ...line,
   })), "sales-return:credit-note-create");
   await appendRecord("PaymentSchedules", {
-    scheduleId: `RETREASON-${randomUUID().slice(0, 12).toUpperCase()}`,
+    scheduleId: documentSeriesId("Return Reason"),
     sourceType: "SALES_RETURN_REASON",
     sourceId: invoiceId,
     projectId: original.projectId || "",

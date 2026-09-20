@@ -30,7 +30,7 @@ function localDate(){
   return `${values.year}-${values.month}-${values.day}`;
 }
 function approvedLifecycle(status:unknown){return ["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED"].includes(String(status||"").toUpperCase());}
-function receiptNumber(movementId:string){const match=movementId.match(/^(PR-\d{4}-[A-Z0-9]+)-\d{3}$/);return match?.[1]||movementId;}
+function receiptNumber(movementId:string){const match=movementId.match(/^((?:PR-\d{5}-\d{4})|(?:PR-\d{4}-[A-Z0-9]+))-\d{3}$/);return match?.[1]||movementId;}
 
 export default function StockWorkspaceV4(){
   const[mode,setMode]=useState<Mode>("menu");

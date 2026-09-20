@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { prisma } from "@/src/lib/prisma";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 export function generatedCode(prefix: string) {
-  return `${prefix}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  return documentSeriesId(prefix);
 }
 
 // ---------------------------------------------------------------------------
@@ -12,7 +12,8 @@ export function generatedCode(prefix: string) {
 function mapCustomer(c: any) {
   if (!c) return null;
   return {
-    customerId: c.id,
+    customerId: c.code || c.id,
+    internalCustomerId: c.id,
     customerCode: c.code,
     customerName: c.name,
     legalName: c.legalName || "",
@@ -33,7 +34,8 @@ function mapCustomer(c: any) {
 function mapSupplier(s: any) {
   if (!s) return null;
   return {
-    supplierId: s.id,
+    supplierId: s.code || s.id,
+    internalSupplierId: s.id,
     supplierCode: s.code,
     supplierName: s.name,
     legalName: s.legalName || "",
@@ -53,12 +55,13 @@ function mapSupplier(s: any) {
 function mapProject(p: any) {
   if (!p) return null;
   return {
-    projectId: p.id,
+    projectId: p.code || p.id,
+    internalProjectId: p.id,
     projectCode: p.code,
     projectName: p.name,
     description: p.description || "",
-    customerId: p.customerId || "",
-    supplierId: p.supplierId || "",
+    customerId: p.customer?.code || p.customerId || "",
+    supplierId: p.supplier?.code || p.supplierId || "",
     startDate: p.startDate?.toISOString?.().slice(0, 10) || (p.startDate ? String(p.startDate) : ""),
     endDate: p.endDate?.toISOString?.().slice(0, 10) || (p.endDate ? String(p.endDate) : ""),
     status: p.status || "OPEN",
@@ -75,21 +78,23 @@ function mapProject(p: any) {
 
 function mapItem(i: any) {
   if (!i) return null;
+  const rawType = String(i.type || "GOOD").toUpperCase();
+  const itemType = rawType === "GOOD" ? "STOCK" : rawType === "NON_INVENTORY" ? "NON_STOCK" : rawType;
   return {
     itemId: i.id,
     itemCode: i.code,
     itemName: i.name,
     description: i.description || i.name || "",
     category: i.category || "",
-    itemType: i.type || "STOCK",
+    itemType,
     unit: i.unit || "Each",
     uom: i.unit || "Each",
     defaultRate: Number(i.sellPrice || 0),
     rate: Number(i.sellPrice || 0),
     sellPrice: Number(i.sellPrice || 0),
     purchasePrice: Number(i.purchasePrice || 0),
-    costAccount: i.costAccount || "ACC-5100",
-    revenueAccount: i.revenueAccount || "ACC-4100",
+    costAccount: i.costAccount || "",
+    revenueAccount: i.revenueAccount || "",
     taxCode: i.taxCode || "GST",
     active: i.isActive !== false,
     deferredRevenueMonths: 0,
@@ -100,12 +105,16 @@ function mapItem(i: any) {
 function mapPurchaseOrder(po: any) {
   if (!po) return null;
   const rawStatus = String(po.status || "DRAFT").toUpperCase();
-  const status = rawStatus === "SENT" ? "APPROVED" : rawStatus === "CANCELLED" ? "CANCELLED" : rawStatus;
+  const status = rawStatus === "SENT" ? "APPROVED" : rawStatus === "PARTIAL_RECEIVED" ? "PART_RECEIVED" : rawStatus === "CANCELLED" ? "CANCELLED" : rawStatus;
   return {
     poId: po.id,
     poNumber: po.code,
-    supplierId: po.supplierId || "",
-    projectId: po.projectId || "",
+    supplierId: po.supplier?.code || po.supplierId || "",
+    internalSupplierId: po.supplierId || "",
+    supplierName: po.supplier?.name || "",
+    projectId: po.project?.code || po.projectId || "",
+    internalProjectId: po.projectId || "",
+    projectName: po.project?.name || "",
     poDate: po.orderDate?.toISOString?.().slice(0, 10) || String(po.orderDate || "").slice(0, 10),
     expectedDate: po.expectedDate?.toISOString?.().slice(0, 10) || "",
     netAmount: Number(po.subtotal || 0),
@@ -152,14 +161,19 @@ function mapQuote(q: any) {
   return {
     quoteId: q.id,
     quoteNumber: q.code,
-    customerId: q.customerId || "",
-    projectId: q.projectId || "",
+    customerId: q.customer?.code || q.customerId || "",
+    internalCustomerId: q.customerId || "",
+    customerName: q.customer?.name || "",
+    projectId: q.project?.code || q.projectId || "",
+    internalProjectId: q.projectId || "",
+    projectName: q.project?.name || "",
     quoteDate: q.issuedDate?.toISOString?.().slice(0, 10) || String(q.issuedDate || "").slice(0, 10),
     expiryDate: q.validUntil?.toISOString?.().slice(0, 10) || "",
     netAmount: Number(q.subtotal || 0),
     gstAmount: Number(q.taxTotal || 0),
     totalAmount: Number(q.total || 0),
     status,
+    sourceDocumentId: q.sourceDocId || "",
     notes: q.notes || "",
     createdAt: q.createdAt?.toISOString?.() || String(q.createdAt || ""),
   };
@@ -198,8 +212,12 @@ function mapInvoice(inv: any) {
   return {
     invoiceId: inv.id,
     invoiceNumber: inv.code,
-    customerId: inv.customerId || "",
-    projectId: inv.projectId || "",
+    customerId: inv.customer?.code || inv.customerId || "",
+    internalCustomerId: inv.customerId || "",
+    customerName: inv.customer?.name || "",
+    projectId: inv.project?.code || inv.projectId || "",
+    internalProjectId: inv.projectId || "",
+    projectName: inv.project?.name || "",
     invoiceDate: inv.issuedDate?.toISOString?.().slice(0, 10) || String(inv.issuedDate || "").slice(0, 10),
     dueDate: inv.dueDate?.toISOString?.().slice(0, 10) || "",
     netAmount: Number(inv.subtotal || 0),
@@ -208,8 +226,8 @@ function mapInvoice(inv: any) {
     paidAmount: Number(inv.total || 0) - Number(inv.outstanding || 0),
     outstandingAmount: Number(inv.outstanding ?? inv.total ?? 0),
     status,
-    sourceDocumentId: "",
-    journalId: "",
+    sourceDocumentId: inv.sourceDocId || "",
+    journalId: inv.journalId || "",
     createdAt: inv.createdAt?.toISOString?.() || String(inv.createdAt || ""),
   };
 }
@@ -237,11 +255,16 @@ function mapSupplierBill(b: any) {
   if (!b) return null;
   const rawStatus = String(b.status || "DRAFT").toUpperCase();
   const status = rawStatus === "SENT" ? "POSTED" : rawStatus;
+  const sourcePoId = b.orderId || b.sourceDocId || b.poReference || "";
   return {
     billId: b.id,
     billNumber: b.code,
-    supplierId: b.supplierId || "",
-    projectId: b.projectId || "",
+    supplierId: b.supplier?.code || b.supplierId || "",
+    internalSupplierId: b.supplierId || "",
+    supplierName: b.supplier?.name || "",
+    projectId: b.project?.code || b.projectId || "",
+    internalProjectId: b.projectId || "",
+    projectName: b.project?.name || "",
     billDate: b.billDate?.toISOString?.().slice(0, 10) || String(b.billDate || "").slice(0, 10),
     dueDate: b.dueDate?.toISOString?.().slice(0, 10) || "",
     netAmount: Number(b.subtotal || 0),
@@ -251,7 +274,8 @@ function mapSupplierBill(b: any) {
     outstandingAmount: Number(b.outstanding ?? b.total ?? 0),
     status,
     orderId: b.orderId || "",
-    sourceDocumentId: b.sourceDocId || b.poReference || "",
+    poId: sourcePoId,
+    sourceDocumentId: b.sourceDocId || b.poReference || b.orderId || "",
     journalId: b.journalId || "",
     createdAt: b.createdAt?.toISOString?.() || String(b.createdAt || ""),
   };
@@ -278,12 +302,24 @@ function mapBillLine(l: any) {
 
 function mapPayment(pay: any) {
   if (!pay) return null;
+  const rawStatus = String(pay.status || "PENDING").toUpperCase();
+  const status = rawStatus === "PENDING"
+    ? "DRAFT"
+    : rawStatus === "AUTHORIZED"
+      ? "APPROVED"
+      : rawStatus === "CAPTURED" || rawStatus === "CLEARED"
+        ? "POSTED"
+        : rawStatus;
   return {
     paymentId: pay.id,
     paymentNumber: pay.code,
     partyType: pay.customerId ? "Customer" : "Supplier",
-    partyId: pay.customerId || pay.supplierId || "",
-    projectId: pay.projectId || "",
+    partyId: pay.customer?.code || pay.supplier?.code || pay.customerId || pay.supplierId || "",
+    internalPartyId: pay.customerId || pay.supplierId || "",
+    partyName: pay.customer?.name || pay.supplier?.name || "",
+    projectId: pay.project?.code || pay.projectId || "",
+    internalProjectId: pay.projectId || "",
+    projectName: pay.project?.name || "",
     paymentType: pay.type?.includes?.("RECEIPT") ? "RECEIVE" : "PAY",
     paymentDate: pay.date?.toISOString?.().slice(0, 10) || String(pay.date || "").slice(0, 10),
     amount: Number(pay.amount || 0),
@@ -292,9 +328,9 @@ function mapPayment(pay: any) {
     reference: pay.referenceNumber || "",
     againstDocumentType: pay.invoiceId ? "Sales Invoice" : pay.billId ? "Supplier Invoice" : "",
     againstDocumentId: pay.invoiceId || pay.billId || "",
-    sourceDocumentId: "",
-    status: pay.status === "CLEARED" || pay.status === "AUTHORIZED" ? "POSTED" : (pay.status || "DRAFT"),
-    journalId: "",
+    sourceDocumentId: pay.sourceDocId || "",
+    status,
+    journalId: pay.journalId || "",
     createdAt: pay.createdAt?.toISOString?.() || String(pay.createdAt || ""),
   };
 }
@@ -320,6 +356,55 @@ function mapExpense(exp: any) {
   };
 }
 
+function mapStockMovement(movement: any) {
+  if (!movement) return null;
+  const movementType = movement.referenceType || movement.type || "";
+  const type = String(movement.type || movementType || "").toUpperCase();
+  const incoming = ["PURCHASE_IN", "PURCHASE_RECEIPT", "SALES_ISSUE_ROLLBACK", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(type);
+  const outgoing = ["SALES_DELIVERY", "SALES_ISSUE", "SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(type);
+  return {
+    movementId: movement.id,
+    movementDate: movement.createdAt?.toISOString?.().slice(0, 10) || String(movement.createdAt || "").slice(0, 10),
+    itemId: movement.itemId || "",
+    projectId: movement.projectId || "",
+    movementType,
+    qtyIn: incoming ? Number(movement.quantity || 0) : 0,
+    qtyOut: outgoing ? Number(movement.quantity || 0) : 0,
+    unitCost: Number(movement.unitCost || 0),
+    value: Number(movement.totalCost || 0),
+    valueAdjustment: ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(type) ? Number(movement.totalCost || 0) : 0,
+    sourceDocumentId: movement.referenceId || "",
+    journalId: movement.journalId || "",
+    note: movement.note || "",
+    createdAt: movement.createdAt?.toISOString?.() || String(movement.createdAt || ""),
+  };
+}
+
+function mapFixedAsset(asset: any) {
+  if (!asset) return null;
+  return {
+    assetId: asset.assetId,
+    assetName: asset.assetName,
+    assetCategory: asset.assetCategory,
+    purchaseDate: asset.purchaseDate?.toISOString?.().slice(0, 10) || String(asset.purchaseDate || "").slice(0, 10),
+    supplierId: asset.supplierId || "",
+    cost: Number(asset.cost || 0),
+    serialNumber: asset.serialNumber || "",
+    location: asset.location || "",
+    assignedTo: asset.assignedTo || "",
+    usefulLifeMonths: Number(asset.usefulLifeMonths || 36),
+    accumulatedDepreciation: Number(asset.accumulatedDepreciation || 0),
+    netBookValue: Number(asset.netBookValue || 0),
+    status: asset.status || "ACTIVE",
+    sourceDocumentId: asset.sourceDocumentId || "",
+    acquisitionJournalId: asset.acquisitionJournalId || "",
+    depreciationJournalId: asset.depreciationJournalId || "",
+    journalId: asset.depreciationJournalId || asset.acquisitionJournalId || "",
+    createdAt: asset.createdAt?.toISOString?.() || String(asset.createdAt || ""),
+    updatedAt: asset.updatedAt?.toISOString?.() || String(asset.updatedAt || ""),
+  };
+}
+
 function mapSetting(s: any) {
   if (!s) return null;
   return {
@@ -329,14 +414,28 @@ function mapSetting(s: any) {
   };
 }
 
-function mapAccount(acc: any) {
+function accountReference(code: unknown) {
+  return `ACC-${String(code || "").trim()}`;
+}
+
+function accountTypeLabel(type: unknown) {
+  return String(type || "")
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function mapAccount(acc: any, accountsById = new Map<string, any>()) {
   if (!acc) return null;
+  const parent = acc.parentId ? accountsById.get(acc.parentId) : null;
   return {
-    accountId: acc.id,
+    accountId: accountReference(acc.code),
     accountCode: acc.code,
     accountName: acc.name,
-    accountType: acc.type,
-    parentId: acc.parentId || null,
+    accountType: accountTypeLabel(acc.type),
+    parentId: parent ? accountReference(parent.code) : null,
+    parentAccount: parent ? accountReference(parent.code) : "",
     normalBalance: acc.normalBalance || "DEBIT",
     currency: acc.currency || "PGK",
     description: acc.description || "",
@@ -355,7 +454,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { contacts: { take: 1 } },
+        include: { contacts: { take: 1, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
       });
       return rows.map(mapCustomer).filter(Boolean) as T[];
     }
@@ -364,7 +463,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
-        include: { contacts: { take: 1 } },
+        include: { contacts: { take: 1, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] } },
       });
       return rows.map(mapSupplier).filter(Boolean) as T[];
     }
@@ -373,6 +472,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { customer: true, supplier: true },
       });
       return rows.map(mapProject).filter(Boolean) as T[];
     }
@@ -389,6 +489,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { supplier: true, project: true },
       });
       return rows.map(mapPurchaseOrder).filter(Boolean) as T[];
     }
@@ -405,6 +506,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { customer: true, project: true },
       });
       return rows.map(mapQuote).filter(Boolean) as T[];
     }
@@ -421,6 +523,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { customer: true, project: true },
       });
       return rows.map(mapInvoice).filter(Boolean) as T[];
     }
@@ -437,6 +540,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { supplier: true, project: true },
       });
       return rows.map(mapSupplierBill).filter(Boolean) as T[];
     }
@@ -453,6 +557,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { customer: true, supplier: true, project: true },
       });
       return rows.map(mapPayment).filter(Boolean) as T[];
     }
@@ -463,6 +568,22 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         orderBy: { createdAt: "desc" },
       });
       return rows.map(mapExpense).filter(Boolean) as T[];
+    }
+    case "StockMovements": {
+      const rows = await prisma.stockMovement.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: "desc" },
+      });
+      return rows.map(mapStockMovement).filter(Boolean) as T[];
+    }
+    case "FixedAssets": {
+      const rows = await prisma.fixedAsset.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: { assetId: "asc" },
+      });
+      return rows.map(mapFixedAsset).filter(Boolean) as T[];
     }
     case "Settings": {
       const rows = await prisma.globalSettings.findMany({
@@ -477,11 +598,129 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         skip: offset,
         orderBy: { code: "asc" },
       });
-      return rows.map(mapAccount).filter(Boolean) as T[];
+      const accountsById = new Map(rows.map((account) => [account.id, account]));
+      return rows.map((account) => mapAccount(account, accountsById)).filter(Boolean) as T[];
+    }
+    case "JournalHeaders": {
+      const rows = await prisma.journalHeader.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: { date: "desc" },
+        include: { lines: { take: 1, orderBy: { lineNo: "asc" } } },
+      });
+      return rows.map(mapJournalHeader).filter(Boolean) as T[];
+    }
+    case "JournalLines": {
+      const rows = await prisma.journalLine.findMany({
+        take: limit,
+        skip: offset,
+        orderBy: [{ journal: { date: "desc" } }, { lineNo: "asc" }],
+        include: { journal: true, account: true },
+      });
+      return rows.map(mapJournalLine).filter(Boolean) as T[];
     }
     default:
       return [];
   }
+}
+
+type LocalJournalBundle = {
+  header: Record<string, unknown>;
+  lines: Array<Record<string, unknown>>;
+  actor?: string;
+};
+
+/** Persist a validated journal atomically when the local Prisma backend is active. */
+export async function prismaPostJournal(input: LocalJournalBundle) {
+  const journalCode = String(input.header.journalId || "").trim();
+  if (!journalCode) throw new Error("Journal ID is required");
+  if (!input.lines.length) throw new Error("A journal requires at least one line");
+
+  const requestedCodes = [...new Set(input.lines.map((line) => String(line.accountId || "").replace(/^ACC-/i, "").trim()))];
+  const accounts = await prisma.chartOfAccounts.findMany({
+    where: { code: { in: requestedCodes } },
+    include: { children: { select: { id: true } } },
+  });
+  const accountsByCode = new Map(accounts.map((account) => [account.code, account]));
+  const missing = requestedCodes.filter((code) => !accountsByCode.has(code));
+  if (missing.length) throw new Error(`Cannot post journal: missing accounts ${missing.join(", ")}`);
+  const inactive = accounts.filter((account) => !account.isActive).map((account) => account.code);
+  if (inactive.length) throw new Error(`Cannot post journal: inactive accounts ${inactive.join(", ")}`);
+  const groups = accounts.filter((account) => account.children.length > 0).map((account) => account.code);
+  if (groups.length) throw new Error(`Cannot post journal directly to group/control accounts: ${groups.join(", ")}`);
+
+  const normalizedLines = input.lines.map((line, index) => {
+    const debit = Number(line.debit || 0);
+    const credit = Number(line.credit || 0);
+    if (!Number.isFinite(debit) || !Number.isFinite(credit) || debit < 0 || credit < 0 || (debit > 0 && credit > 0) || (debit === 0 && credit === 0)) {
+      throw new Error(`Invalid journal line ${index + 1}`);
+    }
+    const accountCode = String(line.accountId || "").replace(/^ACC-/i, "").trim();
+    return { ...line, debit, credit, accountId: accountsByCode.get(accountCode)!.id, lineNo: Number(line.lineNo || index + 1) };
+  });
+  const totalDebit = normalizedLines.reduce((sum, line) => sum + line.debit, 0);
+  const totalCredit = normalizedLines.reduce((sum, line) => sum + line.credit, 0);
+  if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) throw new Error("Journal is not balanced");
+
+  const postingDate = new Date(String(input.header.postingDate || ""));
+  if (Number.isNaN(postingDate.getTime())) throw new Error("A valid posting date is required");
+  const existing = await prisma.journalHeader.findUnique({ where: { code: journalCode } });
+  if (existing) return { journalId: existing.code, header: mapJournalHeader(existing), lines: [] };
+
+  const created = await prisma.$transaction(async (tx) => {
+    const journal = await tx.journalHeader.create({
+      data: {
+        code: journalCode,
+        date: postingDate,
+        description: String(input.header.reference || input.header.documentNumber || input.header.documentType || "Journal"),
+        reference: String(input.header.documentNumber || "") || null,
+        sourceDocType: String(input.header.documentType || "") || null,
+        sourceDocId: String(input.header.documentId || "") || null,
+        status: "POSTED",
+        currency: "PGK",
+        totalDebit,
+        totalCredit,
+        isBalanced: true,
+        createdBy: String(input.header.createdBy || input.actor || "finance-ui"),
+        approvedBy: String(input.header.approvedBy || "") || null,
+        approvedAt: input.header.approvedBy ? new Date() : null,
+        postedAt: new Date(),
+        lines: {
+          create: normalizedLines.map((line) => ({
+            lineNo: line.lineNo,
+            accountId: line.accountId,
+            description: String((line as Record<string, unknown>).description || "Journal entry"),
+            debit: line.debit,
+            credit: line.credit,
+            amount: Math.max(line.debit, line.credit),
+            currency: "PGK",
+            projectId: String((line as Record<string, unknown>).projectId || "") || null,
+            customerId: String((line as Record<string, unknown>).customerId || "") || null,
+            supplierId: String((line as Record<string, unknown>).supplierId || "") || null,
+            taxCode: String((line as Record<string, unknown>).taxCode || "") || null,
+            costCenter: String((line as Record<string, unknown>).costCenter || "") || null,
+          })),
+        },
+      },
+      include: { lines: { include: { account: true }, orderBy: { lineNo: "asc" } }, _count: { select: { lines: true } } },
+    });
+    const actor = String(input.header.createdBy || input.actor || "").trim();
+    const user = actor ? await tx.user.findUnique({ where: { email: actor } }) : null;
+    if (user) {
+      await tx.auditLog.create({
+        data: {
+          action: "POST",
+          entityType: "Journal",
+          entityId: journal.id,
+          entityCode: journal.code,
+          description: `Posted ${journal.sourceDocType || "journal"} ${journal.sourceDocId || journal.code}`,
+          userId: user.id,
+        },
+      });
+    }
+    return journal;
+  });
+  return { journalId: created.code, header: mapJournalHeader(created), lines: created.lines.map(mapJournalLine) };
 }
 
 export async function prismaFindRecords<T = any>(
@@ -489,20 +728,71 @@ export async function prismaFindRecords<T = any>(
   filters: Record<string, unknown>,
   limit = 100
 ): Promise<T[]> {
-  const all = await prismaListTable<T>(table, 500, 0);
   const filterEntries = Object.entries(filters).filter(([_, v]) => v !== undefined && v !== null);
+  const matched: T[] = [];
+  const pageSize = 500;
+  let offset = 0;
 
-  const matched = all.filter((row: any) => {
-    return filterEntries.every(([key, val]) => {
-      const rowVal = row[key];
-      if (typeof val === "string" && typeof rowVal === "string") {
-        return rowVal.toLowerCase() === val.toLowerCase();
-      }
-      return String(rowVal ?? "") === String(val ?? "");
-    });
-  });
+  while (matched.length < limit) {
+    const page = await prismaListTable<T>(table, pageSize, offset);
+    if (!page.length) break;
+    for (const row of page as any[]) {
+      const isMatch = filterEntries.every(([key, val]) => {
+        const rowVal = row[key];
+        if (typeof val === "string" && typeof rowVal === "string") {
+          return rowVal.toLowerCase() === val.toLowerCase();
+        }
+        return String(rowVal ?? "") === String(val ?? "");
+      });
+      if (isMatch) matched.push(row as T);
+      if (matched.length >= limit) break;
+    }
+    if (page.length < pageSize) break;
+    offset += page.length;
+  }
 
-  return matched.slice(0, limit);
+  return matched;
+}
+
+function mapJournalHeader(journal: any) {
+  if (!journal) return null;
+  return {
+    journalId: journal.code,
+    postingDate: journal.date?.toISOString?.().slice(0, 10) || String(journal.date || "").slice(0, 10),
+    documentType: journal.sourceDocType || "",
+    documentId: journal.sourceDocId || "",
+    documentNumber: journal.reference || "",
+    reference: journal.description || "",
+    projectId: journal.lines?.[0]?.projectId || "",
+    status: journal.status,
+    reversalOfJournalId: journal.reversalOfJournalId || "",
+    totalDebit: Number(journal.totalDebit || 0),
+    totalCredit: Number(journal.totalCredit || 0),
+    isBalanced: journal.isBalanced,
+    createdBy: journal.createdBy,
+    approvedBy: journal.approvedBy || "",
+    createdAt: journal.createdAt?.toISOString?.() || String(journal.createdAt || ""),
+    postedAt: journal.postedAt?.toISOString?.() || "",
+  };
+}
+
+function mapJournalLine(line: any) {
+  if (!line) return null;
+  return {
+    journalLineId: line.id,
+    journalId: line.journal?.code || line.journalId,
+    lineNo: line.lineNo,
+    accountId: line.account ? accountReference(line.account.code) : line.accountId,
+    customerId: line.customerId || "",
+    supplierId: line.supplierId || "",
+    projectId: line.projectId || "",
+    debit: Number(line.debit || 0),
+    credit: Number(line.credit || 0),
+    taxCode: line.taxCode || "",
+    costCenter: line.costCenter || "",
+    description: line.description || "",
+    createdAt: line.createdAt?.toISOString?.() || String(line.createdAt || ""),
+  };
 }
 
 export async function prismaAppendRecord<T = any>(
@@ -576,16 +866,18 @@ export async function prismaAppendRecord<T = any>(
 
     case "Items": {
       const code = String(record.itemCode || record.itemId || generatedCode("ITM"));
+      const requestedType = String(record.itemType || "STOCK").toUpperCase();
+      const itemType = requestedType === "STOCK" ? "GOOD" : requestedType === "NON_STOCK" ? "NON_INVENTORY" : requestedType;
       const created = await prisma.item.create({
         data: {
           id: record.itemId ? String(record.itemId) : undefined,
           code,
           name: String(record.itemName || record.name || "Item"),
           description: record.description ? String(record.description) : null,
-          type: String(record.itemType || "GOOD").toUpperCase() as any,
+          type: itemType as any,
           sellPrice: record.defaultRate ? Number(record.defaultRate) : record.rate ? Number(record.rate) : 0,
-          revenueAccount: record.revenueAccount ? String(record.revenueAccount) : "ACC-4100",
-          costAccount: record.costAccount ? String(record.costAccount) : "ACC-5100",
+          revenueAccount: record.revenueAccount !== undefined ? String(record.revenueAccount).trim() : "",
+          costAccount: record.costAccount !== undefined ? String(record.costAccount).trim() : "",
           unit: record.uom ? String(record.uom) : record.unit ? String(record.unit) : "Each",
           isActive: true,
         },
@@ -671,6 +963,8 @@ export async function prismaAppendRecord<T = any>(
         if (p) projectId = p.id;
       }
 
+      const requestedStatus = String(record.status || "DRAFT").trim().toUpperCase().replace(/[\s-]+/g, "_");
+      const quoteStatus = requestedStatus === "APPROVED" ? "ACCEPTED" : requestedStatus;
       const created = await prisma.quote.create({
         data: {
           id: record.quoteId ? String(record.quoteId) : undefined,
@@ -682,9 +976,11 @@ export async function prismaAppendRecord<T = any>(
           subtotal: Number(record.netAmount || 0),
           taxTotal: Number(record.gstAmount || 0),
           total: Number(record.totalAmount || 0),
-          status: "DRAFT",
+          status: quoteStatus as any,
+          sourceDocId: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
           createdBy: actor,
         },
+        include: { customer: true, project: true },
       });
       return mapQuote(created) as T;
     }
@@ -741,8 +1037,11 @@ export async function prismaAppendRecord<T = any>(
           total,
           outstanding: total,
           status: "DRAFT",
+          sourceDocId: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
+          journalId: record.journalId ? String(record.journalId) : null,
           createdBy: actor,
         },
+        include: { customer: true, project: true },
       });
       return mapInvoice(created) as T;
     }
@@ -784,6 +1083,10 @@ export async function prismaAppendRecord<T = any>(
         });
         if (p) projectId = p.id;
       }
+      const poInput = String(record.orderId || record.poId || record.sourceDocumentId || "").trim();
+      const linkedPo = poInput
+        ? await prisma.purchaseOrder.findFirst({ where: { OR: [{ id: poInput }, { code: poInput }] } })
+        : null;
 
       const total = Number(record.totalAmount || 0);
       const created = await prisma.supplierBill.create({
@@ -799,9 +1102,9 @@ export async function prismaAppendRecord<T = any>(
           total,
           outstanding: total,
           status: "DRAFT",
-          orderId: record.orderId ? String(record.orderId) : null,
-          poReference: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
-          sourceDocId: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
+          orderId: linkedPo?.id || null,
+          poReference: linkedPo?.code || (poInput || null),
+          sourceDocId: linkedPo?.id || (poInput || null),
           createdBy: actor,
         },
       });
@@ -825,6 +1128,130 @@ export async function prismaAppendRecord<T = any>(
         },
       });
       return mapBillLine(created) as T;
+    }
+
+    case "Payments": {
+      const partyType = String(record.partyType || "");
+      const partyInput = String(record.partyId || "").trim();
+      const customer = partyType === "Customer" && partyInput
+        ? await prisma.customer.findFirst({ where: { OR: [{ id: partyInput }, { code: partyInput }] } })
+        : null;
+      const supplier = partyType === "Supplier" && partyInput
+        ? await prisma.supplier.findFirst({ where: { OR: [{ id: partyInput }, { code: partyInput }] } })
+        : null;
+      if (partyType === "Customer" && !customer) throw new Error(`Customer ${partyInput || "(blank)"} not found`);
+      if (partyType === "Supplier" && !supplier) throw new Error(`Supplier ${partyInput || "(blank)"} not found`);
+
+      const projectInput = String(record.projectId || "").trim();
+      const project = projectInput
+        ? await prisma.project.findFirst({ where: { OR: [{ id: projectInput }, { code: projectInput }] } })
+        : null;
+      const againstInput = String(record.againstDocumentId || "").trim();
+      const invoice = customer && againstInput
+        ? await prisma.invoice.findFirst({ where: { OR: [{ id: againstInput }, { code: againstInput }] } })
+        : null;
+      const bill = supplier && againstInput
+        ? await prisma.supplierBill.findFirst({ where: { OR: [{ id: againstInput }, { code: againstInput }] } })
+        : null;
+      if (againstInput && customer && !invoice) throw new Error(`Sales Invoice ${againstInput} not found`);
+      if (againstInput && supplier && !bill) throw new Error(`Supplier Invoice ${againstInput} not found`);
+
+      const paymentType = String(record.paymentType || "").toUpperCase();
+      const prismaType = customer
+        ? (paymentType === "PAY" ? "CUSTOMER_REFUND" : "CUSTOMER_RECEIPT")
+        : "SUPPLIER_PAYMENT";
+      const requestedStatus = String(record.status || "DRAFT").toUpperCase();
+      const prismaStatus = requestedStatus === "APPROVED"
+        ? "AUTHORIZED"
+        : requestedStatus === "POSTED"
+          ? "CLEARED"
+          : "PENDING";
+      const created = await prisma.payment.create({
+        data: {
+          id: record.paymentId ? String(record.paymentId) : undefined,
+          code: String(record.paymentNumber || record.paymentId || generatedCode("PAY")),
+          type: prismaType as any,
+          date: record.paymentDate ? new Date(String(record.paymentDate)) : new Date(),
+          amount: Number(record.amount || 0),
+          paymentMethod: String(record.paymentMethod || "Cash"),
+          referenceNumber: record.reference ? String(record.reference) : null,
+          status: prismaStatus as any,
+          customerId: customer?.id || null,
+          supplierId: supplier?.id || null,
+          invoiceId: invoice?.id || null,
+          billId: bill?.id || null,
+          projectId: project?.id || null,
+          depositAccount: record.cashBankAccountId ? String(record.cashBankAccountId) : null,
+          sourceDocId: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
+          journalId: record.journalId ? String(record.journalId) : null,
+          createdBy: actor,
+        },
+      });
+      return mapPayment(created) as T;
+    }
+
+    case "StockMovements": {
+      const itemInput = String(record.itemId || "").trim();
+      const item = itemInput
+        ? await prisma.item.findFirst({ where: { OR: [{ id: itemInput }, { code: itemInput }] } })
+        : null;
+      if (!item) throw new Error(`Item ${itemInput || "(blank)"} not found`);
+      const rawMovementType = String(record.movementType || record.type || "ADJUSTMENT_IN").trim().toUpperCase();
+      const supportedTypes = new Set([
+        "PURCHASE_IN", "PURCHASE_RECEIPT", "SALES_DELIVERY", "SALES_ISSUE", "SALES_ISSUE_ROLLBACK", "SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_IN", "ADJUSTMENT_OUT",
+        "TRANSFER_IN", "TRANSFER_OUT", "RETURN_IN", "RETURN_OUT", "LANDED_COST", "REVALUATION", "NRV_WRITEDOWN", "COUNTED",
+      ]);
+      const movementType = supportedTypes.has(rawMovementType) ? rawMovementType : "ADJUSTMENT_IN";
+      const qtyIn = Number(record.qtyIn || 0);
+      const qtyOut = Number(record.qtyOut || 0);
+      const quantity = Math.abs(Number(record.qty || qtyIn || qtyOut || 0));
+      const created = await prisma.stockMovement.create({
+        data: {
+          id: record.movementId ? String(record.movementId) : undefined,
+          itemId: item.id,
+          type: movementType as any,
+          quantity,
+          unitCost: record.unitCost !== undefined ? Number(record.unitCost || 0) : null,
+          totalCost: record.value !== undefined ? Number(record.value || 0) : record.totalCost !== undefined ? Number(record.totalCost || 0) : null,
+          referenceType: movementType,
+          referenceId: record.sourceDocumentId ? String(record.sourceDocumentId) : record.referenceId ? String(record.referenceId) : null,
+          journalId: record.journalId ? String(record.journalId) : null,
+          projectId: record.projectId ? String(record.projectId) : null,
+          warehouseId: record.warehouseId ? String(record.warehouseId) : null,
+          note: record.note ? String(record.note) : null,
+          createdAt: record.movementDate ? new Date(String(record.movementDate)) : undefined,
+          createdBy: actor,
+        },
+      });
+      return mapStockMovement(created) as T;
+    }
+
+    case "FixedAssets": {
+      const supplierInput = String(record.supplierId || "").trim();
+      const supplier = supplierInput ? await prisma.supplier.findFirst({ where: { OR: [{ id: supplierInput }, { code: supplierInput }] } }) : null;
+      const assetId = String(record.assetId || generatedCode("AST"));
+      const cost = Number(record.cost || 0);
+      const created = await prisma.fixedAsset.create({
+        data: {
+          assetId,
+          assetName: String(record.assetName || "Fixed Asset"),
+          assetCategory: String(record.assetCategory || "General"),
+          purchaseDate: record.purchaseDate ? new Date(String(record.purchaseDate)) : new Date(),
+          supplierId: supplier?.id || null,
+          cost,
+          serialNumber: record.serialNumber ? String(record.serialNumber) : null,
+          location: record.location ? String(record.location) : null,
+          assignedTo: record.assignedTo ? String(record.assignedTo) : null,
+          usefulLifeMonths: Number(record.usefulLifeMonths || 36),
+          accumulatedDepreciation: Number(record.accumulatedDepreciation || 0),
+          netBookValue: record.netBookValue !== undefined ? Number(record.netBookValue || 0) : cost,
+          status: record.status ? String(record.status) : "ACTIVE",
+          sourceDocumentId: record.sourceDocumentId ? String(record.sourceDocumentId) : null,
+          acquisitionJournalId: record.acquisitionJournalId ? String(record.acquisitionJournalId) : null,
+          depreciationJournalId: record.depreciationJournalId ? String(record.depreciationJournalId) : null,
+        },
+      });
+      return mapFixedAsset(created) as T;
     }
 
     case "Settings": {
@@ -939,6 +1366,9 @@ export async function prismaUpdateRecord<T = any>(
       let poStatus: any = undefined;
       if (statusStr) {
         if (statusStr === "APPROVED") poStatus = "SENT";
+        else if (statusStr === "PART_RECEIVED" || statusStr === "PARTIAL_RECEIVED") poStatus = "PARTIAL_RECEIVED";
+        else if (statusStr === "RECEIVED") poStatus = "RECEIVED";
+        else if (statusStr === "BILLED") poStatus = "BILLED";
         else if (statusStr === "CANCELLED" || statusStr === "CANCEL") poStatus = "Cancelled";
         else if (statusStr === "DRAFT") poStatus = "DRAFT";
         else if (statusStr === "SENT") poStatus = "SENT";
@@ -953,7 +1383,8 @@ export async function prismaUpdateRecord<T = any>(
           sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
         },
       });
-      return mapPurchaseOrder(updated) as T;
+      const hydrated = await prisma.purchaseOrder.findUnique({ where: { id: updated.id }, include: { supplier: true, project: true } });
+      return mapPurchaseOrder(hydrated) as T;
     }
 
     case "Quotes": {
@@ -968,13 +1399,16 @@ export async function prismaUpdateRecord<T = any>(
         else if (statusStr === "CANCELLED" || statusStr === "CANCEL") quoteStatus = "CANCELLED";
         else if (statusStr === "DRAFT") quoteStatus = "DRAFT";
         else if (statusStr === "SENT") quoteStatus = "SENT";
+        else if (["CONVERTED", "PART_DELIVERED", "DELIVERED", "PART_INVOICED", "INVOICED"].includes(statusStr)) quoteStatus = statusStr;
         else quoteStatus = "ACCEPTED";
       }
       const updated = await prisma.quote.update({
         where: { id: existing.id },
         data: {
           status: quoteStatus,
+          sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
         },
+        include: { customer: true, project: true },
       });
       return mapQuote(updated) as T;
     }
@@ -998,7 +1432,10 @@ export async function prismaUpdateRecord<T = any>(
         data: {
           status: invoiceStatus,
           outstanding: patch.outstandingAmount !== undefined ? Number(patch.outstandingAmount) : undefined,
+          journalId: patch.journalId !== undefined ? (patch.journalId ? String(patch.journalId) : null) : undefined,
+          sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
         },
+        include: { customer: true, project: true },
       });
       return mapInvoice(updated) as T;
     }
@@ -1026,7 +1463,112 @@ export async function prismaUpdateRecord<T = any>(
           journalId: patch.journalId ? String(patch.journalId) : undefined,
         },
       });
-      return mapSupplierBill(updated) as T;
+      const hydrated = await prisma.supplierBill.findUnique({ where: { id: updated.id }, include: { supplier: true, project: true } });
+      return mapSupplierBill(hydrated) as T;
+    }
+
+    case "Payments": {
+      const existing = await prisma.payment.findFirst({
+        where: { OR: [{ id: idValue }, { code: idValue }] },
+      });
+      if (!existing) throw new Error(`Payment ${idValue} not found`);
+      const statusStr = patch.status ? String(patch.status).trim().toUpperCase() : "";
+      const paymentStatus = statusStr === "DRAFT"
+        ? "PENDING"
+        : statusStr === "APPROVED"
+          ? "AUTHORIZED"
+          : statusStr === "POSTED"
+            ? "CLEARED"
+            : statusStr || undefined;
+
+      const againstInput = patch.againstDocumentId !== undefined ? String(patch.againstDocumentId || "").trim() : "";
+      const againstType = String(patch.againstDocumentType || "").toLowerCase();
+      let invoiceId: string | null | undefined;
+      let billId: string | null | undefined;
+      if (patch.againstDocumentId !== undefined) {
+        invoiceId = null;
+        billId = null;
+        if (againstInput && (againstType.includes("sales") || existing.customerId)) {
+          const invoice = await prisma.invoice.findFirst({ where: { OR: [{ id: againstInput }, { code: againstInput }] } });
+          if (!invoice) throw new Error(`Sales Invoice ${againstInput} not found`);
+          invoiceId = invoice.id;
+        } else if (againstInput) {
+          const bill = await prisma.supplierBill.findFirst({ where: { OR: [{ id: againstInput }, { code: againstInput }] } });
+          if (!bill) throw new Error(`Supplier Invoice ${againstInput} not found`);
+          billId = bill.id;
+        }
+      }
+
+      const updated = await prisma.payment.update({
+        where: { id: existing.id },
+        data: {
+          status: paymentStatus as any,
+          date: patch.paymentDate !== undefined ? new Date(String(patch.paymentDate)) : undefined,
+          amount: patch.amount !== undefined ? Number(patch.amount) : undefined,
+          paymentMethod: patch.paymentMethod !== undefined ? String(patch.paymentMethod) : undefined,
+          depositAccount: patch.cashBankAccountId !== undefined ? (patch.cashBankAccountId ? String(patch.cashBankAccountId) : null) : undefined,
+          referenceNumber: patch.reference !== undefined ? (patch.reference ? String(patch.reference) : null) : undefined,
+          sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
+          journalId: patch.journalId !== undefined ? (patch.journalId ? String(patch.journalId) : null) : undefined,
+          invoiceId,
+          billId,
+        },
+      });
+      const hydrated = await prisma.payment.findUnique({ where: { id: updated.id }, include: { customer: true, supplier: true, project: true } });
+      return mapPayment(hydrated) as T;
+    }
+
+    case "Items": {
+      const existing = await prisma.item.findFirst({
+        where: { OR: [{ id: idValue }, { code: idValue }] },
+      });
+      if (!existing) throw new Error(`Item ${idValue} not found`);
+      const updated = await prisma.item.update({
+        where: { id: existing.id },
+        data: {
+          name: patch.itemName ? String(patch.itemName) : undefined,
+          sellPrice: patch.defaultRate !== undefined ? Number(patch.defaultRate) : patch.rate !== undefined ? Number(patch.rate) : undefined,
+          purchasePrice: patch.purchasePrice !== undefined ? Number(patch.purchasePrice) : undefined,
+          revenueAccount: patch.revenueAccount !== undefined ? String(patch.revenueAccount) : undefined,
+          costAccount: patch.costAccount !== undefined ? String(patch.costAccount) : undefined,
+          taxCode: patch.taxCode !== undefined ? String(patch.taxCode) : undefined,
+          isActive: patch.active !== undefined ? patch.active !== false : undefined,
+        },
+      });
+      return mapItem(updated) as T;
+    }
+
+    case "StockMovements": {
+      const existing = await prisma.stockMovement.findFirst({ where: { id: idValue } });
+      if (!existing) throw new Error(`StockMovement ${idValue} not found`);
+      const updated = await prisma.stockMovement.update({
+        where: { id: existing.id },
+        data: {
+          journalId: patch.journalId !== undefined ? (patch.journalId ? String(patch.journalId) : null) : undefined,
+          referenceId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
+          note: patch.note !== undefined ? (patch.note ? String(patch.note) : null) : undefined,
+        },
+      });
+      return mapStockMovement(updated) as T;
+    }
+
+    case "FixedAssets": {
+      const existing = await prisma.fixedAsset.findFirst({
+        where: { OR: [{ id: idValue }, { assetId: idValue }] },
+      });
+      if (!existing) throw new Error(`FixedAsset ${idValue} not found`);
+      const updated = await prisma.fixedAsset.update({
+        where: { id: existing.id },
+        data: {
+          assetName: patch.assetName !== undefined ? String(patch.assetName) : undefined,
+          status: patch.status !== undefined ? String(patch.status) : undefined,
+          accumulatedDepreciation: patch.accumulatedDepreciation !== undefined ? Number(patch.accumulatedDepreciation) : undefined,
+          netBookValue: patch.netBookValue !== undefined ? Number(patch.netBookValue) : undefined,
+          acquisitionJournalId: patch.acquisitionJournalId !== undefined ? (patch.acquisitionJournalId ? String(patch.acquisitionJournalId) : null) : undefined,
+          depreciationJournalId: patch.depreciationJournalId !== undefined ? (patch.depreciationJournalId ? String(patch.depreciationJournalId) : null) : undefined,
+        },
+      });
+      return mapFixedAsset(updated) as T;
     }
 
     case "Settings": {

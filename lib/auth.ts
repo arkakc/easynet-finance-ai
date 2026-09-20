@@ -1,7 +1,8 @@
-import { createHmac, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { env } from "@/lib/env";
 import bcrypt from "bcryptjs";
+import { prisma } from "@/src/lib/prisma";
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
@@ -10,7 +11,6 @@ export async function hashPassword(password: string): Promise<string> {
 export type Role = "System Manager" | "Finance Controller" | "Accounts User" | "Sales User" | "Purchase User" | "Stock User" | "Management" | "Auditor";
 export type Permission = "dashboard.read" | "sales.read" | "sales.write" | "purchase.read" | "purchase.write" | "stock.read" | "stock.write" | "accounts.read" | "accounts.write" | "reports.read" | "users.manage" | "settings.manage" | "post.approve";
 export type SessionUser = { email: string; name: string; roles: Role[]; permissions: Permission[] };
-type ConfigUser = { email: string; name?: string; passwordHash: string; roles: Role[]; disabled?: boolean };
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   "System Manager": ["dashboard.read","sales.read","sales.write","purchase.read","purchase.write","stock.read","stock.write","accounts.read","accounts.write","reports.read","users.manage","settings.manage","post.approve"],
@@ -26,41 +26,37 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 const COOKIE_NAME = "easynet_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
-const TEST_ADMIN: ConfigUser = {
-  email: "admin@easynet.local",
-  name: "Test System Administrator",
-  passwordHash: "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a",
-  roles: ["System Manager"],
+const PRISMA_ROLE_MAP: Record<string, Role> = {
+  SYSTEM_MANAGER: "System Manager",
+  FINANCE_CONTROLLER: "Finance Controller",
+  ACCOUNTS_USER: "Accounts User",
+  SALES_USER: "Sales User",
+  PURCHASE_USER: "Purchase User",
+  STOCK_USER: "Stock User",
+  MANAGEMENT: "Management",
+  AUDITOR: "Auditor",
 };
-
-function users(): ConfigUser[] {
-  // Temporary simple-login mode: ignore ERP_USERS_JSON and use the built-in
-  // administrator account in all environments until persistent user management is enabled.
-  return [TEST_ADMIN];
-}
 
 function permissionsFor(roles: Role[]) {
   return Array.from(new Set(roles.flatMap((r) => ROLE_PERMISSIONS[r] || []))) as Permission[];
 }
 
 function sign(value: string) {
-  const secret = env.SESSION_SECRET || (process.env.VERCEL_ENV === "preview" || process.env.NODE_ENV === "development" ? "easynet-preview-session-secret-change-before-production" : "");
+  const secret = env.SESSION_SECRET || "";
   if (!secret) throw new Error("SESSION_SECRET is not configured");
   return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
-export function verifyPassword(password: string, stored: string) {
-  const [scheme, salt, expectedHex] = stored.split("$");
-  if (scheme !== "scrypt" || !salt || !expectedHex) return false;
-  const actual = scryptSync(password, salt, 64);
-  const expected = Buffer.from(expectedHex, "hex");
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
-}
+export async function authenticate(email: string, password: string): Promise<SessionUser | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const found = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  if (!found || found.status !== "ACTIVE" || !found.password) return null;
+  if (!await bcrypt.compare(password, found.password)) return null;
 
-export function authenticate(email: string, password: string): SessionUser | null {
-  const found = users().find((u) => !u.disabled && u.email.toLowerCase() === email.trim().toLowerCase());
-  if (!found || !verifyPassword(password, found.passwordHash)) return null;
-  return { email: found.email, name: found.name || found.email, roles: found.roles, permissions: permissionsFor(found.roles) };
+  const role = PRISMA_ROLE_MAP[String(found.role)];
+  if (!role) return null;
+  await prisma.user.update({ where: { id: found.id }, data: { lastLoginAt: new Date() } });
+  return { email: found.email, name: found.name || found.email, roles: [role], permissions: permissionsFor([role]) };
 }
 
 export function createSessionToken(user: SessionUser) {
@@ -112,6 +108,10 @@ export async function getCurrentUser() {
 
 export function hasPermission(user: SessionUser | null, permission: Permission) { return Boolean(user?.permissions.includes(permission)); }
 
+export function hasAnyPermission(user: SessionUser | null, permissions: Permission[]) {
+  return permissions.some((permission) => hasPermission(user, permission));
+}
+
 export function requireRequestPermission(request: Request, permission: Permission) {
   const user = getRequestUser(request);
   if (!user) throw new Error("Unauthorized");
@@ -126,8 +126,15 @@ export async function requirePermission(permission: Permission) {
   return user;
 }
 
-export function listConfiguredUsers() {
-  return users().map((u) => ({ email: u.email, name: u.name || u.email, roles: u.roles, disabled: Boolean(u.disabled) }));
+export async function listConfiguredUsers() {
+  const users = await prisma.user.findMany({
+    orderBy: { email: "asc" },
+    select: { email: true, name: true, role: true, status: true },
+  });
+  return users.flatMap((user) => {
+    const role = PRISMA_ROLE_MAP[String(user.role)];
+    return role ? [{ email: user.email, name: user.name || user.email, roles: [role], disabled: user.status !== "ACTIVE" }] : [];
+  });
 }
 
 export const sessionCookie = { name: COOKIE_NAME, maxAge: SESSION_TTL_SECONDS };

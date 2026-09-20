@@ -1,4 +1,7 @@
 import { prisma } from "@/src/lib/prisma";
+import { Prisma } from "@prisma/client";
+
+type DbClient = typeof prisma | Prisma.TransactionClient;
 
 export type TransactionSummary = {
   journalHeaders: number;
@@ -35,7 +38,7 @@ export type TransactionSummary = {
   totalTransactions: number;
 };
 
-export async function getCompanyTransactionsSummary(): Promise<TransactionSummary> {
+export async function getCompanyTransactionsSummary(client: DbClient = prisma): Promise<TransactionSummary> {
   const [
     journalHeaders,
     journalLines,
@@ -69,37 +72,37 @@ export async function getCompanyTransactionsSummary(): Promise<TransactionSummar
     approvalRequests,
     transactionalDocuments,
   ] = await Promise.all([
-    prisma.journalHeader.count(),
-    prisma.journalLine.count(),
-    prisma.invoice.count(),
-    prisma.invoiceLine.count(),
-    prisma.quote.count(),
-    prisma.quoteLine.count(),
-    prisma.creditNote.count(),
-    prisma.creditNoteLine.count(),
-    prisma.purchaseOrder.count(),
-    prisma.pOLine.count(),
-    prisma.goodsReceipt.count(),
-    prisma.supplierBill.count(),
-    prisma.billLine.count(),
-    prisma.payment.count(),
-    prisma.refund.count(),
-    prisma.expense.count(),
-    prisma.bankTransaction.count(),
-    prisma.reconciliation.count(),
-    prisma.stockMovement.count(),
-    prisma.payrollRun.count(),
-    prisma.payrollItem.count(),
-    prisma.posSession.count(),
-    prisma.landedCostVoucher.count(),
-    prisma.landedCostItem.count(),
-    prisma.loan.count(),
-    prisma.loanEvent.count(),
-    prisma.fixedAsset.count(),
-    prisma.taxReport.count(),
-    prisma.timeEntry.count(),
-    prisma.approvalRequest.count(),
-    prisma.document.count({
+    client.journalHeader.count(),
+    client.journalLine.count(),
+    client.invoice.count(),
+    client.invoiceLine.count(),
+    client.quote.count(),
+    client.quoteLine.count(),
+    client.creditNote.count(),
+    client.creditNoteLine.count(),
+    client.purchaseOrder.count(),
+    client.pOLine.count(),
+    client.goodsReceipt.count(),
+    client.supplierBill.count(),
+    client.billLine.count(),
+    client.payment.count(),
+    client.refund.count(),
+    client.expense.count(),
+    client.bankTransaction.count(),
+    client.reconciliation.count(),
+    client.stockMovement.count(),
+    client.payrollRun.count(),
+    client.payrollItem.count(),
+    client.posSession.count(),
+    client.landedCostVoucher.count(),
+    client.landedCostItem.count(),
+    client.loan.count(),
+    client.loanEvent.count(),
+    client.fixedAsset.count(),
+    client.taxReport.count(),
+    client.timeEntry.count(),
+    client.approvalRequest.count(),
+    client.document.count({
       where: {
         OR: [
           { type: { in: ["INVOICE", "QUOTE", "PURCHASE_ORDER", "BILL", "RECEIPT", "BANK_STATEMENT"] } },
@@ -176,13 +179,14 @@ export type DeleteTransactionsOptions = {
   resetStockQuantities?: boolean;
   ipAddress?: string;
   userAgent?: string;
+  transactionClient?: Prisma.TransactionClient;
 };
 
 export async function deleteCompanyTransactions(options: DeleteTransactionsOptions) {
-  const summaryBefore = await getCompanyTransactionsSummary();
+  const summaryBefore = await getCompanyTransactionsSummary(options.transactionClient || prisma);
 
   // Execute in careful order to handle foreign keys
-  const result = await prisma.$transaction(async (tx) => {
+  const execute = async (tx: Prisma.TransactionClient) => {
     // 1. Clear references between BankTransactions and payments/invoices/bills
     await tx.bankTransaction.updateMany({
       data: {
@@ -309,7 +313,7 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
         action: "DELETE_COMPANY_TRANSACTIONS",
         entityType: "Company",
         entityCode: "ALL_TRANSACTIONS",
-        description: `Company transactions wiped by ${options.adminName || options.adminEmail} (${options.adminEmail}). ERPNext-style transaction reset executed.`,
+        description: `Company transactions wiped by ${options.adminName || options.adminEmail} (${options.adminEmail}). Easynet-style transaction reset executed.`,
         changes: JSON.stringify({
           wipedSummary: summaryBefore,
           resetStockQuantities: options.resetStockQuantities !== false,
@@ -326,7 +330,8 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       wiped: summaryBefore,
       auditId: audit.id,
     };
-  });
+  };
+  const result = options.transactionClient ? await execute(options.transactionClient) : await prisma.$transaction(execute);
 
   return result;
 }

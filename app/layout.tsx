@@ -4,6 +4,11 @@ import Link from "next/link";
 import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
 import LogoutButton from "@/app/components/logout-button";
 import FlowReturnBridge from "@/app/components/flow-return-bridge";
+import SetupAccessGuard from "@/app/components/setup-access-guard";
+import CollapsibleSidebarNav, { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
+import GlobalDataTableEnhancer from "@/app/components/global-data-table-enhancer";
+import GlobalFormDraftCache from "@/app/components/global-form-draft-cache";
+import { getSetupGateState } from "@/lib/setup-gate";
 
 export const metadata = {
   title: "Easynet Finance AI",
@@ -29,8 +34,9 @@ const groups: readonly NavGroup[] = [
     icon: "💼",
     links: [
       ["Sales Transactions", "/transactions?module=sales", "sales.read"],
+      ["Customers", "/customers", "sales.read"],
+      ["Projects", "/projects/master", "sales.read"],
       ["Retail POS Terminal", "/pos", "sales.read"],
-      ["Customers", "/masters?tab=customers", "sales.read"],
       ["Payment Schedules", "/payment-schedules", "sales.read"],
     ],
   },
@@ -39,7 +45,8 @@ const groups: readonly NavGroup[] = [
     icon: "🛒",
     links: [
       ["Purchase Transactions", "/transactions?module=purchase", "purchase.read"],
-      ["Suppliers", "/masters?tab=suppliers", "purchase.read"],
+      ["Suppliers", "/suppliers", "purchase.read"],
+      ["Projects", "/projects/master", "purchase.read"],
       ["Expenses", "/transactions?module=expense", "purchase.write"],
     ],
   },
@@ -56,9 +63,14 @@ const groups: readonly NavGroup[] = [
     icon: "📑",
     links: [
       ["Chart of Accounts", "/accounts", "accounts.read"],
+      ["Manual Journal Entry", "/manual-journal-entry", "accounts.write"],
       ["Posted Journals", "/journals", "accounts.read"],
+      ["Bank / Cash Pay Entry", "/bank-cash-pay", "accounts.write"],
+      ["Payroll Control Centre", "/payroll", "accounts.read"],
       ["Journal Reversal", "/journals/reverse", "accounts.write"],
       ["Statements", "/statements", "accounts.read"],
+      ["Bank Reconciliation", "/banking", "accounts.read"],
+      ["Month-End Close", "/period-close", "post.approve"],
       ["Budgets", "/budgets", "accounts.read"],
       ["Loan Register", "/loans", "accounts.read"],
       ["Loan Actions", "/loans/actions", "accounts.write"],
@@ -90,8 +102,11 @@ const groups: readonly NavGroup[] = [
     label: "Administration",
     icon: "⚙️",
     links: [
-      ["Business Masters", "/masters", "settings.manage"],
       ["Finance Settings", "/settings", "settings.manage"],
+      ["Subledger Recovery", "/migration/subledger", "settings.manage"],
+      ["Opening AR/AP Import", "/migration/opening-subledger", "settings.manage"],
+      ["Go-Live Readiness", "/go-live", "settings.manage"],
+      ["Backup & Recovery", "/system/backups", "settings.manage"],
       ["Users & Permissions", "/users", "users.manage"],
     ],
   },
@@ -99,6 +114,20 @@ const groups: readonly NavGroup[] = [
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
+  const { setupActive, openingSubledgerLocked } = user ? await getSetupGateState() : { setupActive: true, openingSubledgerLocked: false };
+  const navGroups: SidebarNavGroup[] = !user ? [] : !setupActive ? [
+    { label: "System Setup", icon: "⚙️", links: [{ label: "Fresh Setup Wizard", href: "/setup/finance" }] },
+  ] : groups.flatMap((group) => {
+    const visible = group.links
+      .filter(([, , permission]) => hasPermission(user, permission))
+      .map(([label, href]) => ({
+        label,
+        href,
+        disabled: href === "/migration/opening-subledger" && openingSubledgerLocked,
+        disabledReason: "Disabled because the system was activated as a new business with zero opening balances. Full reset is required to enable opening AR/AP import again.",
+      }));
+    return visible.length ? [{ label: group.label, icon: group.icon, links: visible }] : [];
+  });
   return (
     <html lang="en">
       <head>
@@ -112,32 +141,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         ) : (
           <div className="shell">
             <aside className="sidebar">
-              <Link prefetch={false} className="brand" href="/dashboard">
+              <Link prefetch={false} className="brand" href={setupActive ? "/dashboard" : "/setup/finance"}>
                 <div className="brand-icon">EN</div>
                 <div>
                   <strong>EASYNET FINANCE AI</strong>
                   <span>Enterprise Mini ERP · PGK</span>
                 </div>
               </Link>
-              <nav>
-                {groups.map((group) => {
-                  const visible = group.links.filter(([, , permission]) => hasPermission(user, permission));
-                  if (!visible.length) return null;
-                  return (
-                    <div className="nav-section" key={group.label}>
-                      <div className="nav-label">
-                        <span className="nav-section-icon">{group.icon}</span>
-                        <span>{group.label}</span>
-                      </div>
-                      {visible.map(([label, href]) => (
-                        <Link prefetch={false} href={href} key={`${group.label}-${label}`}>
-                          {label}
-                        </Link>
-                      ))}
-                    </div>
-                  );
-                })}
-              </nav>
+              <CollapsibleSidebarNav groups={navGroups} />
               <div className="sidebar-user">
                 <div className="sidebar-user-header">
                   <div className="sidebar-user-avatar">
@@ -152,7 +163,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               </div>
             </aside>
             <main className="main">
+              <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
+              <GlobalDataTableEnhancer />
+              <GlobalFormDraftCache />
               {children}
             </main>
           </div>

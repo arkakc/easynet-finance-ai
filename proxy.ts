@@ -3,7 +3,7 @@ import { sessionCookie, verifySessionToken, type Permission } from "@/lib/auth";
 
 const PUBLIC_PATHS=["/login","/api/auth/login","/api/health","/api/backend/health"];
 const LEGACY_WRITE_PATHS=["/api/transactions","/api/conversions","/api/approvals","/api/assets","/api/budgets","/api/masters","/api/settings","/api/stock","/api/payment-schedules","/api/loans/actions","/api/journals/reverse","/api/setup/finance","/api/documents/extract"];
-const ROUTE_PERMISSIONS:Array<[string,Permission]>=[["/conversions/sales","sales.write"],["/conversions/purchase","purchase.write"],["/users","users.manage"],["/settings","settings.manage"],["/approvals","post.approve"],["/reports","reports.read"],["/stock","stock.read"],["/assets","stock.read"],["/accounts","accounts.read"],["/journals","accounts.read"],["/loans","accounts.read"],["/statements","accounts.read"],["/budgets","accounts.read"],["/documents","accounts.read"],["/ai-finance","accounts.read"]];
+const ROUTE_PERMISSIONS:Array<[string,Permission]>=[["/conversions/sales","sales.write"],["/conversions/purchase","purchase.write"],["/users","users.manage"],["/settings","settings.manage"],["/system","settings.manage"],["/period-close","post.approve"],["/approvals","post.approve"],["/reports","reports.read"],["/stock","stock.read"],["/assets","stock.read"],["/accounts","accounts.read"],["/journals","accounts.read"],["/loans","accounts.read"],["/statements","accounts.read"],["/budgets","accounts.read"],["/documents","accounts.read"],["/ai-finance","accounts.read"]];
 
 function transactionRefererModule(request:NextRequest){
   const referer=request.headers.get("referer")||"";

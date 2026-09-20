@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { getCurrentUser, getRequestUser, authenticate, verifyPassword } from "@/lib/auth";
+import { getCurrentUser, getRequestUser } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
 import {
   getMasterDataSummary,
@@ -83,26 +83,8 @@ export async function POST(request: Request) {
     const { password, confirmationPhrase, preserveAdminUser } = parsed.data;
 
     // 1. Re-authenticate Password
-    let passwordValid = false;
-    const authResult = authenticate(user.email, password);
-    if (authResult) {
-      passwordValid = true;
-    }
-
-    if (!passwordValid) {
-      const dbUser = await prisma.user.findUnique({
-        where: { email: user.email },
-      });
-      if (dbUser?.password) {
-        passwordValid = await bcrypt.compare(password, dbUser.password);
-      }
-    }
-
-    if (!passwordValid && user.email.toLowerCase() === "admin@easynet.local") {
-      const testHash =
-        "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a";
-      passwordValid = verifyPassword(password, testHash);
-    }
+    const dbUser = await prisma.user.findUnique({ where: { email: user.email } });
+    const passwordValid = dbUser?.password ? await bcrypt.compare(password, dbUser.password) : false;
 
     if (!passwordValid) {
       return NextResponse.json(
@@ -147,6 +129,7 @@ export async function POST(request: Request) {
       message: "All company master data and records have been successfully deleted.",
       wiped: result.wiped,
       auditId: result.auditId,
+      redirectTo: "/setup/finance",
     });
   } catch (error) {
     const message =

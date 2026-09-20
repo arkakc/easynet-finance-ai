@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { round2 } from "@/lib/accounting/inventory";
 import { isCreditNote } from "@/lib/accounting/sales-return";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   creditNoteId: z.string().trim().min(1),
@@ -20,15 +20,7 @@ function year() {
 }
 
 async function nextPaymentNumber() {
-  const prefix = `PE-${year()}-`;
-  const rows = await listTable<any>("Payments", 500, 0);
-  const max = (rows.rows || []).reduce((current: number, row: any) => {
-    const value = String(row.paymentNumber || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("Payment", Number(year()));
 }
 
 async function refundableBalance(creditNote: any) {
@@ -76,7 +68,7 @@ export async function POST(request: Request) {
     const balance = await refundableBalance(creditNote);
     if (input.amount > balance.refundable + 0.001) throw new Error(`Refund exceeds refundable customer credit. Available K${balance.refundable.toFixed(2)}`);
 
-    const paymentId = `PAY-${year()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const paymentId = documentSeriesId("Payment", Number(year()));
     const paymentNumber = await nextPaymentNumber();
     const row = await appendRecord("Payments", {
       paymentId,

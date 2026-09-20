@@ -2,7 +2,7 @@ import { listConfiguredUsers, requirePermission, ROLE_PERMISSIONS } from "@/lib/
 
 export default async function UsersPage() {
   await requirePermission("users.manage");
-  const users = listConfiguredUsers();
+  const users = await listConfiguredUsers();
   const enabledUsers = users.filter((u) => !u.disabled).length;
   const roleCount = Object.keys(ROLE_PERMISSIONS).length;
 
@@ -22,7 +22,7 @@ export default async function UsersPage() {
               <span className="notice-arrow">▾</span>
             </summary>
             <div className="system-notice-dropdown">
-              <strong>Credential management:</strong> Users are provisioned through server environment configuration using scrypt password hashes. This prevents plain-text credentials from entering client code or logs.
+              <strong>Credential management:</strong> Users and password hashes are stored in the local database. Credentials are never returned to the browser.
             </div>
           </details>
           <span className="badge">RBAC Security</span>
@@ -79,7 +79,7 @@ export default async function UsersPage() {
             ))}
             {!users.length && (
               <tr>
-                <td colSpan={4}>No ERP users configured. Add ERP_USERS_JSON in the server environment before production use.</td>
+              <td colSpan={4}>No ERP users have been provisioned.</td>
               </tr>
             )}
           </tbody>

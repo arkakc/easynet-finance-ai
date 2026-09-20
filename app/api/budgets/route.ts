@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
+import { requirePermission } from "@/lib/auth";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   budgetId: z.string().trim().optional().default(""),
@@ -27,6 +28,7 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
 
 export async function GET() {
   try {
+    await requirePermission("accounts.read");
     const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
     if (!backendConfigured) {
       const [budgets, accounts, headers, lines] = await Promise.all([
@@ -108,7 +110,8 @@ export async function GET() {
 
     return NextResponse.json({ ok: true, budgets: calculated, accounts: accounts.rows });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Budget read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Budget read failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
 
@@ -142,7 +145,7 @@ export async function POST(request: Request) {
         },
       });
       if (duplicate) throw new Error(`A budget already exists for ${record.financialYear} ${normalizedPeriod}, account ${record.accountId}${record.projectId ? `, project ${record.projectId}` : ""}`);
-      const budgetId = record.budgetId || `BUD-${record.financialYear}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const budgetId = record.budgetId || documentSeriesId("Budget");
       const existingCode = await prisma.budget.findUnique({ where: { code: budgetId } });
       if (existingCode) throw new Error(`Budget ID already exists: ${budgetId}`);
       const budget = await prisma.budget.create({
@@ -177,7 +180,7 @@ export async function POST(request: Request) {
     );
     if (semanticDuplicate) throw new Error(`A budget already exists for ${record.financialYear} ${normalizedPeriod}, account ${record.accountId}${record.projectId ? `, project ${record.projectId}` : ""}`);
 
-    const budgetId = record.budgetId || `BUD-${record.financialYear}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const budgetId = record.budgetId || documentSeriesId("Budget");
     const duplicate = await findRecords("Budgets", { budgetId }, 1);
     if (duplicate.rows.length) throw new Error(`Budget ID already exists: ${budgetId}`);
 

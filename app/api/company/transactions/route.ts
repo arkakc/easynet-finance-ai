@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
-import { getCurrentUser, getRequestUser, authenticate, verifyPassword } from "@/lib/auth";
+import { getCurrentUser, getRequestUser } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
 import {
   getCompanyTransactionsSummary,
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
-    // ERPNext Rule: Strictly System Manager / Administrator
+    // System rule: Strictly System Manager / Administrator
     const isSystemManager = user.roles.includes("System Manager");
     const hasSettingsPerm = user.permissions.includes("settings.manage");
     if (!isSystemManager && !hasSettingsPerm) {
@@ -89,31 +89,9 @@ export async function POST(request: Request) {
 
     const { password, companyNameConfirmation, resetStockQuantities } = parsed.data;
 
-    // 1. Re-authenticate Password (ERPNext security architecture)
-    let passwordValid = false;
-
-    // Check memory auth
-    const authResult = authenticate(user.email, password);
-    if (authResult) {
-      passwordValid = true;
-    }
-
-    // Check database user password hash (bcrypt)
-    if (!passwordValid) {
-      const dbUser = await prisma.user.findUnique({
-        where: { email: user.email },
-      });
-      if (dbUser?.password) {
-        passwordValid = await bcrypt.compare(password, dbUser.password);
-      }
-    }
-
-    // Fallback: check admin default test password if testing with admin@easynet.local
-    if (!passwordValid && user.email.toLowerCase() === "admin@easynet.local") {
-      const testHash =
-        "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a";
-      passwordValid = verifyPassword(password, testHash);
-    }
+    // 1. Re-authenticate Password (system security architecture)
+    const dbUser = await prisma.user.findUnique({ where: { email: user.email } });
+    const passwordValid = dbUser?.password ? await bcrypt.compare(password, dbUser.password) : false;
 
     if (!passwordValid) {
       return NextResponse.json(

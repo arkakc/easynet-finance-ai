@@ -67,11 +67,14 @@ export default async function GstReportPage() {
   const status = normalized(settings.find((row) => row.key === "gst_status")?.value || "UNVERIFIED");
   const gstNumber = settings.find((row) => row.key === "gst_number")?.value || "";
   const header = new Map(headers.map((row) => [String(row.journalId), row]));
+  // The controlled PNG COA uses 2121 for output GST and 2122 for input GST.
+  // Do not use the legacy 1140/2120 parent codes: 1140 is inventory and 2120
+  // is a statutory-tax parent, so either would misstate the GST return.
   const gstLines = lines
-    .filter((line) => ["ACC-1140", "ACC-2120"].includes(String(line.accountId)) && header.has(String(line.journalId)))
+    .filter((line) => ["ACC-2121", "ACC-2122"].includes(String(line.accountId)) && header.has(String(line.journalId)))
     .sort((a, b) => String(header.get(String(a.journalId))?.postingDate || "").localeCompare(String(header.get(String(b.journalId))?.postingDate || "")));
-  const inputGst = gstLines.filter((line) => line.accountId === "ACC-1140").reduce((sum, line) => sum + n(line.debit) - n(line.credit), 0);
-  const outputGst = gstLines.filter((line) => line.accountId === "ACC-2120").reduce((sum, line) => sum + n(line.credit) - n(line.debit), 0);
+  const inputGst = gstLines.filter((line) => line.accountId === "ACC-2122").reduce((sum, line) => sum + n(line.debit) - n(line.credit), 0);
+  const outputGst = gstLines.filter((line) => line.accountId === "ACC-2121").reduce((sum, line) => sum + n(line.credit) - n(line.debit), 0);
   const netPayable = outputGst - inputGst;
 
   return (
@@ -109,7 +112,7 @@ export default async function GstReportPage() {
         <table className="data-table"><thead><tr><th>Date</th><th>Document</th><th>Type</th><th>GST Type</th><th>Debit</th><th>Credit</th><th>Description</th><th>Journal</th></tr></thead><tbody>
           {gstLines.map((line, index) => {
             const h = header.get(String(line.journalId))!;
-            return <tr key={`${line.journalId}-${index}`}><td>{h.postingDate}</td><td>{h.documentNumber}</td><td>{h.documentType}</td><td>{line.accountId === "ACC-1140" ? "Input GST" : "Output GST"}</td><td>{n(line.debit) ? money(line.debit) : "—"}</td><td>{n(line.credit) ? money(line.credit) : "—"}</td><td>{line.description}</td><td><Link href={`/journals/${encodeURIComponent(String(line.journalId))}`}>View</Link></td></tr>;
+            return <tr key={`${line.journalId}-${index}`}><td>{h.postingDate}</td><td>{h.documentNumber}</td><td>{h.documentType}</td><td>{line.accountId === "ACC-2122" ? "Input GST" : "Output GST"}</td><td>{n(line.debit) ? money(line.debit) : "—"}</td><td>{n(line.credit) ? money(line.credit) : "—"}</td><td>{line.description}</td><td><Link href={`/journals/${encodeURIComponent(String(line.journalId))}`}>View</Link></td></tr>;
           })}
           {!gstLines.length && <tr><td colSpan={8}>No posted GST transactions.</td></tr>}
         </tbody></table>

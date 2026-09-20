@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
@@ -96,9 +95,6 @@ export default async function ProjectsPage() {
               </div>
             </details>
           )}
-          <Link prefetch={false} className="button-link secondary-link" href="/masters?tab=project">
-            Manage Projects
-          </Link>
           <span className="badge">PGK (K)</span>
         </div>
       </div>

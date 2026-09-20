@@ -4,6 +4,7 @@ import {
   prismaBatchAppend,
   prismaFindRecords,
   prismaListTable,
+  prismaPostJournal,
   prismaUpdateRecord,
 } from "@/lib/backend/prisma-store";
 
@@ -264,7 +265,13 @@ export function isBackendConfigured(service: BackendService = "core"): boolean {
 
 export async function backendHealth(service: BackendService = "core") {
   if (!isBackendConfigured(service)) {
-    return { ok: true, version: "sqlite-prisma", service } as BackendEnvelope<{ version: string }>;
+    const locallySupported = service === "core";
+    return {
+      ok: locallySupported,
+      version: locallySupported ? "sqlite-prisma" : undefined,
+      service,
+      error: locallySupported ? undefined : `${service} backend is not configured for local mode`,
+    } as BackendEnvelope<{ version?: string }>;
   }
   return callBackend<{ version: string }>("health", {}, service);
 }
@@ -274,7 +281,7 @@ export async function backendHealthAll() {
   const entries = await Promise.all(services.map(async (service) => {
     try {
       const result = await backendHealth(service);
-      return [service, { ok: true, version: result.version }] as const;
+      return [service, { ok: result.ok, version: result.version, error: result.error }] as const;
     } catch (error) {
       return [service, { ok: false, error: error instanceof Error ? error.message : "Health check failed" }] as const;
     }
@@ -392,12 +399,11 @@ export async function updateRecord<T = Record<string, unknown>>(table: string, i
 
 export async function postJournalRecord(input: JournalBundle) {
   if (!isBackendConfigured("core")) {
+    const posted = await prismaPostJournal(input);
     return {
       ok: true,
       service: "core" as const,
-      journalId: (input.header?.journalId as string) || "JRN-LOCAL",
-      header: input.header,
-      lines: input.lines,
+      ...posted,
     } as BackendEnvelope<{ journalId: string; header: Record<string, unknown>; lines: Record<string, unknown>[] }>;
   }
   return callBackend<{ journalId: string; header: Record<string, unknown>; lines: Record<string, unknown>[] }>("postJournal", input, "core");

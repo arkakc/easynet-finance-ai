@@ -21,11 +21,11 @@ function localDate(){
 }
 
 function approvedLifecycle(status:unknown){
-  return ["APPROVED","PART_RECEIVED","CONVERTED","BILL_CREATED","BILLED"].includes(String(status||"").toUpperCase());
+  return ["APPROVED","SENT","PART_RECEIVED","CONVERTED","BILL_CREATED","BILLED"].includes(String(status||"").toUpperCase());
 }
 
 function receiptNumber(movementId:string){
-  const match=movementId.match(/^(PR-\d{4}-[A-Z0-9]+)-\d{3}$/);
+  const match=movementId.match(/^((?:PR-\d{5}-\d{4})|(?:PR-\d{4}-[A-Z0-9]+))-\d{3}$/);
   return match?.[1]||movementId;
 }
 

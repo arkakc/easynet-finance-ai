@@ -1,4 +1,6 @@
-import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, isBackendConfigured, listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
+import { INITIAL_CHART_OF_ACCOUNTS } from "@/lib/accounting/chart-of-accounts";
 
 const REQUIRED_ACCOUNTS = [
   { accountId: "ACC-2190", accountCode: "2190", accountName: "Stock Received But Not Billed / GRNI", accountType: "Liability", parentAccount: "ACC-2100", active: true },
@@ -18,7 +20,70 @@ const REQUIRED_SETTINGS = [
 
 let ensurePromise: Promise<void> | null = null;
 
+function prismaAccountType(accountType: string) {
+  const types: Record<string, string> = {
+    Asset: "ASSET",
+    Liability: "LIABILITY",
+    Equity: "EQUITY",
+    Income: "REVENUE",
+    Expense: "EXPENSE",
+    "Contra Asset": "CONTRA_ASSET",
+    "Contra Liability": "CONTRA_LIABILITY",
+  };
+  return types[accountType] || "ASSET";
+}
+
+function normalBalance(accountType: string) {
+  return ["Liability", "Equity", "Income", "Contra Asset"].includes(accountType) ? "CREDIT" : "DEBIT";
+}
+
+async function reconcileLocalChartOfAccounts() {
+  if (isBackendConfigured("core")) return;
+
+  const canonicalCodes = new Set(INITIAL_CHART_OF_ACCOUNTS.map((account) => account.accountCode));
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    const parentCode = account.parentAccount.replace(/^ACC-/, "") || null;
+    await prisma.chartOfAccounts.upsert({
+      where: { code: account.accountCode },
+      update: {
+        name: account.accountName,
+        type: prismaAccountType(account.accountType) as any,
+        normalBalance: normalBalance(account.accountType) as any,
+        isActive: account.active,
+        parent: parentCode ? { connect: { code: parentCode } } : { disconnect: true },
+      },
+      create: {
+        code: account.accountCode,
+        name: account.accountName,
+        type: prismaAccountType(account.accountType) as any,
+        normalBalance: normalBalance(account.accountType) as any,
+        isActive: account.active,
+        isSystem: true,
+        currency: "PGK",
+        ...(parentCode ? { parent: { connect: { code: parentCode } } } : {}),
+      },
+    });
+  }
+
+  const accounts = await prisma.chartOfAccounts.findMany({ select: { id: true, code: true } });
+  const idByCode = new Map(accounts.map((account) => [account.code, account.id]));
+  const parentCodes = new Set(
+    INITIAL_CHART_OF_ACCOUNTS.map((account) => account.parentAccount.replace(/^ACC-/, "")).filter(Boolean),
+  );
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    if (parentCodes.has(account.accountCode)) continue;
+    const leafId = idByCode.get(account.accountCode);
+    const replacementParentId = idByCode.get(account.parentAccount.replace(/^ACC-/, ""));
+    if (!leafId || !replacementParentId) continue;
+    await prisma.chartOfAccounts.updateMany({
+      where: { parentId: leafId, code: { notIn: [...canonicalCodes] } },
+      data: { parentId: replacementParentId },
+    });
+  }
+}
+
 async function ensureOnce() {
+  await reconcileLocalChartOfAccounts();
   for (const account of REQUIRED_ACCOUNTS) {
     const found = await findRecords("Accounts", { accountId: account.accountId }, 1);
     if (!found.rows.length) await appendRecord("Accounts", account, "accounting-0.5-bootstrap");

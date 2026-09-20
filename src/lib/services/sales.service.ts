@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma';
 import { getNextDocumentNumber } from './document.service';
 import { calculateTotals, calculateLineTotals, calculateMargin, calculateSellingPriceFromMargin } from '@/lib/utils';
 import { getOrCreateAccount } from './accounting.service';
+import { documentSeriesId } from '@/lib/accounting/document-numbering';
 import { z } from 'zod';
 import { Quote, QuoteStatus, Invoice, InvoiceStatus, CreditNote, CreditNoteStatus, Customer } from '@prisma/client';
 
@@ -385,7 +386,7 @@ export async function postInvoiceToGL(invoiceId: string, approvedBy: string) {
   });
 
   // Create General Ledger Journal Header & Lines
-  const journalCode = `JRN-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
+  const journalCode = documentSeriesId('Journal');
 
   const journal = await prisma.journalHeader.create({
     data: {
@@ -456,7 +457,7 @@ export async function recordPayment(
   // Create payment record
   const payment = await prisma.payment.create({
     data: {
-      code: `PAY-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`,
+      code: documentSeriesId('Payment'),
       type: 'CUSTOMER_RECEIPT',
       date: paymentData.paymentDate,
       amount: payAmount,

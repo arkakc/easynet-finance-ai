@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -7,6 +6,8 @@ import { prisma } from "@/src/lib/prisma";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
+import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
+import { requirePermission } from "@/lib/auth";
 import { inventoryState, round2, round4, weightedRate } from "@/lib/accounting/inventory";
 import {
   inventoryAdjustmentPosting,
@@ -15,16 +16,17 @@ import {
   purchaseReceiptPosting,
   type PostingLine,
 } from "@/lib/accounting/posting";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
   itemCode: z.string().trim().optional().default(""),
   itemName: z.string().trim().min(2),
   itemType: z.enum(["STOCK", "SERVICE", "NON_STOCK"]).default("STOCK"),
-  revenueAccount: z.string().trim().optional().default("ACC-4200"),
-  costAccount: z.string().trim().optional().default("ACC-5100"),
+  revenueAccount: z.string().trim().min(1),
+  costAccount: z.string().trim().min(1),
   defaultRate: z.coerce.number().finite().nonnegative().optional().default(0),
-  taxCode: z.string().trim().optional().default(""),
+  taxCode: z.string().trim().min(1),
   uom: z.string().trim().min(1).default("Each"),
   deferredRevenueMonths: z.coerce.number().int().min(0).max(120).optional().default(0),
 });
@@ -75,7 +77,24 @@ function nextItemCode(items: any[]) {
 }
 
 function approvedPurchaseOrderStatus(value: unknown) {
-  return ["APPROVED", "PART_RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
+  return ["APPROVED", "SENT", "PART_RECEIVED", "PARTIAL_RECEIVED", "RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
+}
+
+function publicPurchaseOrderStatus(value: unknown) {
+  const status = String(value || "DRAFT").toUpperCase();
+  if (status === "SENT") return "APPROVED";
+  if (status === "PARTIAL_RECEIVED") return "PART_RECEIVED";
+  if (status === "CANCELLED" || status === "CANCEL") return "CANCELLED";
+  return status || "DRAFT";
+}
+
+function stockItemType(value: unknown) {
+  const type = String(value || "").trim().toUpperCase();
+  return type === "GOOD" ? "STOCK" : type === "NON_INVENTORY" ? "NON_STOCK" : type;
+}
+
+function isStockItem(item: any) {
+  return stockItemType(item?.itemType || item?.type) === "STOCK";
 }
 
 function mergeReceiptLines(lines: Array<{ itemId: string; qty: number }>) {
@@ -139,6 +158,7 @@ async function compensateJournal(input: {
 
 export async function GET(request: Request) {
   try {
+    await requirePermission("stock.read");
     const scope = new URL(request.url).searchParams.get("scope") || "full";
     const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
     if (!backendConfigured) {
@@ -150,8 +170,8 @@ export async function GET(request: Request) {
       ]);
       const localItems = items.map((item) => {
         const rows = movements.filter((movement) => movement.itemId === item.id);
-        const qtyIn = rows.filter((row) => ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
-        const qtyOut = rows.filter((row) => ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
+        const qtyIn = rows.filter((row) => ["PURCHASE_IN", "PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(String(row.type))).reduce((sum, row) => sum + Number(row.quantity), 0);
+        const qtyOut = rows.filter((row) => ["SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(String(row.type))).reduce((sum, row) => sum + Number(row.quantity), 0);
         const stockValue = rows.reduce((sum, row) => sum + (Number(row.totalCost || 0) || Number(row.quantity) * Number(row.unitCost || 0)), 0);
         return {
           itemId: item.id,
@@ -178,19 +198,20 @@ export async function GET(request: Request) {
           movementDate: movement.createdAt.toISOString(),
           itemId: movement.itemId,
           projectId: movement.projectId || "",
-          movementType: movement.type,
-          qtyIn: ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
-          qtyOut: ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
+          movementType: movement.referenceType || movement.type,
+          qtyIn: ["PURCHASE_IN", "PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
+          qtyOut: ["SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
           unitCost: Number(movement.unitCost || 0),
           value: Number(movement.totalCost || 0),
           sourceDocumentId: movement.referenceId || "",
+          journalId: movement.journalId || "",
         })),
         purchaseOrders: purchaseOrders.map((order) => ({
           poId: order.id,
           poNumber: order.code,
           supplierId: order.supplierId,
           projectId: order.projectId || "",
-          status: order.status,
+          status: publicPurchaseOrderStatus(order.status),
           totalAmount: Number(order.total),
         })),
         poLines: poLines.map((line) => ({
@@ -247,7 +268,8 @@ export async function GET(request: Request) {
       nextItemCode: nextItemCode(items.rows),
     });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Stock read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Stock read failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
 
@@ -256,11 +278,12 @@ async function createPurchaseReceipt(raw: unknown) {
   const lines = mergeReceiptLines(record.lines);
   await ensureAccountingInfrastructure();
 
-  const [poResult, poLinesResult, itemsResult, movementsResult] = await Promise.all([
+  const [poResult, poLinesResult, itemsResult, movementsResult, defaults] = await Promise.all([
     findRecords<any>("PurchaseOrders", { poId: record.sourceDocumentId }, 1),
     findRecords<any>("POLines", { poId: record.sourceDocumentId }, 500),
     listTable<any>("Items", 500, 0),
     listTable<any>("StockMovements", 500, 0),
+    loadConfiguredPostingAccounts(),
   ]);
 
   const po = poResult.rows[0];
@@ -269,7 +292,7 @@ async function createPurchaseReceipt(raw: unknown) {
   if (record.projectId && String(po.projectId || "") !== record.projectId) throw new Error("Purchase Receipt project does not match the Purchase Order");
 
   const itemMap = new Map(itemsResult.rows.map((item: any) => [String(item.itemId || ""), item]));
-  const receiptNumber = `PR-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const receiptNumber = documentSeriesId("PR");
   const movementDate = normalizeAccountingDate(record.movementDate);
   const movementsToCreate: any[] = [];
   const valuations: any[] = [];
@@ -279,7 +302,7 @@ async function createPurchaseReceipt(raw: unknown) {
     const line = lines[index];
     const item = itemMap.get(line.itemId);
     if (!item) throw new Error(`Item does not exist: ${line.itemId}`);
-    if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error(`Purchase Receipt can only receive STOCK items: ${item.itemCode || line.itemId}`);
+    if (!isStockItem(item)) throw new Error(`Purchase Receipt can only receive STOCK items: ${item.itemCode || line.itemId}`);
 
     const matchingPoLines = poLinesResult.rows.filter((poLine: any) => String(poLine.itemId || "") === line.itemId);
     if (!matchingPoLines.length) throw new Error(`Purchase Order item is not linked to Item Master: ${item.itemCode || line.itemId}`);
@@ -331,6 +354,8 @@ async function createPurchaseReceipt(raw: unknown) {
     inventoryValue,
     supplierId: po.supplierId,
     projectId: record.projectId || po.projectId || "",
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    stockReceivedButNotBilledAccountId: defaults.stockReceivedButNotBilledAccount,
   });
   const journal = await postJournal({
     postingDate: movementDate,
@@ -352,7 +377,7 @@ async function createPurchaseReceipt(raw: unknown) {
     const poItemIds = [...new Set(poLinesResult.rows.map((line: any) => String(line.itemId || "")).filter(Boolean))];
     const allFullyReceived = poItemIds.every((itemId) => {
       const item = itemMap.get(itemId);
-      if (String(item?.itemType || "").toUpperCase() !== "STOCK") return true;
+      if (!isStockItem(item)) return true;
       const ordered = poLinesResult.rows.filter((line: any) => String(line.itemId || "") === itemId).reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
       const nowReceived = receiptQty([...movementsResult.rows, ...rowsWithJournal], record.sourceDocumentId, itemId);
       return nowReceived + 0.0001 >= ordered;
@@ -388,7 +413,10 @@ async function createPurchaseReceipt(raw: unknown) {
 async function createPhysicalMovement(raw: unknown) {
   const record = movementSchema.parse(raw || {});
   await ensureAccountingInfrastructure();
-  const itemResult = await findRecords<any>("Items", { itemId: record.itemId }, 1);
+  const [itemResult, defaults] = await Promise.all([
+    findRecords<any>("Items", { itemId: record.itemId }, 1),
+    loadConfiguredPostingAccounts(),
+  ]);
   const item = itemResult.rows[0];
   if (!item) throw new Error("Item does not exist");
   if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Stock movements are only allowed for STOCK items");
@@ -404,17 +432,17 @@ async function createPhysicalMovement(raw: unknown) {
 
   const effectiveUnitCost = record.movementType === "ADJUSTMENT_IN" ? Number(record.unitCost || 0) : current.rate;
   if (record.movementType === "ADJUSTMENT_IN" && !(effectiveUnitCost > 0)) throw new Error("Adjustment In requires a positive Unit Cost");
-  const movementId = `MOV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const movementId = documentSeriesId("Movement");
   const movementDate = normalizeAccountingDate(record.movementDate);
   const value = round2(record.qty * effectiveUnitCost);
-  const costAccountId = String(item.costAccount || "ACC-5100");
+  const costAccountId = String(item.costAccount || defaults.defaultCostOfGoodsSoldAccount);
 
   let glLines: PostingLine[];
   if (["PROJECT_ISSUE", "RETURN_OUT"].includes(record.movementType)) {
-    glLines = inventoryIssuePosting({ amount: value, costAccountId, projectId: record.projectId, description: record.movementType === "PROJECT_ISSUE" ? "Project material issue" : "Inventory return out" });
+    glLines = inventoryIssuePosting({ amount: value, costAccountId, projectId: record.projectId, description: record.movementType === "PROJECT_ISSUE" ? "Project material issue" : "Inventory return out", inventoryAccountId: defaults.defaultInventoryAccount });
   } else if (record.movementType === "RETURN_IN") {
     glLines = [
-      { accountId: "ACC-1150", debit: value, projectId: record.projectId, description: "Inventory returned in" },
+      { accountId: defaults.defaultInventoryAccount, debit: value, projectId: record.projectId, description: "Inventory returned in" },
       { accountId: costAccountId, credit: value, projectId: record.projectId, description: "Reverse prior inventory cost" },
     ];
   } else {
@@ -423,6 +451,9 @@ async function createPhysicalMovement(raw: unknown) {
       projectId: record.projectId,
       type: record.movementType,
       costAccountId,
+      inventoryAccountId: defaults.defaultInventoryAccount,
+      stockAdjustmentAccountId: defaults.stockAdjustmentAccount,
+      expensesIncludedInValuationAccountId: defaults.expensesIncludedInValuationAccount,
     });
   }
 
@@ -467,7 +498,11 @@ async function createPhysicalMovement(raw: unknown) {
 async function createValueAdjustment(raw: unknown) {
   const record = valueAdjustmentSchema.parse(raw || {});
   await ensureAccountingInfrastructure();
-  const item = (await findRecords<any>("Items", { itemId: record.itemId }, 1)).rows[0];
+  const [itemResult, defaults] = await Promise.all([
+    findRecords<any>("Items", { itemId: record.itemId }, 1),
+    loadConfiguredPostingAccounts(),
+  ]);
+  const item = itemResult.rows[0];
   if (!item) throw new Error("Item does not exist");
   if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Inventory value adjustments are only allowed for STOCK items");
   const movements = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
@@ -486,9 +521,17 @@ async function createValueAdjustment(raw: unknown) {
     if (record.adjustmentType === "REVALUATION" && Math.abs(delta) < 0.005) throw new Error("Revaluation does not change inventory value");
   }
 
-  const movementId = `VAL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const movementId = documentSeriesId("Value Adjustment");
   const movementDate = normalizeAccountingDate(record.movementDate);
-  const glLines = inventoryAdjustmentPosting({ amountDelta: delta, projectId: record.projectId, type: record.adjustmentType, costAccountId: String(item.costAccount || "ACC-5100") });
+  const glLines = inventoryAdjustmentPosting({
+    amountDelta: delta,
+    projectId: record.projectId,
+    type: record.adjustmentType,
+    costAccountId: String(item.costAccount || defaults.defaultCostOfGoodsSoldAccount),
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    stockAdjustmentAccountId: defaults.stockAdjustmentAccount,
+    expensesIncludedInValuationAccountId: defaults.expensesIncludedInValuationAccount,
+  });
   const journal = await postJournal({
     postingDate: movementDate,
     documentType: `INVENTORY_${record.adjustmentType}`,

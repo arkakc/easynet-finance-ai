@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getCurrentUser, hasAnyPermission } from "@/lib/auth";
 import { env } from "@/lib/env";
 import {
   appendRecord,
@@ -23,6 +23,7 @@ import {
   deferredRevenuePolicy,
   purchasePriceVarianceTolerancePct,
 } from "@/lib/accounting/infrastructure";
+import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
 import {
   addMonthsMonthEnd,
   inventoryState,
@@ -31,6 +32,7 @@ import {
   splitEvenly,
   weightedRate,
 } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -106,7 +108,7 @@ function requireSecret(secret?: string) {
 }
 
 function id(prefix: string) {
-  return `${prefix}-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  return documentSeriesId(prefix);
 }
 
 function totals(lines: z.infer<typeof lineSchema>[], gstRate: number) {
@@ -184,6 +186,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
   }
 
   if (type === "invoice") {
+    const defaults = await loadConfiguredPostingAccounts();
     const invoiceId = id("INV");
     const invoiceNumber = parsed.documentNumber || invoiceId;
     await appendRecord("Invoices", {
@@ -197,12 +200,13 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
       return {
         invoiceLineId: `${invoiceId}-${String(line.lineNo).padStart(3, "0")}`,
         invoiceId, ...line,
-        revenueAccountId: String(item?.revenueAccount || parsed.accountId || "ACC-4100"),
+        revenueAccountId: String(item?.revenueAccount || parsed.accountId || defaults.defaultIncomeAccount),
       };
     }), "transaction-ui");
     return { type, recordId: invoiceId, documentNumber: invoiceNumber, totals: t, status: "DRAFT" };
   }
 
+  const defaults = await loadConfiguredPostingAccounts();
   const billId = id("BILL");
   const billNumber = parsed.documentNumber || billId;
   await appendRecord("SupplierBills", {
@@ -216,7 +220,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
     return {
       billLineId: `${billId}-${String(line.lineNo).padStart(3, "0")}`,
       billId, ...line,
-      costAccountId: String(item?.costAccount || parsed.accountId || "ACC-5100"),
+      costAccountId: String(item?.costAccount || parsed.accountId || defaults.defaultCostOfGoodsSoldAccount),
     };
   }), "transaction-ui");
   return { type, recordId: billId, documentNumber: billNumber, totals: t, status: "DRAFT" };
@@ -271,11 +275,11 @@ async function synchronizePaymentAllocation(row: any) {
   }
 }
 
-async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items: Map<string, any>, policy: Record<string, number>) {
+async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items: Map<string, any>, policy: Record<string, number>, defaultIncomeAccount: string) {
   const schedules: any[] = [];
   for (const line of invoiceLines) {
     const item = items.get(String(line.itemId || ""));
-    const accountId = String(line.revenueAccountId || item?.revenueAccount || "ACC-4100");
+    const accountId = String(line.revenueAccountId || item?.revenueAccount || defaultIncomeAccount);
     const periods = Number(policy[accountId] || 0);
     if (!(periods > 1) || itemType(item) === "STOCK") continue;
     const amounts = splitEvenly(Number(line.netAmount || 0), periods);
@@ -306,19 +310,25 @@ async function postSalesInvoice(row: any) {
   }
 
   await ensureAccountingInfrastructure();
-  const [lineResult, itemResult, movementResult, policy] = await Promise.all([
+  const [lineResult, itemResult, movementResult, policy, defaults] = await Promise.all([
     findRecords<any>("InvoiceLines", { invoiceId: row.invoiceId }, 500),
     listTable<any>("Items", 500, 0),
     listTable<any>("StockMovements", 500, 0),
     deferredRevenuePolicy(),
+    loadConfiguredPostingAccounts(),
   ]);
   if (!lineResult.rows.length) throw new Error("Invoice has no lines");
   const items = new Map(itemResult.rows.map((item: any) => [String(item.itemId || ""), item]));
+  const sourceDocumentId = String(row.sourceDocumentId || "");
+  const deliveryIssueRows = sourceDocumentId
+    ? movementResult.rows.filter((movement: any) => String(movement.sourceDocumentId || "") === sourceDocumentId && String(movement.movementType || "") === "SALES_DELIVERY")
+    : [];
+  const stockAlreadyIssuedByDeliveryNote = deliveryIssueRows.length > 0;
 
   const requestedByItem = new Map<string, number>();
   for (const line of lineResult.rows) {
     const item = items.get(String(line.itemId || ""));
-    if (itemType(item) === "STOCK") {
+    if (!stockAlreadyIssuedByDeliveryNote && itemType(item) === "STOCK") {
       const itemId = String(line.itemId || "");
       requestedByItem.set(itemId, (requestedByItem.get(itemId) || 0) + Number(line.qty || 0));
     }
@@ -333,9 +343,9 @@ async function postSalesInvoice(row: any) {
     stateByItem.set(itemId, state);
   }
 
-  const existingIssues = movementResult.rows.filter((movement: any) => String(movement.sourceDocumentId || "") === String(row.invoiceId) && String(movement.movementType || "") === "SALES_ISSUE");
-  const stockLines = lineResult.rows.filter((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK");
-  if (existingIssues.length && existingIssues.length !== stockLines.length) throw new Error("Partial stock issue already exists for this Sales Invoice; manual review required");
+  const existingIssues = stockAlreadyIssuedByDeliveryNote ? deliveryIssueRows : movementResult.rows.filter((movement: any) => String(movement.sourceDocumentId || "") === String(row.invoiceId) && String(movement.movementType || "") === "SALES_ISSUE");
+  const stockLines = stockAlreadyIssuedByDeliveryNote ? [] : lineResult.rows.filter((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK");
+  if (!stockAlreadyIssuedByDeliveryNote && existingIssues.length && existingIssues.length !== stockLines.length) throw new Error("Partial stock issue already exists for this Sales Invoice; manual review required");
 
   const issueRows = stockLines.map((line: any, index: number) => {
     const itemId = String(line.itemId || "");
@@ -355,7 +365,7 @@ async function postSalesInvoice(row: any) {
     };
   });
 
-  const schedules = await deferredSchedulesForInvoice(row, lineResult.rows, items, policy);
+  const schedules = await deferredSchedulesForInvoice(row, lineResult.rows, items, policy, defaults.defaultIncomeAccount);
   const existingSchedules = schedules.length ? await findRecords<any>("PaymentSchedules", { sourceId: row.invoiceId, sourceType: "DEFERRED_REVENUE" }, 500) : { rows: [] as any[] };
   const existingScheduleIds = new Set(existingSchedules.rows.map((schedule: any) => String(schedule.scheduleId || "")));
   const schedulesToCreate = schedules.filter((schedule) => !existingScheduleIds.has(schedule.scheduleId));
@@ -370,7 +380,7 @@ async function postSalesInvoice(row: any) {
 
     const revenueLines = lineResult.rows.map((line: any) => {
       const item = items.get(String(line.itemId || ""));
-      const accountId = String(line.revenueAccountId || item?.revenueAccount || "ACC-4100");
+      const accountId = String(line.revenueAccountId || item?.revenueAccount || defaults.defaultIncomeAccount);
       return {
         accountId,
         amount: Number(line.netAmount || 0),
@@ -382,7 +392,7 @@ async function postSalesInvoice(row: any) {
       const item = items.get(String(line.itemId || ""));
       const state = stateByItem.get(String(line.itemId || ""))!;
       return {
-        accountId: String(item?.costAccount || "ACC-5100"),
+        accountId: String(item?.costAccount || defaults.defaultCostOfGoodsSoldAccount),
         amount: round2(Number(line.qty || 0) * state.rate),
         description: String(line.description || "Cost of goods sold"),
       };
@@ -394,11 +404,14 @@ async function postSalesInvoice(row: any) {
       lines: salesInvoicePostingByLines({
         total: Number(row.totalAmount), gst: Number(row.gstAmount), customerId: row.customerId,
         projectId: row.projectId, revenueLines, cogsLines,
+        receivableAccountId: defaults.defaultReceivableAccount,
+        deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
+        inventoryAccountId: defaults.defaultInventoryAccount,
       }),
     });
 
     await updateRecord("Invoices", "invoiceId", row.invoiceId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-    return { recordType: "invoice", recordId: row.invoiceId, status: "POSTED", journalId: journal.journalId, stockLines: issueRows.length, deferredSchedules: schedules.length };
+    return { recordType: "invoice", recordId: row.invoiceId, status: "POSTED", journalId: journal.journalId, stockLines: stockAlreadyIssuedByDeliveryNote ? deliveryIssueRows.length : issueRows.length, stockSource: stockAlreadyIssuedByDeliveryNote ? "DELIVERY_NOTE" : "INVOICE", deferredSchedules: schedules.length };
   } catch (error) {
     if (createdIssues && issueRows.length) {
       const rollback = issueRows.map((issue: any, index: number) => ({
@@ -431,15 +444,17 @@ async function postSupplierBill(row: any) {
   }
 
   await ensureAccountingInfrastructure();
-  const [lineResult, itemResult, tolerance] = await Promise.all([
+  const [lineResult, itemResult, tolerance, defaults] = await Promise.all([
     findRecords<any>("SupplierBillLines", { billId: row.billId }, 500),
     listTable<any>("Items", 500, 0),
     purchasePriceVarianceTolerancePct(),
+    loadConfiguredPostingAccounts(),
   ]);
   if (!lineResult.rows.length) throw new Error("Supplier bill has no lines");
   const items = new Map(itemResult.rows.map((item: any) => [String(item.itemId || ""), item]));
 
-  if (!row.poId) {
+  const supplierBillPoId = String(row.poId || row.orderId || row.sourceDocumentId || "").trim();
+  if (!supplierBillPoId) {
     const stockLine = lineResult.rows.find((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK");
     if (stockLine) throw new Error("Stock Supplier Invoices require an approved Purchase Order and Purchase Receipt");
     const journal = await postJournal({
@@ -447,7 +462,8 @@ async function postSupplierBill(row: any) {
       documentNumber: row.billNumber, reference: `Supplier bill ${row.billNumber}`, projectId: row.projectId,
       lines: supplierBillPostingByLines({
         total: Number(row.totalAmount), gst: Number(row.gstAmount), supplierId: row.supplierId, projectId: row.projectId,
-        costLines: lineResult.rows.map((line: any) => ({ accountId: String(line.costAccountId || items.get(String(line.itemId || ""))?.costAccount || "ACC-5100"), amount: Number(line.netAmount || 0), description: String(line.description || "Supplier cost") })),
+        payableAccountId: defaults.defaultPayableAccount,
+        costLines: lineResult.rows.map((line: any) => ({ accountId: String(line.costAccountId || items.get(String(line.itemId || ""))?.costAccount || defaults.defaultCostOfGoodsSoldAccount), amount: Number(line.netAmount || 0), description: String(line.description || "Supplier cost") })),
       }),
     });
     await updateRecord("SupplierBills", "billId", row.billId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
@@ -455,10 +471,10 @@ async function postSupplierBill(row: any) {
   }
 
   const [poResult, poLinesResult, receiptResult, poBillsResult, allBillLines] = await Promise.all([
-    findRecords<any>("PurchaseOrders", { poId: row.poId }, 1),
-    findRecords<any>("POLines", { poId: row.poId }, 500),
-    findRecords<any>("StockMovements", { sourceDocumentId: row.poId }, 500),
-    findRecords<any>("SupplierBills", { poId: row.poId }, 500),
+    findRecords<any>("PurchaseOrders", { poId: supplierBillPoId }, 1),
+    findRecords<any>("POLines", { poId: supplierBillPoId }, 500),
+    findRecords<any>("StockMovements", { sourceDocumentId: supplierBillPoId }, 500),
+    findRecords<any>("SupplierBills", { poId: supplierBillPoId }, 500),
     listTable<any>("SupplierBillLines", 500, 0),
   ]);
   const po = poResult.rows[0];
@@ -510,13 +526,16 @@ async function postSupplierBill(row: any) {
     } else {
       const availableToBill = Math.max(0, orderedQty - priorBilled);
       if (currentQty > availableToBill + 0.0001) throw new Error(`Supplier Invoice quantity exceeds remaining PO quantity for ${item.itemCode || itemId}`);
-      serviceCostLines.push({ accountId: String(line.costAccountId || item.costAccount || "ACC-5200"), amount: Number(line.netAmount || 0), description: String(line.description || item.itemName || itemId) });
+      serviceCostLines.push({ accountId: String(line.costAccountId || item.costAccount || defaults.defaultCostOfGoodsSoldAccount), amount: Number(line.netAmount || 0), description: String(line.description || item.itemName || itemId) });
     }
   }
 
   const mixed = supplierBillPostingMixed({
     total: Number(row.totalAmount), gst: Number(row.gstAmount), supplierId: row.supplierId, projectId: row.projectId,
     serviceCostLines, stockLines,
+    payableAccountId: defaults.defaultPayableAccount,
+    stockReceivedButNotBilledAccountId: defaults.stockReceivedButNotBilledAccount,
+    purchasePriceVarianceAccountId: defaults.stockAdjustmentAccount,
   });
   const journal = await postJournal({
     postingDate: String(row.billDate), documentType: "SUPPLIER_BILL", documentId: row.billId,
@@ -532,7 +551,7 @@ async function postSupplierBill(row: any) {
     const totalOrdered = poLinesResult.rows.filter((candidate: any) => String(candidate.itemId || "") === itemId).reduce((sum: number, candidate: any) => sum + Number(candidate.qty || 0), 0);
     return Number(previouslyBilledByItem.get(itemId) || 0) + Number(currentBillQty.get(itemId) || 0) + 0.0001 >= totalOrdered;
   });
-  await updateRecord("PurchaseOrders", "poId", row.poId, { status: fullyBilled ? "BILLED" : "PART_BILLED" }, "finance-controller");
+  await updateRecord("PurchaseOrders", "poId", supplierBillPoId, { status: fullyBilled ? "BILLED" : "PART_BILLED" }, "finance-controller");
 
   return {
     recordType: "supplierBill", recordId: row.billId, status: "POSTED", journalId: journal.journalId,
@@ -565,9 +584,10 @@ async function postPayment(row: any) {
     }
   }
 
+  const defaults = await loadConfiguredPostingAccounts();
   const lines = receive
-    ? receiptPosting({ amount: Number(row.amount), customerId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance })
-    : supplierPaymentPosting({ amount: Number(row.amount), supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance });
+    ? receiptPosting({ amount: Number(row.amount), customerId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance, receivableAccountId: defaults.defaultReceivableAccount, deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount })
+    : supplierPaymentPosting({ amount: Number(row.amount), supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance, payableAccountId: defaults.defaultPayableAccount });
 
   const journal = await postJournal({
     postingDate: String(row.paymentDate), documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
@@ -601,13 +621,14 @@ async function allocateAdvance(raw: unknown) {
   if (Number(payment.amount || 0) > outstanding + 0.001) throw new Error("Full advance allocation exceeds document outstanding amount; split allocation requires a dedicated reconciliation entry");
 
   const amount = Number(payment.amount || 0);
+  const defaults = await loadConfiguredPostingAccounts();
   const allocationLines = customer
     ? [
-        { accountId: "ACC-2150", debit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Apply customer advance" },
-        { accountId: "ACC-1130", credit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Receivable from advance" },
+        { accountId: defaults.defaultDeferredRevenueAccount, debit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Apply customer advance" },
+        { accountId: defaults.defaultReceivableAccount, credit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Receivable from advance" },
       ]
     : [
-        { accountId: "ACC-2110", debit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Payable from advance" },
+        { accountId: defaults.defaultPayableAccount, debit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Payable from advance" },
         { accountId: "ACC-1160", credit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Apply supplier advance" },
       ];
 
@@ -661,13 +682,19 @@ async function postRecord(raw: unknown) {
 
 export async function GET() {
   try {
+    const user = await getCurrentUser();
+    if (!hasAnyPermission(user, ["sales.read", "purchase.read", "accounts.read"])) throw new Error(user ? "Forbidden" : "Unauthorized");
     const [quotes, purchaseOrders, invoices, supplierBills, payments, expenses] = await Promise.all([
       listTable("Quotes", 500, 0), listTable("PurchaseOrders", 500, 0), listTable("Invoices", 500, 0),
       listTable("SupplierBills", 500, 0), listTable("Payments", 500, 0), listTable("Expenses", 500, 0),
     ]);
     return NextResponse.json({ ok: true, quotes: quotes.rows, purchaseOrders: purchaseOrders.rows, invoices: invoices.rows, supplierBills: supplierBills.rows, payments: payments.rows, expenses: expenses.rows });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Transaction read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Transaction read failed";
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    );
   }
 }
 

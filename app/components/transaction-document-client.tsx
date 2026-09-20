@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import PrintButton from "@/app/components/print-button";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
@@ -12,6 +12,7 @@ import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
+import SalesOrderCycle from "@/app/components/sales-order-cycle";
 import SalesInvoiceCycle from "@/app/components/sales-invoice-cycle";
 import LazyDocumentSection from "@/app/components/lazy-document-section";
 
@@ -26,9 +27,9 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
 const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
-const VALID_TABS=new Set(["salesQuote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
+const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
 const VALID_MODES=new Set(["menu","create","list"]);
-const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
+const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesOrder:"Sales Order",deliveryNote:"Delivery Note / Stock Out",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
 const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED","CLOSED_PARTIAL"]);
 const QUOTE_ACTION_LIFECYCLE=new Set(["APPROVED","PART_INVOICED","CONVERTED","CLOSED_PARTIAL"]);
 
@@ -38,17 +39,32 @@ function href(type:string,id:string){return `/transactions/${type==="supplierQuo
 type RefLink={label:string;type:string;id:string;number:string};
 type ReturnContext={returnModule?:string;returnTab?:string;returnMode?:string};
 
-function named(id:unknown,map:Map<string,string>){const key=String(id||"").trim();if(!key)return"—";const name=map.get(key);return name&&name!==key?`${name} (${key})`:key;}
+function named(id:unknown,map:Map<string,string>){const key=String(id||"").trim();if(!key)return"—";return map.get(key)||key;}
+function refId(value: unknown) {
+  return String(value || "").trim();
+}
+function displayWithCode(name: unknown, code: unknown, fallback: unknown) {
+  const label = refId(name) || refId(fallback);
+  const displayCode = refId(code) || refId(fallback);
+  return label && displayCode && label !== displayCode ? `${label} (${displayCode})` : label || displayCode;
+}
+function masterHref(type: "customer" | "supplier" | "project", id: unknown) {
+  const key = refId(id);
+  if (!key) return "";
+  if (type === "customer") return `/customers/${encodeURIComponent(key)}`;
+  if (type === "supplier") return `/suppliers/${encodeURIComponent(key)}`;
+  return `/projects/master/${encodeURIComponent(key)}`;
+}
 function sourceMarkerFromPayment(record:any,prefix:"PO"|"SQ"){const match=String(record.reference||"").match(new RegExp(`^${prefix}:([^|]+)\\|`));return match?.[1]||"";}
 function previousLink(type:string,record:any):RefLink|null{
-  if(type==="invoice"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);const credit=String(record.invoiceNumber||"").toUpperCase().startsWith("CN-");return credit?{label:"Original Sales Invoice",type:"invoice",id,number:id}:{label:"Source Sales Quotation",type:"quote",id,number:id};}
+  if(type==="invoice"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);const credit=String(record.invoiceNumber||"").toUpperCase().startsWith("CN-");const salesOrder=id.toUpperCase().startsWith("SO-");return credit?{label:"Original Sales Invoice",type:"invoice",id,number:id}:{label:salesOrder?"Source Sales Order":"Source Sales Quotation",type:"quote",id,number:id};}
   if(type==="supplierBill"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Source Purchase Order",type:"purchaseOrder",id,number:id};}
   if(type==="purchaseOrder"&&record.sourceDocumentId){const id=String(record.sourceDocumentId);return{label:"Source Supplier Quotation",type:"supplierQuote",id,number:id};}
   if(type==="payment"&&record.againstDocumentId){const id=String(record.againstDocumentId);const against=String(record.againstDocumentType||"").toLowerCase();if(against.includes("sales invoice")||against.includes("sales credit note")||String(record.partyType||"")==="Customer")return{label:"Against Sales Document",type:"invoice",id,number:id};if(against.includes("supplier bill")||against.includes("supplier invoice"))return{label:"Against Supplier Invoice",type:"supplierBill",id,number:id};return{label:"Previous Document",type:"purchaseOrder",id,number:id};}
   if(type==="payment"){const sourceId=String(record.sourceDocumentId||"").trim();if(String(record.partyType||"")==="Supplier"){const poId=sourceMarkerFromPayment(record,"PO")||sourceId;if(poId)return{label:"Advance Against Purchase Order",type:"purchaseOrder",id:poId,number:poId};}if(String(record.partyType||"")==="Customer"){const quoteId=sourceMarkerFromPayment(record,"SQ")||sourceId;if(quoteId)return{label:"Advance Against Sales Quotation",type:"quote",id:quoteId,number:quoteId};}}
   return null;
 }
-function inferredSection(type:string,number:string,record:any){if(type==="quote")return{module:"sales",tab:"salesQuote"};if(type==="invoice")return{module:"sales",tab:"salesInvoice"};if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))return{module:"purchase",tab:"supplierQuote"};if(type==="purchaseOrder")return{module:"purchase",tab:"purchaseOrder"};if(type==="supplierBill")return{module:"purchase",tab:"supplierInvoice"};if(type==="payment"&&String(record.partyType||"")==="Customer")return{module:"sales",tab:"salesPayment"};if(type==="payment")return{module:"purchase",tab:"purchasePayment"};if(type==="expense")return{module:"expense",tab:"expense"};return{module:"sales",tab:"salesQuote"};}
+function inferredSection(type:string,number:string,record:any){if(type==="quote")return{module:"sales",tab:number.toUpperCase().startsWith("SO-")?"salesOrder":"salesQuote"};if(type==="invoice")return{module:"sales",tab:"salesInvoice"};if(type==="purchaseOrder"&&number.startsWith("SUPQ-"))return{module:"purchase",tab:"supplierQuote"};if(type==="purchaseOrder")return{module:"purchase",tab:"purchaseOrder"};if(type==="supplierBill")return{module:"purchase",tab:"supplierInvoice"};if(type==="payment"&&String(record.partyType||"")==="Customer")return{module:"sales",tab:"salesPayment"};if(type==="payment")return{module:"purchase",tab:"purchasePayment"};if(type==="expense")return{module:"expense",tab:"expense"};return{module:"sales",tab:"salesQuote"};}
 
 export default function TransactionDocumentClient({type,id}:{type:string;id:string}){
   const config=CONFIG[type];
@@ -59,6 +75,18 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[error,setError]=useState("");
   const[returnContext,setReturnContext]=useState<ReturnContext>({});
   const[deleteBusy,setDeleteBusy]=useState(false);
+
+  const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
+    if (showLoading) setLoading(true);
+    setError("");
+    const response = await fetch(`/api/erp/transaction-document?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`,{cache:"no-store",signal});
+    const body = await response.json();
+    if(!response.ok||!body.ok)throw new Error(body.error||"Document load failed");
+    setRecord(body.record||null);
+    setLines(body.lines||[]);
+    setReferences(body.references||{});
+    setLoading(false);
+  }, [type, id]);
 
   async function handleDeleteDocument(){
     if(deleteBusy)return;
@@ -87,29 +115,26 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     setReturnContext({returnModule:params.get("returnModule")||undefined,returnTab:params.get("returnTab")||undefined,returnMode:params.get("returnMode")||undefined});
     const controller=new AbortController();
     const frame=window.requestAnimationFrame(()=>{void(async()=>{
-      try{
-        const response=await fetch(`/api/erp/transaction-document?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`,{cache:"no-store",signal:controller.signal});
-        const body=await response.json();
-        if(!response.ok||!body.ok)throw new Error(body.error||"Document load failed");
-        setRecord(body.record||null);setLines(body.lines||[]);setReferences(body.references||{});
-      }catch(err){if(!controller.signal.aborted)setError(err instanceof Error?err.message:"Document load failed");}
-      finally{if(!controller.signal.aborted)setLoading(false);}
+      try{await loadDocument(controller.signal);}
+      catch(err){if(!controller.signal.aborted){setError(err instanceof Error?err.message:"Document load failed");setLoading(false);}}
     })();});
     return()=>{controller.abort();window.cancelAnimationFrame(frame);};
-  },[type,id]);
+  },[type,id,loadDocument]);
 
-  const customerMap=useMemo(()=>new Map<string, string>((references.customers||[]).map((row:any)=>[String(row.customerId||""),String(row.customerName||row.customerId||"")])),[references.customers]);
-  const supplierMap=useMemo(()=>new Map<string, string>((references.suppliers||[]).map((row:any)=>[String(row.supplierId||""),String(row.supplierName||row.supplierId||"")])),[references.suppliers]);
-  const projectMap=useMemo(()=>new Map<string, string>((references.projects||[]).map((row:any)=>[String(row.projectId||""),String(row.projectName||row.projectId||"")])),[references.projects]);
+  const customerMap=useMemo(()=>{const map=new Map<string,string>();for(const row of references.customers||[]){const label=displayWithCode(row.customerName||row.name,row.customerId||row.customerCode,row.customerId||row.id);for(const key of [row.customerId,row.internalCustomerId,row.customerCode,row.id].map(refId).filter(Boolean))map.set(key,label);}return map;},[references.customers]);
+  const supplierMap=useMemo(()=>{const map=new Map<string,string>();for(const row of references.suppliers||[]){const label=displayWithCode(row.supplierName||row.name,row.supplierId||row.supplierCode,row.supplierId||row.id);for(const key of [row.supplierId,row.internalSupplierId,row.supplierCode,row.id].map(refId).filter(Boolean))map.set(key,label);}return map;},[references.suppliers]);
+  const projectMap=useMemo(()=>{const map=new Map<string,string>();for(const row of references.projects||[]){const label=displayWithCode(row.projectName||row.name,row.projectId||row.projectCode,row.projectId||row.id);for(const key of [row.projectId,row.internalProjectId,row.projectCode,row.id].map(refId).filter(Boolean))map.set(key,label);}return map;},[references.projects]);
   const accountMap=useMemo(()=>new Map<string, string>((references.accounts||[]).map((row:any)=>[String(row.accountId||""),`${String(row.accountName||row.accountId||"")} · ${String(row.accountCode||"")}`])),[references.accounts]);
   const itemMap=useMemo(()=>new Map<string, any>((references.items||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item])),[references.items]);
 
   const number=record?String(record[config?.numberField||""]||id):id;
+  const isSalesOrder=type==="quote"&&number.toUpperCase().startsWith("SO-");
   const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
   const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
   const rowStatus=String(record?.status||"DRAFT").toUpperCase();
   const publicStatus=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)?"APPROVED":rowStatus;
   let title=config?.title||"Transaction Document";
+  if(isSalesOrder)title="Sales Order";
   if(isSupplierQuotation)title="Supplier Quotation";
   if(isCreditNote)title="Sales Credit Note / Return";
   if(type==="payment"&&record){if(String(record.partyType)==="Customer")title=String(record.paymentType||"").toUpperCase()==="PAY"?"Customer Refund Payment":"Sales Payment Entry / Receipt";else if(String(record.partyType)==="Supplier")title="Purchase Payment Entry / Receipt";}
@@ -124,9 +149,39 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   if(!config)return <section className="panel warning-panel"><strong>Unsupported transaction document type.</strong></section>;
 
   const previous=record?previousLink(type,record):null;
-  const hidden=new Set([type==="quote"?"quoteId":type==="invoice"?"invoiceId":type==="purchaseOrder"?"poId":type==="supplierBill"?"billId":type==="payment"?"paymentId":"expenseId",config.numberField,"createdAt","updatedAt","sourceDocumentId","againstDocumentId","againstDocumentType"]);
+  const hidden=new Set([
+    type==="quote"?"quoteId":type==="invoice"?"invoiceId":type==="purchaseOrder"?"poId":type==="supplierBill"?"billId":type==="payment"?"paymentId":"expenseId",
+    config.numberField,
+    "createdAt",
+    "updatedAt",
+    "sourceDocumentId",
+    "againstDocumentId",
+    "againstDocumentType",
+    "internalCustomerId",
+    "customerName",
+    "customerCode",
+    "internalSupplierId",
+    "supplierName",
+    "supplierCode",
+    "internalProjectId",
+    "projectName",
+    "projectCode",
+  ]);
   const fields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
-  const fieldDisplay=(key:string,value:unknown)=>{if(key==="status"&&type==="invoice"&&!isCreditNote)return publicStatus;if(key==="customerId")return named(value,customerMap);if(key==="supplierId")return named(value,supplierMap);if(key==="partyId")return String(record?.partyType)==="Customer"?named(value,customerMap):String(record?.partyType)==="Supplier"?named(value,supplierMap):String(value||"");if(key==="projectId")return named(value,projectMap);if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);return display(key,value);};
+  const linkedValue=(hrefValue:string,label:string)=>hrefValue?<Link prefetch={false} href={hrefValue}>{label}</Link>:label;
+  const fieldDisplay=(key:string,value:unknown)=>{
+    if(key==="status"&&type==="invoice"&&!isCreditNote)return publicStatus;
+    if(key==="customerId")return linkedValue(masterHref("customer",value),named(value,customerMap));
+    if(key==="supplierId")return linkedValue(masterHref("supplier",value),named(value,supplierMap));
+    if(key==="partyId"){
+      if(String(record?.partyType)==="Customer")return linkedValue(masterHref("customer",value),named(value,customerMap));
+      if(String(record?.partyType)==="Supplier")return linkedValue(masterHref("supplier",value),named(value,supplierMap));
+      return String(value||"");
+    }
+    if(key==="projectId")return linkedValue(masterHref("project",value),named(value,projectMap));
+    if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);
+    return display(key,value);
+  };
 
   const canEdit=Boolean(record)&&rowStatus==="DRAFT"&&!String(record.journalId||"").trim()&&!isCreditNote;
   const realPo=Boolean(record)&&type==="purchaseOrder"&&!isSupplierQuotation;
@@ -214,8 +269,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     </section>
 
     {record&&<>
-      <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={rowStatus}/>
-      {type==="quote"&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection title="Sales Quotation Fulfilment" description="Stock readiness, linked invoices, backorders, procurement and customer advances are loaded only when you request them." buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Invoice":"Open Sales Fulfilment Actions"}><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
+      <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={rowStatus} onApproved={() => loadDocument(undefined, true)}/>
+      {type==="quote"&&!isSalesOrder&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection title="Sales Quotation Fulfilment" description="Sales order readiness, stock checks, linked documents and customer advances are loaded only when you request them." buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Order":"Open Sales Fulfilment Actions"}><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
+      {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
       {salesInvoiceSettlementReady&&<section className="conversion-box no-print" style={{marginTop:16}}><div className="form-title-row"><div><strong>Sales Invoice Settlement</strong><p className="small">Invoice is approved and accounting-posted. Create or receive the customer payment when needed.</p></div><span className="auto-badge">APPROVED</span></div><div className="button-row" style={{marginTop:12}}><Link prefetch={false} className="button-link" href={`/transactions?module=sales&tab=salesPayment&mode=create&sourceInvoice=${encodeURIComponent(id)}`}>Create / Receive Customer Payment</Link></div></section>}
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
       {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}

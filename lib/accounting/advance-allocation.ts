@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { appendRecord, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { postJournal } from "@/lib/accounting/posting";
 import { round2 } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 export type AdvancePartyType = "Customer" | "Supplier";
 export type AdvanceDocumentType = "Sales Invoice" | "Supplier Invoice";
@@ -125,7 +125,7 @@ export async function allocateAdvancePartial(input: {
   if (amount > summary.remainingAmount + 0.001) throw new Error(`Allocation exceeds unallocated advance balance K${summary.remainingAmount.toFixed(2)}`);
   if (amount > outstanding + 0.001) throw new Error(`Allocation exceeds document outstanding balance K${outstanding.toFixed(2)}`);
 
-  const allocationId = `ALLOC-${randomUUID().slice(0, 12).toUpperCase()}`;
+  const allocationId = documentSeriesId("Allocation");
   const allocationDate = String(input.allocationDate || localDate());
   const lines = customer
     ? [

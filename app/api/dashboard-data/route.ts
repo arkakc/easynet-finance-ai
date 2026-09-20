@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { backendConfigStatus, backendHealthAll, listReportingTable } from "@/lib/backend/apps-script";
+import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
+import { pngToday } from "@/lib/accounting/period-close";
 import { prisma } from "@/src/lib/prisma";
 
 type DashboardKPI = { key: string; value: string | number; updatedAt: string };
@@ -8,24 +10,22 @@ type DashboardKPI = { key: string; value: string | number; updatedAt: string };
 const numberValue = (value: unknown) => Number(value || 0);
 
 async function localDashboardData() {
-  const [accounts, invoices, bills, expenses, purchaseOrders] = await Promise.all([
-    prisma.bankAccount.findMany({ include: { transactions: true } }),
-    prisma.invoice.findMany({ where: { status: { notIn: ["CANCELLED", "VOID"] } } }),
-    prisma.supplierBill.findMany({ where: { status: { not: "CANCELLED" } } }),
-    prisma.expense.findMany({ where: { glPosted: true } }),
+  const [statements, purchaseOrders, draftApprovals, activeProjects, sourcePending] = await Promise.all([
+    buildFinancialStatements({ asOf: pngToday() }),
     prisma.purchaseOrder.findMany({ where: { status: { notIn: ["BILLED", "CLOSED", "Cancelled"] } } }),
+    prisma.approvalRequest.count({ where: { status: { in: ["PENDING", "IN_REVIEW"] } } }),
+    prisma.project.count({ where: { status: "ACTIVE" } }),
+    prisma.document.count({ where: { fileUrl: null, status: { not: "ARCHIVED" } } }),
   ]);
 
-  const cashBank = accounts.reduce(
-    (total, account) => total + numberValue(account.openingBalance) + account.transactions.reduce((sum, transaction) => sum + numberValue(transaction.amount), 0),
-    0,
-  );
-  const accountsReceivable = invoices.reduce((total, invoice) => total + numberValue(invoice.outstanding), 0);
-  const accountsPayable = bills.reduce((total, bill) => total + numberValue(bill.outstanding), 0);
-  const gstPayable = invoices.reduce((total, invoice) => total + numberValue(invoice.taxTotal), 0)
-    - bills.reduce((total, bill) => total + numberValue(bill.taxTotal), 0);
-  const revenue = invoices.reduce((total, invoice) => total + numberValue(invoice.total), 0);
-  const expensesTotal = expenses.reduce((total, expense) => total + numberValue(expense.total), 0);
+  const cashBank = statements.balanceSheet.assets.filter((row) => /^(111|112)/.test(row.code)).reduce((sum, row) => sum + row.amount, 0);
+  const accountsReceivable = statements.controls.receivables.glBalance;
+  const accountsPayable = statements.controls.payables.glBalance;
+  const gstLiability = statements.balanceSheet.liabilities.filter((row) => /GST/i.test(row.name)).reduce((sum, row) => sum + row.amount, 0);
+  const gstAsset = statements.balanceSheet.assets.filter((row) => /GST/i.test(row.name)).reduce((sum, row) => sum + row.amount, 0);
+  const gstPayable = gstLiability - gstAsset;
+  const revenue = statements.profitAndLoss.totals.revenue;
+  const expensesTotal = statements.profitAndLoss.totals.expenses;
   const poCommitments = purchaseOrders.reduce((total, order) => total + numberValue(order.total) - numberValue(order.amountReceived), 0);
   const updatedAt = new Date().toISOString();
 
@@ -39,12 +39,19 @@ async function localDashboardData() {
       { key: "expensesPosted", value: expensesTotal, updatedAt },
       { key: "netProfitPosted", value: revenue - expensesTotal, updatedAt },
       { key: "poCommitments", value: poCommitments, updatedAt },
+      { key: "draftApprovals", value: draftApprovals, updatedAt },
+      { key: "activeProjects", value: activeProjects, updatedAt },
+      { key: "sourcePending", value: sourcePending, updatedAt },
+      { key: "arSubledger", value: statements.controls.receivables.subledgerBalance, updatedAt },
+      { key: "apSubledger", value: statements.controls.payables.subledgerBalance, updatedAt },
+      { key: "arReconciliationDifference", value: statements.controls.receivables.difference, updatedAt },
+      { key: "apReconciliationDifference", value: statements.controls.payables.difference, updatedAt },
       { key: "gstStatus", value: "LOCAL", updatedAt },
     ] satisfies DashboardKPI[],
     services: {
-      core: { ok: true, version: "local" },
-      reporting: { ok: true, version: "local" },
-      document: { ok: true, version: "local" },
+      core: { ok: true, version: "sqlite-prisma" },
+      reporting: { ok: true, version: "sqlite-prisma" },
+      document: { ok: true, version: "sqlite-prisma" },
     },
   };
 }
