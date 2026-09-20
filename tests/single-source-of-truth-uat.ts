@@ -2,7 +2,49 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+async function sourceFiles(root: string): Promise<string[]> {
+  const results: string[] = [];
+  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...await sourceFiles(target));
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      results.push(target);
+    }
+  }
+  return results;
+}
+
+async function assertNoHiddenCoreRouter() {
+  const allowedBackendConfigStatus = new Set([
+    path.normalize("lib/backend/apps-script.ts"),
+    path.normalize("app/api/health/backend-split/route.ts"),
+    path.normalize("app/api/erp/actions/route.ts"),
+  ]);
+  const files = [
+    ...await sourceFiles(path.join(process.cwd(), "app")),
+    ...await sourceFiles(path.join(process.cwd(), "lib")),
+  ];
+
+  const violations: string[] = [];
+  for (const file of files) {
+    const relative = path.normalize(path.relative(process.cwd(), file));
+    const source = await fs.readFile(file, "utf8");
+    if (relative !== path.normalize("lib/backend/apps-script.ts") && /\bcallBackend\s*\(/.test(source)) {
+      violations.push(`${relative}: direct callBackend() use`);
+    }
+    if (source.includes("backendConfigStatus") && !allowedBackendConfigStatus.has(relative)) {
+      violations.push(`${relative}: backendConfigStatus may select a second core data path`);
+    }
+  }
+  if (violations.length) {
+    throw new Error(`Single-source architecture violations:\n${violations.join("\n")}`);
+  }
+  return files.length;
+}
+
 async function main() {
+  const scannedSourceFiles = await assertNoHiddenCoreRouter();
   const liveDatabase = path.join(process.cwd(), "prisma", "dev.db");
   await fs.access(liveDatabase);
 
@@ -168,6 +210,8 @@ async function main() {
       directRemoteCoreBlocked,
       reportingIntegrationOptional: configuration.reporting.authority,
       documentIntegrationOptional: configuration.document.authority,
+      scannedSourceFiles,
+      hiddenCoreRouters: 0,
     }, null, 2));
   } finally {
     await prisma.$disconnect();
