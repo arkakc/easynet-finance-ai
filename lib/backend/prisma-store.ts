@@ -396,6 +396,10 @@ function mapStockMovement(movement: any) {
     movementDate: movement.createdAt?.toISOString?.().slice(0, 10) || String(movement.createdAt || "").slice(0, 10),
     itemId: movement.itemId || "",
     projectId: movement.projectId || "",
+    warehouseId: movement.warehouseId || "",
+    warehouseCode: movement.warehouse?.code || "",
+    warehouseName: movement.warehouse?.name || "",
+    transferId: movement.transferId || "",
     movementType,
     qtyIn: incoming ? Number(movement.quantity || 0) : 0,
     qtyOut: outgoing ? Number(movement.quantity || 0) : 0,
@@ -611,6 +615,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { warehouse: true },
       });
       return rows.map(mapStockMovement).filter(Boolean) as T[];
     }
@@ -1245,6 +1250,11 @@ export async function prismaAppendRecord<T = any>(
       const qtyIn = Number(record.qtyIn || 0);
       const qtyOut = Number(record.qtyOut || 0);
       const quantity = Math.abs(Number(record.qty || qtyIn || qtyOut || 0));
+      const warehouseInput = String(record.warehouseId || record.warehouseCode || "").trim();
+      const warehouse = warehouseInput
+        ? await prisma.warehouse.findFirst({ where: { OR: [{ id: warehouseInput }, { code: warehouseInput }] } })
+        : await prisma.warehouse.findFirst({ where: { isDefault: true, isActive: true } });
+      if (warehouseInput && !warehouse) throw new Error(`Warehouse ${warehouseInput} not found`);
       const created = await prisma.stockMovement.create({
         data: {
           id: record.movementId ? String(record.movementId) : undefined,
@@ -1263,13 +1273,15 @@ export async function prismaAppendRecord<T = any>(
           referenceId: record.sourceDocumentId ? String(record.sourceDocumentId) : record.referenceId ? String(record.referenceId) : null,
           journalId: record.journalId ? String(record.journalId) : null,
           projectId: record.projectId ? String(record.projectId) : null,
-          warehouseId: record.warehouseId ? String(record.warehouseId) : null,
+          warehouseId: warehouse?.id || null,
+          transferId: record.transferId ? String(record.transferId) : null,
           note: record.note ? String(record.note) : null,
           createdAt: record.movementDate ? new Date(String(record.movementDate)) : undefined,
           createdBy: actor,
         },
       });
-      return mapStockMovement(created) as T;
+      const hydrated = await prisma.stockMovement.findUnique({ where: { id: created.id }, include: { warehouse: true } });
+      return mapStockMovement(hydrated) as T;
     }
 
     case "FixedAssets": {
