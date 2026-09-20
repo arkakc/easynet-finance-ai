@@ -17,6 +17,7 @@ export type AtomicSupplierBillInput = {
   defaultCostAccountId: string;
   purchasePriceVarianceAccountId?: string;
   purchasePriceVarianceTolerancePct: number;
+  approveIfDraft?: boolean;
   createdBy?: string;
   approvedBy?: string;
 };
@@ -61,7 +62,19 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
         alreadyPosted: true,
       };
     }
-    if (bill.status !== "SENT") {
+    if (bill.status === "DRAFT") {
+      if (!input.approveIfDraft) {
+        throw new Error("Supplier Invoice must be APPROVED before posting. Current status: DRAFT");
+      }
+      await tx.supplierBill.update({
+        where: { id: bill.id },
+        data: {
+          status: "SENT",
+          approvedBy: input.approvedBy || "Finance Controller",
+          approvedAt: new Date(),
+        },
+      });
+    } else if (bill.status !== "SENT") {
       throw new Error(`Supplier Invoice must be APPROVED before posting. Current status: ${bill.status}`);
     }
     if (!bill.lines.length) throw new Error("Supplier bill has no lines");
