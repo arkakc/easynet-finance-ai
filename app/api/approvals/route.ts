@@ -97,20 +97,9 @@ export async function POST(request: Request) {
     }
 
     if (creditNote) {
-      await updateRecord(
-        config.table,
-        config.idField,
-        input.recordId,
-        { status: "APPROVED" },
-        `finance-controller:${input.note || "approve"}`,
-      );
-      try {
-        const approvedCredit = (await findRecords<any>("Invoices", { invoiceId: input.recordId }, 1)).rows[0];
-        await postSalesCreditNote(approvedCredit);
-      } catch (error) {
-        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:credit-note-posting-rollback");
-        throw error;
-      }
+      // Credit Note approval, AR settlement, stock return, reason status and
+      // GL posting share one Prisma transaction. No compensating DRAFT reset.
+      await postSalesCreditNote(row, { approveIfDraft: true });
     } else if (ACCOUNTING_TYPES.has(input.recordType)) {
       // Approval + document/subledger mutation + GL posting are one Prisma
       // transaction. Do not pre-approve here and do not use compensating
