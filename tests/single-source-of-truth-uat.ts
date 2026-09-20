@@ -55,7 +55,7 @@ async function main() {
   // Deliberately configure a fake Core Apps Script endpoint. The UAT proves
   // that core reads/writes still stay inside the Prisma database and that
   // direct remote-core access is rejected before any network request.
-  process.env.DATABASE_URL = `file:${temporaryDatabase.replace(/\\/g, "/")}`;
+  process.env.EASYNET_PRISMA_DATASOURCE_URL = `file:${temporaryDatabase.replace(/\\/g, "/")}`;
   process.env.CORE_APPS_SCRIPT_WEB_APP_URL = "https://core-accounting.invalid.example/exec";
   process.env.CORE_APPS_SCRIPT_API_TOKEN = "phase2-core-apps-script-must-be-ignored-0001";
   delete process.env.APPS_SCRIPT_WEB_APP_URL;
