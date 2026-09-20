@@ -1,6 +1,7 @@
 import { prisma } from "@/src/lib/prisma";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
+import { insertPaymentSchedule, listPaymentSchedules, updatePaymentSchedule } from "@/lib/accounting/payment-schedule-store";
 
 export function generatedCode(prefix: string) {
   return documentSeriesId(prefix);
@@ -569,6 +570,9 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         orderBy: { createdAt: "desc" },
       });
       return rows.map(mapExpense).filter(Boolean) as T[];
+    }
+    case "PaymentSchedules": {
+      return await listPaymentSchedules(limit, offset) as T[];
     }
     case "StockMovements": {
       const rows = await prisma.stockMovement.findMany({
@@ -1152,6 +1156,10 @@ export async function prismaAppendRecord<T = any>(
       return mapPayment(created) as T;
     }
 
+    case "PaymentSchedules": {
+      return await insertPaymentSchedule(record, actor) as T;
+    }
+
     case "StockMovements": {
       const itemInput = String(record.itemId || "").trim();
       const item = itemInput
@@ -1498,6 +1506,10 @@ export async function prismaUpdateRecord<T = any>(
         },
       });
       return mapItem(updated) as T;
+    }
+
+    case "PaymentSchedules": {
+      return await updatePaymentSchedule(idValue, patch) as T;
     }
 
     case "StockMovements": {
