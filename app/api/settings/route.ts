@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { requirePermission } from "@/lib/auth";
-import { appendRecord, backendConfigStatus, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { toPublicBankAccount, upsertCompanyBankAccounts } from "@/lib/accounting/bank-accounts";
@@ -54,7 +54,9 @@ export async function GET() {
   try {
     await requirePermission("settings.manage");
 
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
 
     if (!backendConfigured) {
       // Prisma / SQLite fallback
@@ -200,7 +202,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "No settings provided to save" }, { status: 400 });
     }
 
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
 
     // Check GST compliance rule if gst_status is involved or set to VERIFIED
     const gstStatusItem = itemsToSave.find((i) => i.key === "gst_status");
