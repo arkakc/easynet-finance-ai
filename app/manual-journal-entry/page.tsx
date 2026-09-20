@@ -42,9 +42,9 @@ export default async function ManualJournalEntryPage() {
       <div className="page-head">
         <div>
           <h2>Manual Journal Entry</h2>
-          <p className="small">Accountant-controlled double-entry doctype · posts through the posting engine into immutable journals and ledgers.</p>
+          <p className="small">Maker-controlled double-entry entry · submits as PENDING and reaches the immutable GL only after approval by a different authorised checker.</p>
         </div>
-        {error ? <div className="badge">Account list warning</div> : <div className="badge">MANUAL POSTING</div>}
+        {error ? <div className="badge">Account list warning</div> : <div className="badge">MAKER ENTRY</div>}
       </div>
       {error ? <section className="panel"><strong>Backend warning:</strong> {error}</section> : null}
       <ManualJournalEntryClient accounts={accounts} defaultPostingDate={new Date().toISOString().slice(0, 10)} />
