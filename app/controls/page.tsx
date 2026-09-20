@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { listTable } from "@/lib/backend/apps-script";
 import { round2, signedMovementValue } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
 
@@ -43,7 +43,9 @@ function aggregateQty(rows: Array<{ itemId: string; qty: number | string }>) {
 }
 
 export default async function ControlsPage() {
-  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
 
   if (!backendConfigured) {
     const [invoices, bills, purchaseOrders, expenses, journals, journalLines] = await Promise.all([
