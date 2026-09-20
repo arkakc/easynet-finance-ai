@@ -825,6 +825,7 @@ model PaymentAllocation {
   idempotencyKey    String?                 @unique
   createdBy         String
   reversedBy        String?
+  reversalDate      DateTime?
   reversedAt        DateTime?
   createdAt         DateTime                @default(now())
   updatedAt         DateTime                @updatedAt
