@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { AccountTypeGL, NormalBalance } from "@prisma/client";
 
 async function sourceFiles(root: string): Promise<string[]> {
   const results: string[] = [];
@@ -118,14 +119,49 @@ async function main() {
       throw new Error("Core update was not persisted in Prisma");
     }
 
-    const accountsResult = await backend.listTable<any>("Accounts", 500, 0);
-    const parentIds = new Set(
-      accountsResult.rows.map((row: any) => String(row.parentAccount || "")).filter(Boolean),
-    );
-    const leaves = accountsResult.rows.filter(
-      (row: any) => row.active !== false && !parentIds.has(String(row.accountId || "")),
-    );
-    if (leaves.length < 2) throw new Error("UAT requires at least two active leaf GL accounts");
+    let accountsResult = await backend.listTable<any>("Accounts", 500, 0);
+    const leafRows = (rows: any[]) => {
+      const parentIds = new Set(
+        rows.map((row: any) => String(row.parentAccount || "")).filter(Boolean),
+      );
+      return rows.filter(
+        (row: any) => row.active !== false && !parentIds.has(String(row.accountId || "")),
+      );
+    };
+
+    let leaves = leafRows(accountsResult.rows);
+    if (leaves.length < 2) {
+      // The UAT must not depend on the user's real chart of accounts. Provision
+      // deterministic leaf fixtures inside the temporary clone only.
+      await prisma.chartOfAccounts.upsert({
+        where: { code: "UAT-SSOT-ASSET" },
+        update: { isActive: true, parentId: null },
+        create: {
+          code: "UAT-SSOT-ASSET",
+          name: "UAT Single Source Asset",
+          type: AccountTypeGL.ASSET,
+          normalBalance: NormalBalance.DEBIT,
+          isActive: true,
+        },
+      });
+      await prisma.chartOfAccounts.upsert({
+        where: { code: "UAT-SSOT-EXPENSE" },
+        update: { isActive: true, parentId: null },
+        create: {
+          code: "UAT-SSOT-EXPENSE",
+          name: "UAT Single Source Expense",
+          type: AccountTypeGL.EXPENSE,
+          normalBalance: NormalBalance.DEBIT,
+          isActive: true,
+        },
+      });
+
+      accountsResult = await backend.listTable<any>("Accounts", 500, 0);
+      leaves = leafRows(accountsResult.rows);
+    }
+    if (leaves.length < 2) {
+      throw new Error("UAT could not provision two active leaf GL accounts in the temporary database");
+    }
 
     const journalId = `UAT-SSOT-JRN-${process.pid}`;
     const sourceId = `UAT-SSOT-SOURCE-${process.pid}`;
