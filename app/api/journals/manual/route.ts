@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
-import { postJournal } from "@/lib/accounting/posting";
+import { createPendingManualJournal } from "@/lib/accounting/manual-journal-approval";
 import { requireRequestPermission } from "@/lib/auth";
 
 const lineSchema = z.object({
@@ -59,24 +59,31 @@ export async function POST(request: Request) {
       }))
       .filter((line) => line.debit > 0 || line.credit > 0);
 
-    const posted = await postJournal({
+    const pending = await createPendingManualJournal({
+      entryType: input.entryType,
+      journalType: input.journalType,
       postingDate: input.postingDate,
-      documentType: input.entryType,
-      documentId: manualId,
-      documentNumber: manualId,
-      reference: [input.journalType, input.reference, input.remarks ? `Remarks: ${input.remarks}` : ""].filter(Boolean).join(" · "),
-      createdBy: user.email || "manual-journal-ui",
-      approvedBy: user.name || "Finance Controller",
+      reference: input.reference,
+      remarks: input.remarks,
       lines: nonZeroLines,
+      makerEmail: user.email,
+      manualId,
     });
 
-    return NextResponse.json({ ok: true, manualId, journalId: posted.journalId, entryType: input.entryType, journalType: input.journalType });
+    return NextResponse.json({
+      ok: true,
+      manualId: pending.manualId,
+      journalId: pending.journalId,
+      status: pending.status,
+      entryType: input.entryType,
+      journalType: input.journalType,
+    });
   } catch (error) {
     const message = error instanceof z.ZodError
       ? error.errors.map((issue) => issue.message).join("; ")
       : error instanceof Error
         ? error.message
-        : "Manual journal posting failed";
+        : "Manual journal submission failed";
     const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }
