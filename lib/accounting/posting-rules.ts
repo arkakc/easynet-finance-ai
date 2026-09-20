@@ -141,3 +141,157 @@ export function salesInvoicePostingByLines(input: {
   validateBalancedPosting(lines);
   return lines;
 }
+
+
+export function supplierBillPostingByLines(input: {
+  total: number;
+  gst: number;
+  supplierId: string;
+  projectId?: string;
+  costLines: Array<{ accountId: string; amount: number; description?: string }>;
+  payableAccountId?: string;
+}) {
+  const lines: PostingLine[] = [];
+  const grouped = new Map<string, number>();
+  for (const line of input.costLines) {
+    const amount = roundPostingAmount(Number(line.amount || 0));
+    if (amount > 0) {
+      grouped.set(
+        line.accountId,
+        roundPostingAmount((grouped.get(line.accountId) || 0) + amount),
+      );
+    }
+  }
+
+  for (const [accountId, amount] of grouped.entries()) {
+    lines.push({
+      accountId,
+      debit: amount,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Supplier cost",
+    });
+  }
+
+  if (input.gst) {
+    lines.push({
+      accountId: INITIAL_ACCOUNT_IDS.inputGst,
+      debit: input.gst,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      taxCode: "GST",
+      description: "Input GST",
+    });
+  }
+
+  lines.push({
+    accountId: input.payableAccountId || INITIAL_ACCOUNT_IDS.accountsPayable,
+    credit: input.total,
+    supplierId: input.supplierId,
+    projectId: input.projectId,
+    description: "Accounts payable",
+  });
+
+  validateBalancedPosting(lines);
+  return lines;
+}
+
+export function supplierBillPostingMixed(input: {
+  total: number;
+  gst: number;
+  supplierId: string;
+  projectId?: string;
+  serviceCostLines: Array<{ accountId: string; amount: number; description?: string }>;
+  stockLines: Array<{ invoiceAmount: number; receiptValue: number; description?: string }>;
+  payableAccountId?: string;
+  stockReceivedButNotBilledAccountId?: string;
+  purchasePriceVarianceAccountId?: string;
+}) {
+  const lines: PostingLine[] = [];
+  const serviceGrouped = new Map<string, number>();
+
+  for (const line of input.serviceCostLines) {
+    const amount = roundPostingAmount(Number(line.amount || 0));
+    if (amount > 0) {
+      serviceGrouped.set(
+        line.accountId,
+        roundPostingAmount((serviceGrouped.get(line.accountId) || 0) + amount),
+      );
+    }
+  }
+
+  for (const [accountId, amount] of serviceGrouped.entries()) {
+    lines.push({
+      accountId,
+      debit: amount,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Service / non-stock purchase cost",
+    });
+  }
+
+  const receiptValue = roundPostingAmount(
+    input.stockLines.reduce((sum, line) => sum + Number(line.receiptValue || 0), 0),
+  );
+  const stockInvoiceValue = roundPostingAmount(
+    input.stockLines.reduce((sum, line) => sum + Number(line.invoiceAmount || 0), 0),
+  );
+
+  if (receiptValue > 0) {
+    lines.push({
+      accountId: input.stockReceivedButNotBilledAccountId || INITIAL_ACCOUNT_IDS.grni,
+      debit: receiptValue,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Clear stock received but not billed",
+    });
+  }
+
+  const purchasePriceVariance = roundPostingAmount(stockInvoiceValue - receiptValue);
+  const ppvAccount = input.purchasePriceVarianceAccountId || INITIAL_ACCOUNT_IDS.purchasePriceVariance;
+
+  if (purchasePriceVariance > 0) {
+    lines.push({
+      accountId: ppvAccount,
+      debit: purchasePriceVariance,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Purchase price variance",
+    });
+  } else if (purchasePriceVariance < 0) {
+    lines.push({
+      accountId: ppvAccount,
+      credit: Math.abs(purchasePriceVariance),
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Purchase price variance",
+    });
+  }
+
+  if (input.gst) {
+    lines.push({
+      accountId: INITIAL_ACCOUNT_IDS.inputGst,
+      debit: input.gst,
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      taxCode: "GST",
+      description: "Input GST",
+    });
+  }
+
+  lines.push({
+    accountId: input.payableAccountId || INITIAL_ACCOUNT_IDS.accountsPayable,
+    credit: input.total,
+    supplierId: input.supplierId,
+    projectId: input.projectId,
+    description: "Accounts payable",
+  });
+
+  validateBalancedPosting(lines);
+  return {
+    lines,
+    purchasePriceVariance,
+    receiptValue,
+    stockInvoiceValue,
+  };
+}
