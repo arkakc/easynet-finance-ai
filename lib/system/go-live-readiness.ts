@@ -1,6 +1,6 @@
 import { buildFinancialReconciliationSnapshot } from "@/lib/system/financial-reconciliation";
 import { listDatabaseBackups } from "@/lib/system/database-backup";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
+import { CORE_DATA_AUTHORITY } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 export type GoLiveCheck = { key: string; label: string; blocking: boolean; passed: boolean; detail: string };
@@ -35,7 +35,6 @@ export async function buildGoLiveReadiness() {
   const orphanPayroll = payrollJournals.filter((journal) => !linkedPayrollJournals.has(journal.id));
   const latestBackup = backups[0];
   const backupFresh = Boolean(latestBackup && Date.now() - new Date(latestBackup.createdAt).getTime() <= 24 * 60 * 60 * 1000);
-  const configuredBackend = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
   const checks: GoLiveCheck[] = [
     { key: "backup", label: "Verified database backup within 24 hours", blocking: true, passed: backupFresh, detail: latestBackup ? `${latestBackup.fileName} · ${new Date(latestBackup.createdAt).toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}` : "No verified backup found" },
     { key: "ledger", label: "Posted ledger balanced", blocking: true, passed: snapshot.controls.ledgerBalanced, detail: snapshot.controls.ledgerBalanced ? `Debit and credit both K${snapshot.ledger.totalDebit.toFixed(2)}` : `Ledger difference K${Math.abs(snapshot.ledger.difference).toFixed(2)}` },
@@ -46,7 +45,7 @@ export async function buildGoLiveReadiness() {
     postgresReadinessCheck(),
     { key: "session", label: "Application session secret configured", blocking: true, passed: Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32), detail: process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32 ? "Secret present" : "SESSION_SECRET must be at least 32 characters" },
     { key: "auth", label: "NextAuth secret configured", blocking: true, passed: Boolean(process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32), detail: process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32 ? "Secret present" : "AUTH_SECRET must be at least 32 characters" },
-    { key: "backend", label: "External backend configuration is intentional", blocking: false, passed: !configuredBackend, detail: configuredBackend ? "Apps Script backend configured; verify production credentials" : "Local Prisma source is active" },
+    { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: CORE_DATA_AUTHORITY === "prisma", detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
   ];
   return { generatedAt: new Date().toISOString(), ready: checks.filter((check) => check.blocking).every((check) => check.passed), checks, snapshot: { asOf: snapshot.asOf, fingerprint: snapshot.fingerprint, migrationReady: snapshot.controls.migrationReady } };
 }
