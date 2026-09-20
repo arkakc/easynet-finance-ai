@@ -152,7 +152,7 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
     event.preventDefault();
     if (!canPost) return;
     setBusy(true);
-    setMessage("Posting manual journal…");
+    setMessage("Submitting manual journal for checker approval…");
     try {
       const response = await fetch("/api/journals/manual", {
         method: "POST",
@@ -160,8 +160,8 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
         body: JSON.stringify({ entryType, journalType, postingDate, reference, remarks, lines }),
       });
       const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal posting failed");
-      setMessage(`Successfully posted manual journal ${body.journalId}.`);
+      if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal submission failed");
+      setMessage(`Manual journal ${body.journalId} submitted as PENDING. It will affect the GL only after approval by a different authorised checker.`);
       setLines([blankLine("Debit line"), blankLine("Credit line")]);
       setRemarks("");
       try {
@@ -170,7 +170,7 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
       } catch {}
       router.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Manual journal posting failed");
+      setMessage(error instanceof Error ? error.message : "Manual journal submission failed");
     } finally {
       setBusy(false);
     }
@@ -181,13 +181,13 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
       <div className="form-title-row">
         <div>
           <h3 className="form-title">Manual Journal Entry</h3>
-          <p className="small">Use this for accountant-controlled entries such as opening cash against a loan payable. Debit must equal credit before posting.</p>
+          <p className="small">Maker step: prepare a balanced manual journal and submit it for checker approval. PENDING journals do not affect the GL or financial reports.</p>
         </div>
         <div className="button-row">
           <button type="button" className="secondary" disabled={busy} onClick={() => { setMessage("Refreshing ledger accounts without clearing your draft…"); router.refresh(); }}>
             Refresh ledger accounts
           </button>
-          <span className="badge">JOURNAL ENTRY</span>
+          <span className="badge">MAKER → CHECKER</span>
         </div>
       </div>
       <form className="form-grid" data-draft-key="manual-journal-entry" onSubmit={submit}>
@@ -261,7 +261,7 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
         <div className="form-wide button-row">
           <button type="button" className="secondary" disabled={busy} onClick={() => setLines((current) => [...current, blankLine("Journal line")])}>+ Add line</button>
           <button type="submit" disabled={!canPost} style={!canPost ? { opacity: 0.6, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}>
-            {busy ? "Posting…" : "Post Manual Journal"}
+            {busy ? "Submitting…" : "Submit for Approval"}
           </button>
         </div>
         {message ? <div className="form-wide status-banner">{message}</div> : null}
