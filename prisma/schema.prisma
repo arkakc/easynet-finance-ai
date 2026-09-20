@@ -493,6 +493,7 @@ model Invoice {
   project             Project?      @relation(fields: [projectId], references: [id])
   lines               InvoiceLine[]
   payments            Payment[]
+  paymentAllocations  PaymentAllocation[]
   originalCreditNotes CreditNote[]  @relation("OriginalInvoice")
   quotes              Quote[]
 
@@ -678,6 +679,7 @@ model SupplierBill {
   order              PurchaseOrder?      @relation("SupplierBillToPO", fields: [orderId], references: [id])
   lines              BillLine[]
   payments           Payment[]           @relation("SupplierBillPayments")
+  paymentAllocations PaymentAllocation[]
   refunds            Refund[]
   landedCostVouchers LandedCostVoucher[]
 
@@ -764,6 +766,7 @@ model Payment {
   creditNote       CreditNote?   @relation("CreditNoteUsedInPayment", fields: [creditNoteId], references: [id])
   bill             SupplierBill? @relation("SupplierBillPayments", fields: [billId], references: [id])
   project          Project?      @relation(fields: [projectId], references: [id])
+  allocations      PaymentAllocation[]
 
   @@index([customerId])
   @@index([supplierId])
@@ -794,6 +797,46 @@ enum PaymentStatus {
   REVERSED
   FAILED
   CANCELLED
+}
+
+enum PaymentAllocationType {
+  DIRECT
+  ADVANCE
+  MIGRATED
+}
+
+enum PaymentAllocationStatus {
+  POSTED
+  REVERSED
+}
+
+model PaymentAllocation {
+  id                String                  @id @default(cuid())
+  code              String                  @unique
+  paymentId         String
+  invoiceId         String?
+  billId            String?
+  allocationDate    DateTime
+  amount            Decimal
+  allocationType    PaymentAllocationType
+  status            PaymentAllocationStatus @default(POSTED)
+  journalId         String?
+  reversalJournalId String?
+  idempotencyKey    String?                 @unique
+  createdBy         String
+  reversedBy        String?
+  reversedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  payment           Payment                 @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoice           Invoice?                @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  bill              SupplierBill?           @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, status])
+  @@index([invoiceId, status])
+  @@index([billId, status])
+  @@index([allocationDate])
+  @@index([journalId])
 }
 
 model CreditNote {
