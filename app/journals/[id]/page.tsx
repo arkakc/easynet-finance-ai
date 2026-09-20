@@ -56,8 +56,10 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           <div><span>Posting Date</span><strong>{formatAccountingDate(header.date.toISOString())}</strong></div>
           <div><span>Document Type</span><strong>{header.sourceDocType || "JOURNAL"}</strong></div>
           <div><span>Document Number</span><strong>{header.sourceDocId || "—"}</strong></div>
-          <div><span>Project</span><strong>—</strong></div>
-          <div><span>Approved By</span><strong>{header.approvedBy || "—"}</strong></div>
+          <div><span>Maker / Created By</span><strong>{header.createdBy || "—"}</strong></div>
+          <div><span>Checker / Approved By</span><strong>{header.approvedBy || "Pending checker"}</strong></div>
+          <div><span>Submitted At</span><strong>{header.createdAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}</strong></div>
+          <div><span>Posted At</span><strong>{header.postedAt ? header.postedAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" }) : "Not posted"}</strong></div>
           <div><span>Reference</span><strong>{header.reference || header.description || "—"}</strong></div>
         </div>
 
