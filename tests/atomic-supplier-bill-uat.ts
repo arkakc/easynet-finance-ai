@@ -118,7 +118,7 @@ async function main() {
         supplierId: supplier.id,
         orderId: purchaseOrder.id,
         billDate: new Date("2099-03-05T00:00:00+10:00"),
-        status: BillStatus.SENT,
+        status: BillStatus.DRAFT,
         subtotal: 110,
         total: 110,
         amountPaid: 0,
@@ -149,6 +149,7 @@ async function main() {
       defaultCostAccountId: `ACC-${fallbackCost.code}`,
       purchasePriceVarianceAccountId: `ACC-${ppv.code}`,
       purchasePriceVarianceTolerancePct: 20,
+      approveIfDraft: true,
       createdBy: "atomic-supplier-bill-uat",
       approvedBy: "atomic-supplier-bill-uat",
     };
@@ -178,7 +179,7 @@ async function main() {
 
     if (
       !billAfterFailure
-      || billAfterFailure.status !== BillStatus.SENT
+      || billAfterFailure.status !== BillStatus.DRAFT
       || billAfterFailure.glPosted
       || billAfterFailure.journalId
     ) {
@@ -279,15 +280,18 @@ async function main() {
       liveDatabaseChanged: false,
       failedPostingRolledBack,
       failedBillStateRolledBack:
-        billAfterFailure.status === BillStatus.SENT
+        billAfterFailure.status === BillStatus.DRAFT
         && !billAfterFailure.glPosted
+        && !billAfterFailure.approvedAt
         && !billAfterFailure.journalId,
       failedPoStateRolledBack:
         poAfterFailure.status === POStatus.RECEIVED
         && !poAfterFailure.billId,
       failedJournalRolledBack: journalAfterFailure === null,
       successfulBillCommitted:
-        committedBill.glPosted === true
+        committedBill.status === BillStatus.SENT
+        && committedBill.glPosted === true
+        && Boolean(committedBill.approvedAt)
         && committedBill.journalId === journal.code,
       successfulPoStatusCommitted:
         committedPo.status === POStatus.BILLED
