@@ -35,6 +35,7 @@ import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoice";
 import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
 import { finalizeExpenseAtomic } from "@/lib/accounting/atomic-expense";
+import { allocateAdvanceAtomic, finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -427,86 +428,121 @@ async function postSupplierBill(row: any, approveAtomically = false) {
 }
 
 async function postPayment(row: any) {
-  if (String(row.status || "").toUpperCase() === "POSTED" && String(row.journalId || "")) {
-    await synchronizePaymentAllocation(row);
-    return { recordType: "payment", recordId: row.paymentId, status: "already-posted", journalId: row.journalId };
-  }
   await ensureAccountingInfrastructure();
   const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
   const advance = !String(row.againstDocumentId || "").trim();
-
-  if (!advance) {
-    if (receive) {
-      const invoice = (await findRecords<any>("Invoices", { invoiceId: row.againstDocumentId }, 1)).rows[0];
-      if (!invoice) throw new Error("Against invoice not found");
-      if (String(invoice.customerId) !== String(row.partyId)) throw new Error("Payment customer does not match the against invoice");
-      if (!["POSTED", "PAID"].includes(String(invoice.status).toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted invoice");
-      if (Number(row.amount) > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds invoice outstanding amount");
-    } else {
-      const bill = (await findRecords<any>("SupplierBills", { billId: row.againstDocumentId }, 1)).rows[0];
-      if (!bill) throw new Error("Against supplier bill not found");
-      if (String(bill.supplierId) !== String(row.partyId)) throw new Error("Payment supplier does not match the against supplier bill");
-      if (!["POSTED", "PAID"].includes(String(bill.status).toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted supplier bill");
-      if (Number(row.amount) > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds bill outstanding amount");
-    }
-  }
-
   const defaults = await loadConfiguredPostingAccounts();
-  const lines = receive
-    ? receiptPosting({ amount: Number(row.amount), customerId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance, receivableAccountId: defaults.defaultReceivableAccount, deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount })
-    : supplierPaymentPosting({ amount: Number(row.amount), supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: row.cashBankAccountId, advance, payableAccountId: defaults.defaultPayableAccount });
 
-  const journal = await postJournal({
-    postingDate: String(row.paymentDate), documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
-    documentId: row.paymentId, documentNumber: row.paymentNumber, reference: row.reference || row.paymentNumber,
-    projectId: row.projectId, lines,
+  const lines = receive
+    ? receiptPosting({
+        amount: Number(row.amount),
+        customerId: row.partyId,
+        projectId: row.projectId,
+        cashBankAccountId: row.cashBankAccountId,
+        advance,
+        receivableAccountId: defaults.defaultReceivableAccount,
+        deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
+      })
+    : supplierPaymentPosting({
+        amount: Number(row.amount),
+        supplierId: row.partyId,
+        projectId: row.projectId,
+        cashBankAccountId: row.cashBankAccountId,
+        advance,
+        payableAccountId: defaults.defaultPayableAccount,
+      });
+
+  const posted = await finalizePaymentAtomic({
+    paymentId: row.paymentId,
+    postingDate: String(row.paymentDate),
+    amount: Number(row.amount),
+    paymentMethod: String(row.paymentMethod || "Cash"),
+    cashBankAccountId: String(row.cashBankAccountId || ""),
+    reference: String(row.reference || row.paymentNumber || row.paymentId),
+    documentType: advance
+      ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE")
+      : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
+    documentNumber: String(row.paymentNumber || row.paymentId),
+    projectId: String(row.projectId || ""),
+    lines,
+    againstInvoiceId: !advance && receive ? String(row.againstDocumentId) : undefined,
+    againstBillId: !advance && !receive ? String(row.againstDocumentId) : undefined,
+    createdBy: "payment-posting",
+    approvedBy: "Finance Controller",
   });
-  await updateRecord("Payments", "paymentId", row.paymentId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-  if (!advance) await synchronizePaymentAllocation({ ...row, status: "POSTED" });
-  return { recordType: "payment", recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, advance };
+
+  return {
+    recordType: "payment",
+    recordId: row.paymentId,
+    status: posted.alreadyFinalized ? "already-posted" : "POSTED",
+    journalId: posted.journalId,
+    advance,
+  };
 }
 
 async function allocateAdvance(raw: unknown) {
   const input = allocateAdvanceSchema.parse(raw);
   const payment = (await findRecords<any>("Payments", { paymentId: input.paymentId }, 1)).rows[0];
   if (!payment) throw new Error("Advance Payment Entry not found");
-  if (String(payment.status || "").toUpperCase() !== "POSTED" || !String(payment.journalId || "")) throw new Error("Advance Payment Entry must be finalized before allocation");
-  if (String(payment.againstDocumentId || "").trim()) throw new Error("This advance is already allocated");
+
   await ensureAccountingInfrastructure();
-
   const customer = String(payment.partyType || "") === "Customer";
-  if (customer && input.againstDocumentType !== "Sales Invoice") throw new Error("Customer advances can only be allocated to Sales Invoices");
-  if (!customer && input.againstDocumentType !== "Supplier Invoice") throw new Error("Supplier advances can only be allocated to Supplier Invoices");
-
-  const source = customer
-    ? (await findRecords<any>("Invoices", { invoiceId: input.againstDocumentId }, 1)).rows[0]
-    : (await findRecords<any>("SupplierBills", { billId: input.againstDocumentId }, 1)).rows[0];
-  if (!source) throw new Error(`${input.againstDocumentType} not found`);
-  if (customer && String(source.customerId || "") !== String(payment.partyId || "")) throw new Error("Advance customer does not match Sales Invoice customer");
-  if (!customer && String(source.supplierId || "") !== String(payment.partyId || "")) throw new Error("Advance supplier does not match Supplier Invoice supplier");
-  const outstanding = Number(source.outstandingAmount || 0);
-  if (Number(payment.amount || 0) > outstanding + 0.001) throw new Error("Full advance allocation exceeds document outstanding amount; split allocation requires a dedicated reconciliation entry");
-
   const amount = Number(payment.amount || 0);
   const defaults = await loadConfiguredPostingAccounts();
+
   const allocationLines = customer
     ? [
-        { accountId: defaults.defaultDeferredRevenueAccount, debit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Apply customer advance" },
-        { accountId: defaults.defaultReceivableAccount, credit: amount, customerId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Receivable from advance" },
+        {
+          accountId: defaults.defaultDeferredRevenueAccount,
+          debit: amount,
+          customerId: payment.partyId,
+          projectId: payment.projectId,
+          description: "Apply customer advance",
+        },
+        {
+          accountId: defaults.defaultReceivableAccount,
+          credit: amount,
+          customerId: payment.partyId,
+          projectId: payment.projectId,
+          description: "Settle Accounts Receivable from advance",
+        },
       ]
     : [
-        { accountId: defaults.defaultPayableAccount, debit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Settle Accounts Payable from advance" },
-        { accountId: "ACC-1160", credit: amount, supplierId: payment.partyId, projectId: payment.projectId, description: "Apply supplier advance" },
+        {
+          accountId: defaults.defaultPayableAccount,
+          debit: amount,
+          supplierId: payment.partyId,
+          projectId: payment.projectId,
+          description: "Settle Accounts Payable from advance",
+        },
+        {
+          accountId: "ACC-1160",
+          credit: amount,
+          supplierId: payment.partyId,
+          projectId: payment.projectId,
+          description: "Apply supplier advance",
+        },
       ];
 
-  const journal = await postJournal({
-    postingDate: String(payment.paymentDate), documentType: customer ? "CUSTOMER_ADVANCE_ALLOCATION" : "SUPPLIER_ADVANCE_ALLOCATION",
-    documentId: `${payment.paymentId}-${input.againstDocumentId}`, documentNumber: payment.paymentNumber,
-    reference: `Allocate ${payment.paymentNumber} to ${input.againstDocumentId}`, projectId: payment.projectId, lines: allocationLines,
+  const allocated = await allocateAdvanceAtomic({
+    paymentId: payment.paymentId,
+    againstDocumentType: input.againstDocumentType,
+    againstDocumentId: input.againstDocumentId,
+    postingDate: String(payment.paymentDate),
+    documentNumber: String(payment.paymentNumber || payment.paymentId),
+    projectId: String(payment.projectId || ""),
+    lines: allocationLines,
+    createdBy: "advance-allocation",
+    approvedBy: "Finance Controller",
   });
-  await updateRecord("Payments", "paymentId", payment.paymentId, { againstDocumentType: input.againstDocumentType, againstDocumentId: input.againstDocumentId, sourceDocumentId: input.againstDocumentId }, "advance-allocation");
-  await synchronizePaymentAllocation({ ...payment, againstDocumentType: input.againstDocumentType, againstDocumentId: input.againstDocumentId, status: "POSTED" });
-  return { paymentId: payment.paymentId, againstDocumentId: input.againstDocumentId, journalId: journal.journalId, allocatedAmount: amount };
+
+  return {
+    paymentId: payment.paymentId,
+    againstDocumentId: input.againstDocumentId,
+    journalId: allocated.journalId,
+    allocatedAmount: allocated.allocatedAmount,
+    alreadyAllocated: allocated.alreadyAllocated,
+  };
 }
 
 async function postRecord(raw: unknown) {
