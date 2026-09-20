@@ -386,8 +386,12 @@ function mapStockMovement(movement: any) {
     qtyIn: incoming ? Number(movement.quantity || 0) : 0,
     qtyOut: outgoing ? Number(movement.quantity || 0) : 0,
     unitCost: Number(movement.unitCost || 0),
-    value: Number(movement.totalCost || 0),
-    valueAdjustment: ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(type) ? Number(movement.totalCost || 0) : 0,
+    value: ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(type)
+      ? Math.abs(Number(movement.totalCost || 0))
+      : Number(movement.totalCost || 0),
+    valueAdjustment: ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(type)
+      ? Number(movement.totalCost || 0)
+      : 0,
     sourceDocumentId: movement.referenceId || "",
     journalId: movement.journalId || "",
     note: movement.note || "",
@@ -1234,7 +1238,13 @@ export async function prismaAppendRecord<T = any>(
           type: movementType as any,
           quantity,
           unitCost: record.unitCost !== undefined ? Number(record.unitCost || 0) : null,
-          totalCost: record.value !== undefined ? Number(record.value || 0) : record.totalCost !== undefined ? Number(record.totalCost || 0) : null,
+          totalCost: ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(movementType) && record.valueAdjustment !== undefined
+            ? Number(record.valueAdjustment || 0)
+            : record.value !== undefined
+              ? Number(record.value || 0)
+              : record.totalCost !== undefined
+                ? Number(record.totalCost || 0)
+                : null,
           referenceType: movementType,
           referenceId: record.sourceDocumentId ? String(record.sourceDocumentId) : record.referenceId ? String(record.referenceId) : null,
           journalId: record.journalId ? String(record.journalId) : null,
@@ -1549,8 +1559,16 @@ export async function prismaUpdateRecord<T = any>(
         where: { id: existing.id },
         data: {
           name: patch.itemName ? String(patch.itemName) : undefined,
-          sellPrice: patch.defaultRate !== undefined ? Number(patch.defaultRate) : patch.rate !== undefined ? Number(patch.rate) : undefined,
-          purchasePrice: patch.purchasePrice !== undefined ? Number(patch.purchasePrice) : undefined,
+          sellPrice: patch.sellPrice !== undefined
+            ? Number(patch.sellPrice)
+            : patch.rate !== undefined
+              ? Number(patch.rate)
+              : undefined,
+          purchasePrice: patch.purchasePrice !== undefined
+            ? Number(patch.purchasePrice)
+            : patch.valuationRate !== undefined
+              ? Number(patch.valuationRate)
+              : undefined,
           revenueAccount: patch.revenueAccount !== undefined ? String(patch.revenueAccount) : undefined,
           costAccount: patch.costAccount !== undefined ? String(patch.costAccount) : undefined,
           taxCode: patch.taxCode !== undefined ? String(patch.taxCode) : undefined,
