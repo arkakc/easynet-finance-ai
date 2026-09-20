@@ -67,8 +67,8 @@ export default async function JournalsPage() {
 
   try {
     const [journalHeaders, journalLines, chartOfAccounts] = await Promise.all([
-      prisma.journalHeader.findMany({ orderBy: { createdAt: "desc" } }),
-      prisma.journalLine.findMany({ orderBy: { lineNo: "asc" } }),
+      prisma.journalHeader.findMany({ where: { status: "POSTED" }, orderBy: { createdAt: "desc" } }),
+      prisma.journalLine.findMany({ where: { journal: { status: "POSTED" } }, orderBy: { lineNo: "asc" } }),
       prisma.chartOfAccounts.findMany({ orderBy: { code: "asc" } }),
     ]);
 
