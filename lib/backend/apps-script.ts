@@ -54,34 +54,6 @@ const REPORTING_TABLES = new Set([
   "ReportDashboardKPI",
 ]);
 
-const TABLE_ID_FIELDS: Record<string, string> = {
-  Settings: "key",
-  Accounts: "accountId",
-  Customers: "customerId",
-  Suppliers: "supplierId",
-  Projects: "projectId",
-  Items: "itemId",
-  Quotes: "quoteId",
-  QuoteLines: "quoteLineId",
-  PurchaseOrders: "poId",
-  POLines: "poLineId",
-  Invoices: "invoiceId",
-  InvoiceLines: "invoiceLineId",
-  SupplierBills: "billId",
-  SupplierBillLines: "billLineId",
-  Payments: "paymentId",
-  Expenses: "expenseId",
-  Loans: "loanId",
-  LoanEvents: "loanEventId",
-  PaymentSchedules: "scheduleId",
-  StockMovements: "movementId",
-  FixedAssets: "assetId",
-  Budgets: "budgetId",
-  Exceptions: "exceptionId",
-  Documents: "documentId",
-  DocumentLines: "documentLineId",
-};
-
 class BackendApplicationError extends Error {}
 
 /*
