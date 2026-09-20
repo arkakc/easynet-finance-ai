@@ -339,21 +339,34 @@ function mapPayment(pay: any) {
 
 function mapExpense(exp: any) {
   if (!exp) return null;
+  const categoryLooksLikeAccount = /^ACC-/i.test(String(exp.category || "").trim());
+  const cancelled = String(exp.approvedBy || "") === "__CANCELLED__";
+  const status = exp.glPosted
+    ? "POSTED"
+    : cancelled
+      ? "CANCELLED"
+      : exp.approvedAt
+        ? "APPROVED"
+        : "DRAFT";
   return {
     expenseId: exp.id,
     expenseNumber: exp.code,
     expenseDate: exp.date?.toISOString?.().slice(0, 10) || String(exp.date || "").slice(0, 10),
-    supplierId: exp.supplierId || "",
-    projectId: exp.projectId || "",
-    expenseAccountId: exp.referenceAccount || "ACC-6600",
+    supplierId: exp.supplier?.code || exp.supplierId || "",
+    internalSupplierId: exp.supplierId || "",
+    projectId: exp.project?.code || exp.projectId || "",
+    internalProjectId: exp.projectId || "",
+    expenseAccountId: categoryLooksLikeAccount ? exp.category : (exp.referenceAccount || "ACC-6600"),
     description: exp.description || "",
     netAmount: Number(exp.amount || 0),
     gstAmount: Number(exp.taxAmount || 0),
     totalAmount: Number(exp.total || 0),
     paymentMethod: exp.paymentMethod || "Cash",
-    cashBankAccountId: "ACC-1110",
-    status: exp.glPosted ? "POSTED" : "DRAFT",
+    cashBankAccountId: categoryLooksLikeAccount ? (exp.referenceAccount || "ACC-1110") : "ACC-1110",
+    status,
     journalId: exp.journalId || "",
+    approvedBy: cancelled ? "" : (exp.approvedBy || ""),
+    approvedAt: exp.approvedAt?.toISOString?.() || "",
     createdAt: exp.createdAt?.toISOString?.() || String(exp.createdAt || ""),
   };
 }
@@ -568,6 +581,7 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
         take: limit,
         skip: offset,
         orderBy: { createdAt: "desc" },
+        include: { supplier: true, project: true },
       });
       return rows.map(mapExpense).filter(Boolean) as T[];
     }
@@ -1156,6 +1170,44 @@ export async function prismaAppendRecord<T = any>(
       return mapPayment(created) as T;
     }
 
+    case "Expenses": {
+      const supplierInput = String(record.supplierId || "").trim();
+      const projectInput = String(record.projectId || "").trim();
+      const supplier = supplierInput
+        ? await prisma.supplier.findFirst({ where: { OR: [{ id: supplierInput }, { code: supplierInput }] } })
+        : null;
+      const project = projectInput
+        ? await prisma.project.findFirst({ where: { OR: [{ id: projectInput }, { code: projectInput }] } })
+        : null;
+      if (supplierInput && !supplier) throw new Error(`Supplier ${supplierInput} not found`);
+      if (projectInput && !project) throw new Error(`Project ${projectInput} not found`);
+
+      const requestedStatus = String(record.status || "DRAFT").toUpperCase();
+      const created = await prisma.expense.create({
+        data: {
+          id: record.expenseId ? String(record.expenseId) : undefined,
+          code: String(record.expenseNumber || record.expenseId || generatedCode("EXP")),
+          date: record.expenseDate ? new Date(String(record.expenseDate)) : new Date(),
+          supplierId: supplier?.id || null,
+          projectId: project?.id || null,
+          category: String(record.expenseAccountId || "ACC-6600"),
+          description: String(record.description || "Expense"),
+          amount: Number(record.netAmount || 0),
+          taxAmount: Number(record.gstAmount || 0),
+          total: Number(record.totalAmount || (Number(record.netAmount || 0) + Number(record.gstAmount || 0))),
+          paymentMethod: String(record.paymentMethod || "Cash"),
+          referenceAccount: String(record.cashBankAccountId || "ACC-1110"),
+          glPosted: requestedStatus === "POSTED",
+          approvedBy: requestedStatus === "APPROVED" || requestedStatus === "POSTED" ? actor : null,
+          approvedAt: requestedStatus === "APPROVED" || requestedStatus === "POSTED" ? new Date() : null,
+          journalId: record.journalId ? String(record.journalId) : null,
+          createdBy: actor,
+        },
+        include: { supplier: true, project: true },
+      });
+      return mapExpense(created) as T;
+    }
+
     case "PaymentSchedules": {
       return await insertPaymentSchedule(record, actor) as T;
     }
@@ -1506,6 +1558,43 @@ export async function prismaUpdateRecord<T = any>(
         },
       });
       return mapItem(updated) as T;
+    }
+
+    case "Expenses": {
+      const existing = await prisma.expense.findFirst({
+        where: { OR: [{ id: idValue }, { code: idValue }] },
+      });
+      if (!existing) throw new Error(`Expense ${idValue} not found`);
+      const requestedStatus = patch.status ? String(patch.status).toUpperCase() : "";
+      if (existing.glPosted && requestedStatus && requestedStatus !== "POSTED") {
+        throw new Error("Posted Expense cannot be moved back to an editable workflow state; use reversal");
+      }
+
+      const updated = await prisma.expense.update({
+        where: { id: existing.id },
+        data: {
+          approvedBy: requestedStatus === "APPROVED"
+            ? actor
+            : requestedStatus === "DRAFT"
+              ? null
+              : requestedStatus === "CANCELLED"
+                ? "__CANCELLED__"
+                : undefined,
+          approvedAt: requestedStatus === "APPROVED"
+            ? new Date()
+            : requestedStatus === "DRAFT" || requestedStatus === "CANCELLED"
+              ? null
+              : undefined,
+          glPosted: requestedStatus === "POSTED" ? true : undefined,
+          journalId: patch.journalId !== undefined ? (patch.journalId ? String(patch.journalId) : null) : undefined,
+          category: patch.expenseAccountId !== undefined ? String(patch.expenseAccountId || "ACC-6600") : undefined,
+          referenceAccount: patch.cashBankAccountId !== undefined ? String(patch.cashBankAccountId || "ACC-1110") : undefined,
+          paymentMethod: patch.paymentMethod !== undefined ? String(patch.paymentMethod || "Cash") : undefined,
+          description: patch.description !== undefined ? String(patch.description || "") : undefined,
+        },
+        include: { supplier: true, project: true },
+      });
+      return mapExpense(updated) as T;
     }
 
     case "PaymentSchedules": {
