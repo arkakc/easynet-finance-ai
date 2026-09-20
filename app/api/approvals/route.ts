@@ -6,6 +6,7 @@ import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script"
 import { POST as legacyTransactionPost } from "@/app/api/transactions/route";
 import { assertCustomerCreditPolicy } from "@/lib/accounting/customer-credit-control";
 import { isCreditNote, postSalesCreditNote } from "@/lib/accounting/sales-return";
+import { prisma } from "@/src/lib/prisma";
 
 const actionSchema = z.object({
   recordType: z.enum(["quote", "invoice", "purchaseOrder", "supplierBill", "payment", "expense"]),
@@ -51,9 +52,16 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
 export async function GET() {
   try {
     await requirePermission("post.approve");
-    const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses] = await Promise.all([
+    const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, manualJournals] = await Promise.all([
       listTable<any>("Quotes", 500, 0), listTable<any>("Invoices", 500, 0), listTable<any>("PurchaseOrders", 500, 0),
       listTable<any>("SupplierBills", 500, 0), listTable<any>("Payments", 500, 0), listTable<any>("Expenses", 500, 0),
+      prisma.journalHeader.findMany({
+        where: {
+          status: "PENDING",
+          sourceDocType: { startsWith: "MANUAL_" },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
     const pending = [
       ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
@@ -62,6 +70,20 @@ export async function GET() {
       ...supplierBills.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Supplier Invoice", documentNo: r.billNumber || r.billId, recordId: r.billId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.billDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/supplierBill/${r.billId}`, approvalRecordType: "supplierBill" })),
       ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", createdAt: r.createdAt || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
       ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
+      ...manualJournals.map((r) => ({
+        module: "Accounts",
+        documentType: "Manual Journal",
+        documentNo: r.code,
+        recordId: r.id,
+        status: "PENDING",
+        party: "",
+        project: "",
+        date: r.date.toISOString().slice(0, 10),
+        createdAt: r.createdAt.toISOString(),
+        amount: Number(r.totalDebit || 0),
+        href: `/journals/${r.code}`,
+        approvalRecordType: "manualJournal",
+      })),
     ].sort((a, b) => createdValue(b.createdAt || b.date) - createdValue(a.createdAt || a.date));
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
