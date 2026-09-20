@@ -56,7 +56,7 @@ export async function postStockMovementAtomic(input:{
     } else if(input.movementType==="RETURN_IN") {
       lines=[
         {accountId:input.inventoryAccountId,debit:value,projectId:project?.code||project?.id,description:"Inventory returned in"},
-        {accountId:input.costAccountId,credit:value,projectId:project?.code||project?.id,description:"Reverse prior inventory cost"},
+        {accountId:costAccountId,credit:value,projectId:project?.code||project?.id,description:"Reverse prior inventory cost"},
       ];
     } else {
       lines=inventoryAdjustmentPosting({amountDelta:isIncoming?value:-value,projectId:project?.code||project?.id,type:input.movementType,costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
@@ -98,6 +98,7 @@ export async function postStockValueAdjustmentAtomic(input:{
     if(input.adjustmentType==="REVALUATION" && Math.abs(delta)<0.005) throw new Error("Revaluation does not change inventory value");
     if(round2(current.value+delta)<-0.005) throw new Error("Inventory adjustment would create a negative inventory value");
 
+    const costAccountId=String(item.costAccount||input.defaultCostAccountId);
     const lines=inventoryAdjustmentPosting({amountDelta:delta,projectId:input.projectRef,type:input.adjustmentType,costAccountId,inventoryAccountId:input.inventoryAccountId,stockAdjustmentAccountId:input.stockAdjustmentAccountId,expensesIncludedInValuationAccountId:input.expensesIncludedInValuationAccountId});
     const nextRate=round4(Math.max(0,(current.value+delta)/current.qty));
     const movement=await tx.stockMovement.create({data:{
