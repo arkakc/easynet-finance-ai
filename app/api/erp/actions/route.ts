@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { requireRequestPermission, type Permission } from "@/lib/auth";
 import { POST as approvalsPost } from "@/app/api/approvals/route";
 import { POST as assetsPost } from "@/app/api/assets/route";
@@ -74,11 +73,6 @@ export async function POST(request: Request) {
 
     const body = incoming.body || {};
     requireRequestPermission(request, permissionFor(incoming.target, body));
-
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
-    if (!env.APP_SECRET && backendConfigured) {
-      throw new Error("Server compatibility credential is not configured");
-    }
 
     const internalRequest = new Request(request.url, {
       method: "POST",
