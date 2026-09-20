@@ -97,7 +97,7 @@ async function main() {
         total: 100,
         amountPaid: 0,
         outstanding: 100,
-        status: "SENT",
+        status: "DRAFT",
         glPosted: false,
         createdBy: "atomic-sales-invoice-uat",
       },
@@ -143,6 +143,7 @@ async function main() {
         },
       ],
       createdBy: "atomic-sales-invoice-uat",
+      approveIfDraft: true,
       approvedBy: "atomic-sales-invoice-uat",
     };
 
@@ -164,7 +165,7 @@ async function main() {
       findPaymentSchedules("DEFERRED_REVENUE", invoice.id),
     ]);
 
-    if (!invoiceAfterFailure || invoiceAfterFailure.status !== "SENT" || invoiceAfterFailure.glPosted || invoiceAfterFailure.journalId) {
+    if (!invoiceAfterFailure || invoiceAfterFailure.status !== "DRAFT" || invoiceAfterFailure.glPosted || invoiceAfterFailure.journalId) {
       throw new Error("Sales Invoice state survived a failed atomic posting");
     }
     if (stockAfterFailure.length) throw new Error("Stock issue survived a failed atomic Sales Invoice posting");
@@ -221,11 +222,11 @@ async function main() {
       database: "temporary clone",
       liveDatabaseChanged: false,
       failedPostingRolledBack,
-      failedInvoiceStateRolledBack: invoiceAfterFailure.status === "SENT" && !invoiceAfterFailure.glPosted,
+      failedInvoiceStateRolledBack: invoiceAfterFailure.status === "DRAFT" && !invoiceAfterFailure.glPosted && !invoiceAfterFailure.approvedAt,
       failedStockIssueRolledBack: stockAfterFailure.length === 0,
       failedDeferredScheduleRolledBack: schedulesAfterFailure.length === 0,
       failedJournalRolledBack: journalAfterFailure === null,
-      successfulInvoiceCommitted: committedInvoice.glPosted === true,
+      successfulInvoiceCommitted: committedInvoice.status === "SENT" && committedInvoice.glPosted === true && Boolean(committedInvoice.approvedAt),
       successfulStockIssueCommitted: issues.length === 1 && Number(issues[0].totalCost) === 40,
       successfulDeferredScheduleCommitted: schedules.length === 1,
       successfulJournalCommitted: journal.status === "POSTED",
