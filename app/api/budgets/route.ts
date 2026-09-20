@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 import { requirePermission } from "@/lib/auth";
@@ -17,7 +17,9 @@ const schema = z.object({
 });
 
 function requireSecret(secret?: string) {
-  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
   if (!env.APP_SECRET && !backendConfigured) return;
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
@@ -29,7 +31,9 @@ const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 1
 export async function GET() {
   try {
     await requirePermission("accounts.read");
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const [budgets, accounts, headers, lines] = await Promise.all([
         prisma.budget.findMany({ orderBy: [{ fiscalYear: "desc" }, { createdAt: "desc" }] }),
@@ -128,7 +132,9 @@ export async function POST(request: Request) {
     if (normalizedPeriod !== "ANNUAL" && !normalizedPeriod.startsWith(`${record.financialYear}-`)) {
       throw new Error("Budget period must fall within the selected financial year");
     }
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const account = await prisma.chartOfAccounts.findUnique({ where: { id: record.accountId } });
       if (!account) throw new Error("Budget account does not exist");
