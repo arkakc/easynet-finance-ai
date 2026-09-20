@@ -1834,7 +1834,7 @@ export async function prismaDeleteInvoice(invoiceId: string) {
   if (!existing) throw new Error("Sales invoice not found");
 
   const [paymentCount, creditNoteCount] = await Promise.all([
-    prisma.payment.count({ where: { invoiceId: existing.id } }),
+    prisma.paymentAllocation.count({ where: { invoiceId: existing.id, status: "POSTED" } }),
     prisma.creditNote.count({ where: { originalInvoiceId: existing.id } }),
   ]);
 
@@ -1885,7 +1885,7 @@ export async function prismaDeleteSupplierBill(billId: string) {
   if (!existing) throw new Error("Supplier invoice / bill not found");
 
   const [paymentCount, landedCostCount] = await Promise.all([
-    prisma.payment.count({ where: { billId: existing.id } }),
+    prisma.paymentAllocation.count({ where: { billId: existing.id, status: "POSTED" } }),
     prisma.landedCostVoucher.count({ where: { billId: existing.id } }),
   ]);
 
@@ -1910,9 +1910,14 @@ export async function prismaDeletePayment(paymentId: string) {
   });
   if (!existing) throw new Error("Payment entry not found");
 
+  const allocationCount = await prisma.paymentAllocation.count({
+    where: { paymentId: existing.id },
+  });
+
   const reasons: string[] = [];
   if (existing.status === "CLEARED" || existing.status === "CAPTURED") reasons.push(`payment status is ${existing.status}`);
   if (existing.clearanceDate) reasons.push("bank clearance recorded");
+  if (allocationCount > 0) reasons.push(`${allocationCount} allocation row(s)`);
 
   if (reasons.length > 0) {
     throw new Error(`Cannot delete payment: payment has already been finalized or cleared (${reasons.join(", ")}).`);
