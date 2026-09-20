@@ -40,6 +40,7 @@ export type AtomicSalesInvoiceInput = {
   deferredRevenueAccountId: string;
   inventoryAccountId: string;
   deferredSchedules?: Array<Record<string, unknown>>;
+  approveIfDraft?: boolean;
   createdBy?: string;
   approvedBy?: string;
 };
@@ -99,7 +100,19 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
         alreadyPosted: true,
       };
     }
-    if (invoice.status !== "SENT") {
+    if (invoice.status === "DRAFT") {
+      if (!input.approveIfDraft) {
+        throw new Error("Sales Invoice must be APPROVED before posting. Current status: DRAFT");
+      }
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          status: "SENT",
+          approvedBy: input.approvedBy || "Finance Controller",
+          approvedAt: new Date(),
+        },
+      });
+    } else if (invoice.status !== "SENT") {
       throw new Error(`Sales Invoice must be APPROVED before posting. Current status: ${invoice.status}`);
     }
 
