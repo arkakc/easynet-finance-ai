@@ -2,6 +2,7 @@ import { runAtomicAccounting, type AtomicPostingLine } from "@/lib/accounting/at
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { ensurePaymentScheduleInfrastructure, findPaymentSchedules, updatePaymentSchedule } from "@/lib/accounting/payment-schedule-store";
 import { round2 } from "@/lib/accounting/inventory";
+import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 
 export type AtomicSalesCreditNoteInput = {
@@ -298,7 +299,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     await updatePaymentSchedule(reason.scheduleId, { status: "POSTED" }, tx);
 
     const journal = await postJournal({
-      postingDate: credit.issuedDate.toISOString().slice(0, 10),
+      postingDate: normalizeAccountingDate(credit.issuedDate.toISOString()),
       documentType: "SALES_CREDIT_NOTE",
       documentId: credit.id,
       documentNumber: credit.code,
