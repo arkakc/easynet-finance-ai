@@ -28,6 +28,8 @@ const DIRECT_REVERSAL_TYPES = new Set([
   "SUPPLIER_PAYMENT",
   "CUSTOMER_ADVANCE",
   "SUPPLIER_ADVANCE",
+  "CUSTOMER_ADVANCE_ALLOCATION",
+  "SUPPLIER_ADVANCE_ALLOCATION",
 ]);
 
 export type ReverseJournalInput = {
@@ -82,6 +84,62 @@ async function findPayment(tx: Prisma.TransactionClient, reference: string) {
   return tx.payment.findFirst({ where: { OR: [{ id: reference }, { code: reference }] } });
 }
 
+async function reverseAllocationSettlement(
+  tx: Prisma.TransactionClient,
+  allocation: {
+    id: string;
+    amount: Prisma.Decimal;
+    invoiceId: string | null;
+    billId: string | null;
+    status: string;
+  },
+  actor: string,
+) {
+  if (allocation.status !== "POSTED") {
+    throw new Error("Payment allocation is not active");
+  }
+  const amount = round2(Number(allocation.amount || 0));
+
+  if (allocation.invoiceId) {
+    const invoice = await tx.invoice.findUnique({ where: { id: allocation.invoiceId } });
+    if (!invoice) throw new Error("Allocated Sales Invoice was not found");
+    const amountPaid = round2(Math.max(0, Number(invoice.amountPaid || 0) - amount));
+    const outstanding = round2(Math.max(0, Number(invoice.total || 0) - amountPaid));
+    await tx.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        amountPaid,
+        outstanding,
+        status: outstanding <= 0.001 ? "PAID" : amountPaid > 0.001 ? "PARTIAL" : "SENT",
+      },
+    });
+  }
+
+  if (allocation.billId) {
+    const bill = await tx.supplierBill.findUnique({ where: { id: allocation.billId } });
+    if (!bill) throw new Error("Allocated Supplier Invoice was not found");
+    const amountPaid = round2(Math.max(0, Number(bill.amountPaid || 0) - amount));
+    const outstanding = round2(Math.max(0, Number(bill.total || 0) - amountPaid));
+    await tx.supplierBill.update({
+      where: { id: bill.id },
+      data: {
+        amountPaid,
+        outstanding,
+        status: outstanding <= 0.001 ? "PAID" : amountPaid > 0.001 ? "PARTIAL" : "SENT",
+      },
+    });
+  }
+
+  await tx.paymentAllocation.update({
+    where: { id: allocation.id },
+    data: {
+      status: "REVERSED",
+      reversedBy: actor,
+      reversedAt: new Date(),
+    },
+  });
+}
+
 async function synchronizeSourceAfterReversal(
   tx: Prisma.TransactionClient,
   original: {
@@ -89,6 +147,7 @@ async function synchronizeSourceAfterReversal(
     sourceDocId: string | null;
     reference: string | null;
   },
+  actor: string,
 ) {
   const type = String(original.sourceDocType || "").toUpperCase();
   const reference = sourceReference(original);
@@ -135,6 +194,25 @@ async function synchronizeSourceAfterReversal(
     return;
   }
 
+  if (["CUSTOMER_ADVANCE_ALLOCATION", "SUPPLIER_ADVANCE_ALLOCATION"].includes(type)) {
+    const allocation = await tx.paymentAllocation.findFirst({
+      where: {
+        OR: [
+          { id: reference },
+          { code: reference },
+        ],
+      },
+    });
+    if (!allocation) {
+      throw new Error("Linked Payment Allocation was not found");
+    }
+    if (allocation.allocationType !== "ADVANCE") {
+      throw new Error("Only advance allocation journals can be reversed through this allocation workflow");
+    }
+    await reverseAllocationSettlement(tx, allocation, actor);
+    return;
+  }
+
   if (["CUSTOMER_RECEIPT", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
     const payment = await findPayment(tx, reference);
     if (!payment) {
@@ -142,44 +220,32 @@ async function synchronizeSourceAfterReversal(
     }
     if (payment.status === "REVERSED") throw new Error("The linked Payment Entry is already reversed");
 
-    if (type === "CUSTOMER_RECEIPT" && payment.invoiceId) {
-      const invoice = await tx.invoice.findUnique({ where: { id: payment.invoiceId } });
-      if (!invoice) throw new Error("Allocated Sales Invoice was not found");
-      const settlement = round2(Number(payment.amount || 0) + Number(payment.s65aDeduction || 0));
-      const amountPaid = Math.max(0, round2(Number(invoice.amountPaid || 0) - settlement));
-      const outstanding = Math.max(0, round2(Number(invoice.total || 0) - amountPaid));
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          amountPaid,
-          outstanding,
-          status: outstanding <= 0.01 ? "PAID" : amountPaid > 0.01 ? "PARTIAL" : "SENT",
-        },
-      });
-    }
+    const allocations = await tx.paymentAllocation.findMany({
+      where: {
+        paymentId: payment.id,
+        status: "POSTED",
+      },
+      orderBy: { createdAt: "asc" },
+    });
 
-    if (type === "SUPPLIER_PAYMENT" && payment.billId) {
-      const bill = await tx.supplierBill.findUnique({ where: { id: payment.billId } });
-      if (!bill) throw new Error("Allocated Supplier Bill was not found");
-      const settlement = round2(
-        Number(payment.amount || 0)
-        + Number(payment.bptDeduction || 0)
-        + Number(payment.withholdingTax || 0),
+    const advanceAllocations = allocations.filter((row) => row.allocationType === "ADVANCE");
+    if (advanceAllocations.length) {
+      throw new Error(
+        "Reverse active advance allocation journal(s) before reversing the original advance Payment Entry",
       );
-      const amountPaid = Math.max(0, round2(Number(bill.amountPaid || 0) - settlement));
-      const outstanding = Math.max(0, round2(Number(bill.total || 0) - amountPaid));
-      await tx.supplierBill.update({
-        where: { id: bill.id },
-        data: {
-          amountPaid,
-          outstanding,
-          status: outstanding <= 0.01 ? "PAID" : amountPaid > 0.01 ? "PARTIAL" : "SENT",
-        },
-      });
     }
 
-    await tx.payment.update({ where: { id: payment.id }, data: { status: "REVERSED" } });
+    for (const allocation of allocations) {
+      await reverseAllocationSettlement(tx, allocation, actor);
+    }
+
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: "REVERSED" },
+    });
+    return;
   }
+
 }
 
 export async function reversePostedJournal(
@@ -244,7 +310,7 @@ export async function reversePostedJournal(
 
     // Source/subledger correction and the counter-entry commit together.
     // Any failure rolls the complete reversal back.
-    await synchronizeSourceAfterReversal(tx, original);
+    await synchronizeSourceAfterReversal(tx, original, input.createdBy || "journal-reversal-ui");
 
     const reversal = await tx.journalHeader.create({
       data: {
@@ -269,6 +335,19 @@ export async function reversePostedJournal(
       },
       include: { lines: { orderBy: { lineNo: "asc" } } },
     });
+
+    if (["CUSTOMER_ADVANCE_ALLOCATION", "SUPPLIER_ADVANCE_ALLOCATION"].includes(type)) {
+      const allocationRef = sourceReference(original);
+      const allocation = await tx.paymentAllocation.findFirst({
+        where: { OR: [{ id: allocationRef }, { code: allocationRef }] },
+      });
+      if (allocation) {
+        await tx.paymentAllocation.update({
+          where: { id: allocation.id },
+          data: { reversalJournalId: reversal.code },
+        });
+      }
+    }
 
     // The original journal deliberately remains POSTED and immutable.
     // Financial reports therefore see both the original and its POSTED
