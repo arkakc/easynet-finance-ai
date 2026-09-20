@@ -4,9 +4,9 @@ import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
-import { postJournal, receiptPosting, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { receiptPosting, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
-import { synchronizeSettlement } from "@/lib/accounting/advance-allocation";
 import { round2 } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
 import {
@@ -209,21 +209,25 @@ async function finalizeCustomerRefund(row: any, patch: { paymentDate: string; am
   if (String(refundable.creditNote.customerId || "") !== String(row.partyId || "")) throw new Error("Refund customer does not match Sales Credit Note customer");
   if (patch.amount > refundable.refundable + 0.001) throw new Error(`Refund exceeds remaining refundable customer credit. Available K${refundable.refundable.toFixed(2)}`);
 
-  await updateRecord("Payments", "paymentId", row.paymentId, patch, "payment-final-save:customer-refund");
-  const journal = await postJournal({
+  const result = await finalizePaymentAtomic({
+    paymentId: row.paymentId,
     postingDate: patch.paymentDate,
-    documentType: "CUSTOMER_REFUND",
-    documentId: row.paymentId,
-    documentNumber: String(row.paymentNumber || row.paymentId),
+    amount: patch.amount,
+    paymentMethod: patch.paymentMethod,
+    cashBankAccountId: patch.cashBankAccountId,
     reference: patch.reference || `Customer refund against ${refundable.creditNote.invoiceNumber}`,
+    documentType: "CUSTOMER_REFUND",
+    documentNumber: String(row.paymentNumber || row.paymentId),
     projectId: row.projectId || "",
+    createdBy: "payment-final-save:customer-refund",
+    approvedBy: "Finance Controller",
     lines: [
       { accountId: "ACC-2150", debit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Refund customer credit / advance" },
       { accountId: patch.cashBankAccountId, credit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Customer refund paid" },
     ],
   });
-  await updateRecord("Payments", "paymentId", row.paymentId, { status: "POSTED", journalId: journal.journalId }, "payment-final-save:customer-refund");
-  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, refund: true, creditNoteId };
+
+  return { recordId: row.paymentId, status: "POSTED", journalId: result.journalId, refund: true, creditNoteId };
 }
 
 function referenceSourceId(row: any, prefix: "SQ" | "PO") {
@@ -311,19 +315,26 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
   const lines = receive
     ? receiptPosting({ amount: patch.amount, customerId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance })
     : supplierPaymentPosting({ amount: patch.amount, supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance });
-  const journal = await postJournal({
+
+  const result = await finalizePaymentAtomic({
+    paymentId: row.paymentId,
     postingDate: patch.paymentDate,
-    documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
-    documentId: row.paymentId,
-    documentNumber: String(row.paymentNumber || row.paymentId),
+    amount: patch.amount,
+    paymentMethod: patch.paymentMethod,
+    cashBankAccountId: patch.cashBankAccountId,
     reference: patch.reference || String(row.reference || row.paymentNumber || row.paymentId),
+    documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
+    documentNumber: String(row.paymentNumber || row.paymentId),
     projectId: row.projectId || "",
     lines,
+    againstInvoiceId: !advance && receive ? againstDocumentId : undefined,
+    againstBillId: !advance && !receive ? againstDocumentId : undefined,
+    createdBy: "payment-final-save:standard",
+    approvedBy: "Finance Controller",
   });
-  await updateRecord("Payments", "paymentId", row.paymentId, { ...patch, status: "POSTED", journalId: journal.journalId }, "payment-final-save:standard");
-  if (!advance) await synchronizeSettlement(receive ? "Customer" : "Supplier", againstDocumentId);
-  console.info("payment-final-save.posted", { paymentId: row.paymentId, journalId: journal.journalId, partyType, againstDocumentId: againstDocumentId || null, advance });
-  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, advance, finalized: true };
+
+  console.info("payment-final-save.posted", { paymentId: row.paymentId, journalId: result.journalId, partyType, againstDocumentId: againstDocumentId || null, advance });
+  return { recordId: row.paymentId, status: "POSTED", journalId: result.journalId, advance, finalized: true };
 }
 
 async function finalizePayment(payload: Record<string, unknown>) {
