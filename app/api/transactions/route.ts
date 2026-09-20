@@ -253,32 +253,6 @@ async function createExpense(raw: unknown) {
   return { type: "expense", recordId: expenseId, documentNumber: expenseNumber, totalAmount, status: "DRAFT" };
 }
 
-async function synchronizePaymentAllocation(row: any) {
-  const againstId = String(row.againstDocumentId || "");
-  if (!againstId) return;
-  const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
-  const postedPayments = await findRecords<any>("Payments", { againstDocumentId: againstId, status: "POSTED" }, 500);
-  const allocated = round2(postedPayments.rows
-    .filter((payment: any) => receive ? String(payment.paymentType || "").toUpperCase() === "RECEIVE" : String(payment.paymentType || "").toUpperCase() === "PAY")
-    .reduce((sum: number, payment: any) => sum + Number(payment.amount || 0), 0));
-
-  if (receive) {
-    const invoice = (await findRecords<any>("Invoices", { invoiceId: againstId }, 1)).rows[0];
-    if (!invoice) return;
-    const total = Number(invoice.totalAmount || 0);
-    if (allocated > total + 0.001) throw new Error("Posted customer receipts exceed invoice total; allocation review required");
-    const outstandingAmount = Math.max(0, round2(total - allocated));
-    await updateRecord("Invoices", "invoiceId", againstId, { paidAmount: allocated, outstandingAmount, status: outstandingAmount === 0 ? "PAID" : "POSTED" }, "finance-controller");
-  } else {
-    const bill = (await findRecords<any>("SupplierBills", { billId: againstId }, 1)).rows[0];
-    if (!bill) return;
-    const total = Number(bill.totalAmount || 0);
-    if (allocated > total + 0.001) throw new Error("Posted supplier payments exceed bill total; allocation review required");
-    const outstandingAmount = Math.max(0, round2(total - allocated));
-    await updateRecord("SupplierBills", "billId", againstId, { paidAmount: allocated, outstandingAmount, status: outstandingAmount === 0 ? "PAID" : "POSTED" }, "finance-controller");
-  }
-}
-
 async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items: Map<string, any>, policy: Record<string, number>, defaultIncomeAccount: string) {
   const schedules: any[] = [];
   for (const line of invoiceLines) {
