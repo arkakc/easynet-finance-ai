@@ -233,7 +233,7 @@ async function main() {
       failedMovementRolledBack,
       successfulMovementCommitted:Boolean(issueMovement),
       successfulMovementJournalBalanced:Number(issueJournal.totalDebit)===Number(issueJournal.totalCredit),
-      sellPriceUnchangedByValuation:Number(itemAfterIssue.sellPrice)===99,
+      sellPriceUnchangedByValuation:Number(itemAfterIssue?.sellPrice)===99,
       failedAdjustmentRolledBack,
       landedCostCommitted:Number(landedMovement.totalCost)===16,
       nrvSignedValuePreserved:Number(nrvMovement.totalCost)===-8,
