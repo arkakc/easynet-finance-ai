@@ -1,5 +1,6 @@
 import { AccountTypeGL, Prisma, PrismaClient } from "@prisma/client";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 
 export type ManualJournalLineInput = {
@@ -211,9 +212,7 @@ async function validatePersistedPendingJournal(
   journal: PersistedPendingJournal,
 ) {
   if (!journal || !journal.lines) throw new Error("Manual journal not found");
-  const postingDate = journal.date.toLocaleDateString("en-CA", {
-    timeZone: "Pacific/Port_Moresby",
-  });
+  const postingDate = normalizeAccountingDate(journal.date.toISOString());
   await assertPostingLock(tx, postingDate);
 
   const lineInputs: ManualJournalLineInput[] = journal.lines.map((line) => ({
