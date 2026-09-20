@@ -1,4 +1,4 @@
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,9 @@ export default async function StatementsPage() {
   let error = "";
 
   try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const [c, s, i, b, p] = await Promise.all([
         prisma.customer.findMany(),
