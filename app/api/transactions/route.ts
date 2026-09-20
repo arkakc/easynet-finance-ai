@@ -34,6 +34,7 @@ import {
 } from "@/lib/accounting/inventory";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoice";
+import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -392,118 +393,33 @@ async function postSupplierBill(row: any) {
   }
 
   await ensureAccountingInfrastructure();
-  const [lineResult, itemResult, tolerance, defaults] = await Promise.all([
-    findRecords<any>("SupplierBillLines", { billId: row.billId }, 500),
-    listTable<any>("Items", 500, 0),
+  const [tolerance, defaults] = await Promise.all([
     purchasePriceVarianceTolerancePct(),
     loadConfiguredPostingAccounts(),
   ]);
-  if (!lineResult.rows.length) throw new Error("Supplier bill has no lines");
-  const items = new Map(itemResult.rows.map((item: any) => [String(item.itemId || ""), item]));
 
-  const supplierBillPoId = String(row.poId || row.orderId || row.sourceDocumentId || "").trim();
-  if (!supplierBillPoId) {
-    const stockLine = lineResult.rows.find((line: any) => itemType(items.get(String(line.itemId || ""))) === "STOCK");
-    if (stockLine) throw new Error("Stock Supplier Invoices require an approved Purchase Order and Purchase Receipt");
-    const journal = await postJournal({
-      postingDate: String(row.billDate), documentType: "SUPPLIER_BILL", documentId: row.billId,
-      documentNumber: row.billNumber, reference: `Supplier bill ${row.billNumber}`, projectId: row.projectId,
-      lines: supplierBillPostingByLines({
-        total: Number(row.totalAmount), gst: Number(row.gstAmount), supplierId: row.supplierId, projectId: row.projectId,
-        payableAccountId: defaults.defaultPayableAccount,
-        costLines: lineResult.rows.map((line: any) => ({ accountId: String(line.costAccountId || items.get(String(line.itemId || ""))?.costAccount || defaults.defaultCostOfGoodsSoldAccount), amount: Number(line.netAmount || 0), description: String(line.description || "Supplier cost") })),
-      }),
-    });
-    await updateRecord("SupplierBills", "billId", row.billId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-    return { recordType: "supplierBill", recordId: row.billId, status: "POSTED", journalId: journal.journalId };
-  }
-
-  const [poResult, poLinesResult, receiptResult, poBillsResult, allBillLines] = await Promise.all([
-    findRecords<any>("PurchaseOrders", { poId: supplierBillPoId }, 1),
-    findRecords<any>("POLines", { poId: supplierBillPoId }, 500),
-    findRecords<any>("StockMovements", { sourceDocumentId: supplierBillPoId }, 500),
-    findRecords<any>("SupplierBills", { poId: supplierBillPoId }, 500),
-    listTable<any>("SupplierBillLines", 500, 0),
-  ]);
-  const po = poResult.rows[0];
-  if (!po) throw new Error("Referenced Purchase Order not found");
-  if (String(po.supplierId || "") !== String(row.supplierId || "")) throw new Error("Supplier Invoice supplier does not match the Purchase Order");
-  if (String(po.projectId || "") !== String(row.projectId || "")) throw new Error("Supplier Invoice project does not match the Purchase Order");
-
-  const priorBillIds = new Set(poBillsResult.rows
-    .filter((bill: any) => String(bill.billId || "") !== String(row.billId) && !["CANCELLED", "REVERSED"].includes(String(bill.status || "").toUpperCase()))
-    .map((bill: any) => String(bill.billId || "")));
-
-  const previouslyBilledByItem = new Map<string, number>();
-  for (const line of allBillLines.rows) {
-    if (!priorBillIds.has(String(line.billId || ""))) continue;
-    const itemId = String(line.itemId || "");
-    previouslyBilledByItem.set(itemId, (previouslyBilledByItem.get(itemId) || 0) + Number(line.qty || 0));
-  }
-
-  const serviceCostLines: Array<{ accountId: string; amount: number; description?: string }> = [];
-  const stockLines: Array<{ invoiceAmount: number; receiptValue: number; description?: string }> = [];
-
-  for (const line of lineResult.rows) {
-    const itemId = String(line.itemId || "");
-    const item = items.get(itemId);
-    if (!item) throw new Error(`Supplier Invoice item not found in Item Master: ${itemId}`);
-    const matchingPoLines = poLinesResult.rows.filter((poLine: any) => String(poLine.itemId || "") === itemId);
-    if (!matchingPoLines.length) throw new Error(`Supplier Invoice item is not on the Purchase Order: ${item.itemCode || itemId}`);
-
-    const orderedQty = matchingPoLines.reduce((sum: number, poLine: any) => sum + Number(poLine.qty || 0), 0);
-    const poRate = weightedRate(matchingPoLines);
-    const priorBilled = Number(previouslyBilledByItem.get(itemId) || 0);
-    const currentQty = Number(line.qty || 0);
-    const rateVariancePct = poRate > 0 ? Math.abs(Number(line.rate || 0) - poRate) / poRate * 100 : 0;
-    if (rateVariancePct > tolerance + 0.0001) {
-      throw new Error(`Purchase price variance exceeds ${tolerance}% tolerance for ${item.itemCode || itemId}. PO rate ${poRate.toFixed(2)}, invoice rate ${Number(line.rate || 0).toFixed(2)}`);
-    }
-
-    if (itemType(item) === "STOCK") {
-      const receipts = receiptResult.rows.filter((movement: any) => String(movement.itemId || "") === itemId && String(movement.movementType || "") === "PURCHASE_RECEIPT");
-      const receivedQty = receipts.reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0), 0);
-      const availableToBill = Math.max(0, receivedQty - priorBilled);
-      if (currentQty > availableToBill + 0.0001) {
-        throw new Error(`Three-way match failed for ${item.itemCode || itemId}: ordered ${orderedQty}, received ${receivedQty}, previously billed ${priorBilled}, invoice qty ${currentQty}`);
-      }
-      const receiptRate = receivedQty > 0
-        ? receipts.reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0) * Number(movement.unitCost || 0), 0) / receivedQty
-        : 0;
-      stockLines.push({ invoiceAmount: Number(line.netAmount || 0), receiptValue: round2(currentQty * receiptRate), description: String(line.description || item.itemName || itemId) });
-    } else {
-      const availableToBill = Math.max(0, orderedQty - priorBilled);
-      if (currentQty > availableToBill + 0.0001) throw new Error(`Supplier Invoice quantity exceeds remaining PO quantity for ${item.itemCode || itemId}`);
-      serviceCostLines.push({ accountId: String(line.costAccountId || item.costAccount || defaults.defaultCostOfGoodsSoldAccount), amount: Number(line.netAmount || 0), description: String(line.description || item.itemName || itemId) });
-    }
-  }
-
-  const mixed = supplierBillPostingMixed({
-    total: Number(row.totalAmount), gst: Number(row.gstAmount), supplierId: row.supplierId, projectId: row.projectId,
-    serviceCostLines, stockLines,
+  const posted = await finalizeSupplierBillAtomic({
+    billId: row.billId,
+    purchaseOrderRef: String(row.poId || row.orderId || row.sourceDocumentId || ""),
+    postingDate: String(row.billDate),
+    documentNumber: String(row.billNumber || row.billId),
+    reference: `Supplier bill ${row.billNumber || row.billId}`,
     payableAccountId: defaults.defaultPayableAccount,
     stockReceivedButNotBilledAccountId: defaults.stockReceivedButNotBilledAccount,
-    purchasePriceVarianceAccountId: defaults.stockAdjustmentAccount,
+    defaultCostAccountId: defaults.defaultCostOfGoodsSoldAccount,
+    purchasePriceVarianceTolerancePct: tolerance,
+    createdBy: "supplier-bill-posting",
+    approvedBy: "Finance Controller",
   });
-  const journal = await postJournal({
-    postingDate: String(row.billDate), documentType: "SUPPLIER_BILL", documentId: row.billId,
-    documentNumber: row.billNumber, reference: `Supplier bill ${row.billNumber}`, projectId: row.projectId,
-    lines: mixed.lines,
-  });
-  await updateRecord("SupplierBills", "billId", row.billId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-
-  const currentBillQty = new Map<string, number>();
-  for (const line of lineResult.rows) currentBillQty.set(String(line.itemId || ""), (currentBillQty.get(String(line.itemId || "")) || 0) + Number(line.qty || 0));
-  const fullyBilled = poLinesResult.rows.every((poLine: any) => {
-    const itemId = String(poLine.itemId || "");
-    const totalOrdered = poLinesResult.rows.filter((candidate: any) => String(candidate.itemId || "") === itemId).reduce((sum: number, candidate: any) => sum + Number(candidate.qty || 0), 0);
-    return Number(previouslyBilledByItem.get(itemId) || 0) + Number(currentBillQty.get(itemId) || 0) + 0.0001 >= totalOrdered;
-  });
-  await updateRecord("PurchaseOrders", "poId", supplierBillPoId, { status: fullyBilled ? "BILLED" : "PART_BILLED" }, "finance-controller");
 
   return {
-    recordType: "supplierBill", recordId: row.billId, status: "POSTED", journalId: journal.journalId,
-    purchasePriceVariance: mixed.purchasePriceVariance, grniCleared: mixed.receiptValue,
+    recordType: "supplierBill",
+    recordId: row.billId,
+    status: posted.alreadyPosted ? "already-posted" : "POSTED",
+    journalId: posted.journalId,
+    purchasePriceVariance: posted.purchasePriceVariance,
+    grniCleared: posted.grniCleared,
+    purchaseOrderStatus: posted.purchaseOrderStatus,
   };
 }
 
