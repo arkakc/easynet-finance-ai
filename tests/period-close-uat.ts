@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import { AccountTypeGL, NormalBalance, PrismaClient, Role, UserStatus } from "@prisma/client";
 import { closeAccountingPeriod, monthBounds, reopenAccountingPeriod } from "../lib/accounting/period-close";
 import { buildFinancialStatements } from "../lib/accounting/financial-statements";
 import { databasePath, verifyLiveDatabase } from "../lib/system/database-backup";
@@ -16,8 +16,47 @@ async function main() {
   try {
     const month = "2026-08";
     const bounds = monthBounds(month);
-    const actor = await client.user.findFirst({ where: { status: "ACTIVE", role: "SYSTEM_MANAGER" } });
-    if (!actor) throw new Error("UAT requires an active System Manager");
+    const actor = await client.user.findFirst({ where: { status: "ACTIVE", role: "SYSTEM_MANAGER" } })
+      || await client.user.upsert({
+        where: { email: "period-close-uat@easynet.local" },
+        update: { status: UserStatus.ACTIVE, role: Role.SYSTEM_MANAGER },
+        create: {
+          email: "period-close-uat@easynet.local",
+          name: "Period Close UAT System Manager",
+          role: Role.SYSTEM_MANAGER,
+          status: UserStatus.ACTIVE,
+        },
+      });
+
+    const customer = await client.customer.findFirst({ where: { isActive: true } })
+      || await client.customer.upsert({
+        where: { code: "UAT-PERIOD-CUSTOMER" },
+        update: { isActive: true },
+        create: { code: "UAT-PERIOD-CUSTOMER", name: "UAT Period Close Customer", isActive: true },
+      });
+
+    const supplier = await client.supplier.findFirst({ where: { isActive: true } })
+      || await client.supplier.upsert({
+        where: { code: "UAT-PERIOD-SUPPLIER" },
+        update: { isActive: true },
+        create: { code: "UAT-PERIOD-SUPPLIER", name: "UAT Period Close Supplier", isActive: true },
+      });
+
+    const existingAsset = await client.chartOfAccounts.findFirst({
+      where: { isActive: true, type: "ASSET", children: { none: {} } },
+      orderBy: { code: "asc" },
+    });
+    const bankLedger = existingAsset || await client.chartOfAccounts.upsert({
+      where: { code: "UAT-PERIOD-BANK" },
+      update: { isActive: true },
+      create: {
+        code: "UAT-PERIOD-BANK",
+        name: "UAT Period Close Bank",
+        type: AccountTypeGL.ASSET,
+        normalBalance: NormalBalance.DEBIT,
+        isActive: true,
+      },
+    });
     await client.accountingPeriod.deleteMany();
     await client.reconciliation.deleteMany({ where: { periodStart: { lte: bounds.end }, periodEnd: { gte: bounds.start } } });
     await client.globalSettings.upsert({
@@ -26,7 +65,17 @@ async function main() {
       update: { value: "2026-07-31" },
     });
     const banks = await client.bankAccount.findMany({ where: { isActive: true } });
+    await client.bankTransaction.updateMany({
+      where: { date: { gte: bounds.start, lte: bounds.end } },
+      data: { isReconciled: true },
+    });
     for (const bank of banks) {
+      if (!bank.chartOfAccountsId) {
+        await client.bankAccount.update({
+          where: { id: bank.id },
+          data: { chartOfAccountsId: bankLedger.id },
+        });
+      }
       await client.reconciliation.create({ data: {
         bankAccountId: bank.id,
         periodStart: bounds.start,
@@ -42,9 +91,6 @@ async function main() {
     }
 
     const baseline = await buildFinancialStatements({ from: "1900-01-01", asOf: bounds.endText }, client);
-    const customer = await client.customer.findFirst({ where: { isActive: true } });
-    const supplier = await client.supplier.findFirst({ where: { isActive: true } });
-    if (!customer || !supplier) throw new Error("UAT requires an active customer and supplier");
     if (baseline.controls.receivables.difference > 0) {
       await client.invoice.create({ data: {
         code: "UAT-AR-CONTROL",
