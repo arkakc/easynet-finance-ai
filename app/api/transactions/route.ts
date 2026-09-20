@@ -10,7 +10,6 @@ import {
   updateRecord,
 } from "@/lib/backend/apps-script";
 import {
-  expensePosting,
   postJournal,
   receiptPosting,
   salesInvoicePostingByLines,
@@ -35,6 +34,7 @@ import {
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoice";
 import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
+import { finalizeExpenseAtomic } from "@/lib/accounting/atomic-expense";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -96,6 +96,7 @@ const expenseSchema = z.object({
 const postSchema = z.object({
   recordType: z.enum(["invoice", "supplierBill", "payment", "expense"]),
   recordId: text.min(1),
+  approveAtomically: z.coerce.boolean().optional().default(false),
 });
 
 const allocateAdvanceSchema = z.object({
@@ -303,7 +304,7 @@ async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items:
   return schedules;
 }
 
-async function postSalesInvoice(row: any) {
+async function postSalesInvoice(row: any, approveAtomically = false) {
   if (["POSTED", "PAID"].includes(String(row.status || "").toUpperCase()) && String(row.journalId || "")) {
     return { recordType: "invoice", recordId: row.invoiceId, status: "already-posted", journalId: row.journalId };
   }
@@ -369,6 +370,7 @@ async function postSalesInvoice(row: any) {
     deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
     inventoryAccountId: defaults.defaultInventoryAccount,
     deferredSchedules: schedules,
+    approveIfDraft: approveAtomically,
     createdBy: "sales-invoice-posting",
     approvedBy: "Finance Controller",
   });
@@ -384,7 +386,7 @@ async function postSalesInvoice(row: any) {
   };
 }
 
-async function postSupplierBill(row: any) {
+async function postSupplierBill(row: any, approveAtomically = false) {
   if (["POSTED", "PAID"].includes(String(row.status || "").toUpperCase()) && String(row.journalId || "")) {
     return { recordType: "supplierBill", recordId: row.billId, status: "already-posted", journalId: row.journalId };
   }
@@ -408,6 +410,7 @@ async function postSupplierBill(row: any) {
     stockReceivedButNotBilledAccountId: defaults.stockReceivedButNotBilledAccount,
     defaultCostAccountId: defaults.defaultCostOfGoodsSoldAccount,
     purchasePriceVarianceTolerancePct: tolerance,
+    approveIfDraft: approveAtomically,
     createdBy: "supplier-bill-posting",
     approvedBy: "Finance Controller",
   });
@@ -511,12 +514,12 @@ async function postRecord(raw: unknown) {
   if (parsed.recordType === "invoice") {
     const row = (await findRecords<any>("Invoices", { invoiceId: parsed.recordId }, 1)).rows[0];
     if (!row) throw new Error("Invoice not found");
-    return postSalesInvoice(row);
+    return postSalesInvoice(row, parsed.approveAtomically);
   }
   if (parsed.recordType === "supplierBill") {
     const row = (await findRecords<any>("SupplierBills", { billId: parsed.recordId }, 1)).rows[0];
     if (!row) throw new Error("Supplier bill not found");
-    return postSupplierBill(row);
+    return postSupplierBill(row, parsed.approveAtomically);
   }
   if (parsed.recordType === "payment") {
     const row = (await findRecords<any>("Payments", { paymentId: parsed.recordId }, 1)).rows[0];
@@ -526,22 +529,29 @@ async function postRecord(raw: unknown) {
 
   const row = (await findRecords<any>("Expenses", { expenseId: parsed.recordId }, 1)).rows[0];
   if (!row) throw new Error("Expense not found");
-  if (String(row.status || "").toUpperCase() === "POSTED" && String(row.journalId || "")) {
-    return { recordType: parsed.recordType, recordId: parsed.recordId, status: "already-posted", journalId: row.journalId };
+  if (Number(row.gstAmount || 0) > 0 && (await gstStatus()) !== "VERIFIED") {
+    throw new Error("GST status is UNVERIFIED. Verify GST registration before posting input GST.");
   }
-  if (Number(row.gstAmount || 0) > 0 && (await gstStatus()) !== "VERIFIED") throw new Error("GST status is UNVERIFIED. Verify GST registration before posting input GST.");
+
   await ensureAccountingInfrastructure();
-  const journal = await postJournal({
-    postingDate: String(row.expenseDate), documentType: "EXPENSE", documentId: row.expenseId,
-    documentNumber: row.expenseNumber, reference: row.description, projectId: row.projectId,
-    lines: expensePosting({
-      total: Number(row.totalAmount), net: Number(row.netAmount), gst: Number(row.gstAmount),
-      supplierId: row.supplierId, projectId: row.projectId, expenseAccountId: row.expenseAccountId,
-      cashBankAccountId: row.cashBankAccountId,
-    }),
+  const posted = await finalizeExpenseAtomic({
+    expenseId: row.expenseId,
+    postingDate: String(row.expenseDate),
+    documentNumber: String(row.expenseNumber || row.expenseId),
+    reference: String(row.description || row.expenseNumber || row.expenseId),
+    expenseAccountId: String(row.expenseAccountId || ""),
+    cashBankAccountId: String(row.cashBankAccountId || ""),
+    approveIfDraft: parsed.approveAtomically,
+    createdBy: "expense-posting",
+    approvedBy: "Finance Controller",
   });
-  await updateRecord("Expenses", "expenseId", row.expenseId, { status: "POSTED", journalId: journal.journalId }, "finance-controller");
-  return { recordType: parsed.recordType, recordId: row.expenseId, status: "POSTED", journalId: journal.journalId };
+
+  return {
+    recordType: "expense",
+    recordId: row.expenseId,
+    status: posted.alreadyPosted ? "already-posted" : "POSTED",
+    journalId: posted.journalId,
+  };
 }
 
 export async function GET() {
