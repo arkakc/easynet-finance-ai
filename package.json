@@ -37,6 +37,8 @@
     "test:atomic-partial-advance": "tsx tests/atomic-partial-advance-uat.ts",
     "test:atomic-sales-return": "tsx tests/atomic-sales-return-uat.ts",
     "test:manual-journal-approval": "tsx tests/manual-journal-approval-uat.ts",
+    "payment-allocations:preview": "tsx scripts/backfill-payment-allocations.ts",
+    "payment-allocations:backfill": "tsx scripts/backfill-payment-allocations.ts --apply",
     "test:financial-statements": "tsx tests/financial-statements-uat.ts",
     "test:cash-flow": "tsx tests/cash-flow-uat.ts",
     "test:subledger-recovery": "tsx tests/subledger-recovery-uat.ts",
