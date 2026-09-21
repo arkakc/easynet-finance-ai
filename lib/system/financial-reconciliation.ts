@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
+import { inventoryState } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
 
 const snapshotDirectory = path.join(process.cwd(), "backups", "reconciliation");
@@ -112,7 +113,17 @@ export async function buildFinancialReconciliationSnapshot(options?: {
       where: { billDate: { lte: periodEnd }, status: { in: [...OPEN_BILL_STATUSES] } },
       select: { outstanding: true, taxTotal: true, glPosted: true },
     }),
-    client.stockLevel.findMany({ include: { item: { select: { purchasePrice: true } } } }),
+    client.stockMovement.findMany({
+      where: { createdAt: { lte: periodEnd } },
+      select: {
+        itemId: true,
+        warehouseId: true,
+        type: true,
+        quantity: true,
+        totalCost: true,
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    }),
     client.bankAccount.findMany({
       where: { isActive: true },
       include: {
@@ -182,12 +193,48 @@ export async function buildFinancialReconciliationSnapshot(options?: {
     difference: money(statements.controls.payables.difference),
     matched: statements.controls.payables.matched,
   };
+  const incomingMovementTypes = new Set([
+    "PURCHASE_IN",
+    "PURCHASE_RECEIPT",
+    "SALES_ISSUE_ROLLBACK",
+    "ADJUSTMENT_IN",
+    "RETURN_IN",
+    "TRANSFER_IN",
+  ]);
+  const outgoingMovementTypes = new Set([
+    "SALES_DELIVERY",
+    "SALES_ISSUE",
+    "SALE_OUT",
+    "PROJECT_ISSUE",
+    "ADJUSTMENT_OUT",
+    "RETURN_OUT",
+    "TRANSFER_OUT",
+  ]);
+  const valueAdjustmentTypes = new Set(["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"]);
+  const stockByLocation = new Map<string, Array<{ qtyIn: number; qtyOut: number; value: number; valueAdjustment: number }>>();
+  for (const row of stock) {
+    const type = String(row.type || "").toUpperCase();
+    const quantity = numberValue(row.quantity);
+    const totalCost = numberValue(row.totalCost);
+    const key = `${row.itemId}::${row.warehouseId || "LEGACY"}`;
+    const rows = stockByLocation.get(key) || [];
+    rows.push({
+      qtyIn: incomingMovementTypes.has(type) ? quantity : 0,
+      qtyOut: outgoingMovementTypes.has(type) ? quantity : 0,
+      value: valueAdjustmentTypes.has(type) ? 0 : Math.abs(totalCost),
+      valueAdjustment: valueAdjustmentTypes.has(type) ? totalCost : 0,
+    });
+    stockByLocation.set(key, rows);
+  }
+  const stockStates = [...stockByLocation.values()].map((rows) => inventoryState(rows));
   const inventory = {
-    stockLines: stock.length,
-    quantityOnHand: money(stock.reduce((sum, row) => sum + numberValue(row.quantity), 0)),
-    availableQuantity: money(stock.reduce((sum, row) => sum + numberValue(row.available), 0)),
-    estimatedValue: money(stock.reduce((sum, row) => sum + numberValue(row.quantity) * numberValue(row.item.purchasePrice), 0)),
-    negativeStockLines: stock.filter((row) => numberValue(row.quantity) < 0).length,
+    stockLines: stockStates.length,
+    quantityOnHand: money(stockStates.reduce((sum, row) => sum + row.qty, 0)),
+    // Reservation history is not event-sourced, so the historical snapshot uses
+    // physical quantity as the auditable available quantity at the cut-off.
+    availableQuantity: money(stockStates.reduce((sum, row) => sum + row.qty, 0)),
+    estimatedValue: money(stockStates.reduce((sum, row) => sum + row.value, 0)),
+    negativeStockLines: stockStates.filter((row) => row.qty < 0).length,
   };
   const banking = {
     activeAccounts: bankAccounts.length,
