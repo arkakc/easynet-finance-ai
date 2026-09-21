@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { env } from "@/lib/env";
+import { requireValidatedRequestPermission } from "@/lib/auth";
 import { reversePostedJournal } from "@/lib/accounting/journal-reversal";
 
 const schema = z.object({
@@ -9,23 +9,17 @@ const schema = z.object({
   reason: z.string().trim().min(5),
 });
 
-function requireSecret(secret?: string) {
-  if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
-  if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
-}
-
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { secret?: string; payload?: unknown };
-    requireSecret(body.secret);
-    const input = schema.parse(body.payload || {});
+    const actor = await requireValidatedRequestPermission(request, "post.approve");
+    const input = schema.parse(await request.json());
 
     const reversal = await reversePostedJournal({
       journalId: input.journalId,
       reversalDate: input.reversalDate,
       reason: input.reason,
-      createdBy: "journal-reversal-ui",
-      approvedBy: "Finance Controller",
+      createdBy: actor.email,
+      approvedBy: actor.email,
     });
 
     return NextResponse.json({
@@ -42,6 +36,7 @@ export async function POST(request: Request) {
     const message = error instanceof z.ZodError
       ? error.errors.map((item) => `${item.path.join(".")}: ${item.message}`).join("; ")
       : error instanceof Error ? error.message : "Journal reversal failed";
-    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : 400 });
+    const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 }
