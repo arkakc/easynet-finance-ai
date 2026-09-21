@@ -91,6 +91,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 const COOKIE_NAME = "easynet_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 8;
 const ACCOUNT_FAILURE_LIMIT = 5;
+const ACCOUNT_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 const ACCOUNT_LOCK_MS = 15 * 60 * 1000;
 
 export const PRISMA_ROLE_MAP: Record<string, Role> = {
@@ -162,7 +163,9 @@ export async function authenticateDetailed(
   const validPassword = await bcrypt.compare(password, found.password);
   if (!validPassword) {
     const lockExpired = Boolean(found.lockedUntil && found.lockedUntil <= now);
-    const nextCount = (lockExpired ? 0 : found.failedLoginCount) + 1;
+    const staleFailureWindow = !found.lastFailedLoginAt
+      || now.getTime() - found.lastFailedLoginAt.getTime() >= ACCOUNT_FAILURE_WINDOW_MS;
+    const nextCount = (lockExpired || staleFailureWindow ? 0 : found.failedLoginCount) + 1;
     const lockedUntil = nextCount >= ACCOUNT_FAILURE_LIMIT
       ? new Date(now.getTime() + ACCOUNT_LOCK_MS)
       : null;
