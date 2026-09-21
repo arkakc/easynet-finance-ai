@@ -13,7 +13,7 @@ export async function backfillMultiCurrency(options: { apply?: boolean } = {}) {
   const apply = options.apply === true;
   const baseCurrency = await prisma.$transaction((tx) => companyBaseCurrency(tx));
 
-  const [quotes, purchaseOrders, invoices, bills, payments, allocations, journals, journalLines] = await Promise.all([
+  const [quotes, purchaseOrders, invoices, bills, payments, allocations, journals, journalLines, foreignBankAccounts] = await Promise.all([
     prisma.quote.findMany(),
     prisma.purchaseOrder.findMany(),
     prisma.invoice.findMany(),
@@ -22,6 +22,14 @@ export async function backfillMultiCurrency(options: { apply?: boolean } = {}) {
     prisma.paymentAllocation.findMany(),
     prisma.journalHeader.findMany(),
     prisma.journalLine.findMany(),
+    prisma.bankAccount.findMany({
+      where: {
+        isActive: true,
+        chartOfAccountsId: { not: null },
+        currency: { not: baseCurrency },
+      },
+      select: { id: true, code: true, currency: true, chartOfAccountsId: true },
+    }),
   ]);
 
   const blockers: PreviewBlocker[] = [];
@@ -51,6 +59,30 @@ export async function backfillMultiCurrency(options: { apply?: boolean } = {}) {
   inspect("SupplierBill", bills as any[], (row) => Boolean(row.glPosted));
   inspect("Payment", payments as any[], (row) => ["CAPTURED", "CLEARED", "REVERSED"].includes(String(row.status || "")));
   inspect("JournalHeader", journals as any[], (row) => String(row.status || "") === "POSTED");
+
+  for (const bank of foreignBankAccounts) {
+    const related = journalLines.filter((line) => line.accountId === bank.chartOfAccountsId);
+    const hasBaseHistory = related.some(
+      (line) => Math.abs(Number(line.debit || 0)) > 0.0001 || Math.abs(Number(line.credit || 0)) > 0.0001,
+    );
+    const hasForeignAudit = related.some(
+      (line) =>
+        String(line.transactionCurrency || "").toUpperCase() === bank.currency.toUpperCase()
+        && (
+          Math.abs(Number(line.transactionDebit || 0)) > 0.0001
+          || Math.abs(Number(line.transactionCredit || 0)) > 0.0001
+        ),
+    );
+    if (hasBaseHistory && !hasForeignAudit) {
+      blockers.push({
+        model: "BankAccount",
+        id: bank.id,
+        code: bank.code,
+        currency: bank.currency,
+        reason: "Foreign-currency bank ledger has base history but no recoverable transaction-currency audit amounts",
+      });
+    }
+  }
 
   const baseStats = {
     quotes: quotes.filter((row) => normalizeCurrency(row.currency || baseCurrency) === baseCurrency).length,
