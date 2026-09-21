@@ -11,7 +11,7 @@ APP_ENV=production
 AUTH_SECRET=<32+ random characters>
 SESSION_SECRET=<32+ random characters>
 AUDIT_LOG_SECRET=<separate stable 32+ random characters>
-APP_SECRET=<32+ random characters>
+APP_SECRET=<32+ random characters>\nPOSTGRES_BACKUP_VERIFIED_AT=<ISO timestamp of latest verified managed backup/PITR>
 ```
 
 Never commit production credentials or secrets. Keep `AUDIT_LOG_SECRET` stable for a database whose audit chain has already been sealed.
