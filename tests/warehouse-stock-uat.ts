@@ -16,7 +16,7 @@ async function main() {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "easynet-warehouse-stock-uat-"));
   const temporaryDatabase = path.join(temporaryRoot, "uat.sqlite");
   await fs.copyFile(liveDatabase, temporaryDatabase);
-  process.env.EASYNET_PRISMA_DATASOURCE_URL = \`file:\${temporaryDatabase.replace(/\\\\/g, "/")}\`;
+  process.env.EASYNET_PRISMA_DATASOURCE_URL = `file:${temporaryDatabase.replace(/\\/g, "/")}`;
 
   const [
     {
@@ -47,11 +47,11 @@ async function main() {
     });
 
     const [inventory, cogs, adjustment, clearing, grni] = await Promise.all([
-      account(\`UAT-WH-INV-\${suffix}\`, "UAT Warehouse Inventory", AccountTypeGL.ASSET, NormalBalance.DEBIT),
-      account(\`UAT-WH-COGS-\${suffix}\`, "UAT Warehouse COGS", AccountTypeGL.EXPENSE, NormalBalance.DEBIT),
-      account(\`UAT-WH-ADJ-\${suffix}\`, "UAT Warehouse Adjustment", AccountTypeGL.EXPENSE, NormalBalance.DEBIT),
-      account(\`UAT-WH-CLR-\${suffix}\`, "UAT Warehouse Clearing", AccountTypeGL.LIABILITY, NormalBalance.CREDIT),
-      account(\`UAT-WH-GRNI-\${suffix}\`, "UAT Warehouse GRNI", AccountTypeGL.LIABILITY, NormalBalance.CREDIT),
+      account(`UAT-WH-INV-${suffix}`, "UAT Warehouse Inventory", AccountTypeGL.ASSET, NormalBalance.DEBIT),
+      account(`UAT-WH-COGS-${suffix}`, "UAT Warehouse COGS", AccountTypeGL.EXPENSE, NormalBalance.DEBIT),
+      account(`UAT-WH-ADJ-${suffix}`, "UAT Warehouse Adjustment", AccountTypeGL.EXPENSE, NormalBalance.DEBIT),
+      account(`UAT-WH-CLR-${suffix}`, "UAT Warehouse Clearing", AccountTypeGL.LIABILITY, NormalBalance.CREDIT),
+      account(`UAT-WH-GRNI-${suffix}`, "UAT Warehouse GRNI", AccountTypeGL.LIABILITY, NormalBalance.CREDIT),
     ]);
 
     await prisma.globalSettings.upsert({
@@ -63,7 +63,7 @@ async function main() {
     const [pom, lae] = await Promise.all([
       prisma.warehouse.create({
         data: {
-          code: \`POM-\${suffix}\`,
+          code: `POM-${suffix}`,
           name: "POM UAT Warehouse",
           location: "Port Moresby",
           isDefault: true,
@@ -72,7 +72,7 @@ async function main() {
       }),
       prisma.warehouse.create({
         data: {
-          code: \`LAE-\${suffix}\`,
+          code: `LAE-${suffix}`,
           name: "Lae UAT Warehouse",
           location: "Lae",
           isDefault: false,
@@ -83,47 +83,47 @@ async function main() {
 
     const item = await prisma.item.create({
       data: {
-        code: \`UAT-WH-ITEM-\${suffix}\`,
+        code: `UAT-WH-ITEM-${suffix}`,
         name: "UAT Warehouse Item",
         type: ItemType.GOOD,
         unit: "PCS",
         trackQty: true,
         purchasePrice: 20,
         sellPrice: 50,
-        costAccount: \`ACC-\${cogs.code}\`,
-        inventoryAsset: \`ACC-\${inventory.code}\`,
+        costAccount: `ACC-${cogs.code}`,
+        inventoryAsset: `ACC-${inventory.code}`,
         isActive: true,
       },
     });
 
     await postStockMovementAtomic({
-      movementId: \`UAT-WH-OPEN-\${suffix}\`,
+      movementId: `UAT-WH-OPEN-${suffix}`,
       postingDate: "2099-08-01",
       itemRef: item.id,
       warehouseRef: pom.id,
       movementType: "ADJUSTMENT_IN",
       qty: 10,
       unitCost: 20,
-      inventoryAccountId: \`ACC-\${inventory.code}\`,
-      defaultCostAccountId: \`ACC-\${cogs.code}\`,
-      stockAdjustmentAccountId: \`ACC-\${adjustment.code}\`,
-      expensesIncludedInValuationAccountId: \`ACC-\${clearing.code}\`,
+      inventoryAccountId: `ACC-${inventory.code}`,
+      defaultCostAccountId: `ACC-${cogs.code}`,
+      stockAdjustmentAccountId: `ACC-${adjustment.code}`,
+      expensesIncludedInValuationAccountId: `ACC-${clearing.code}`,
       createdBy: "warehouse-stock-uat",
     });
 
     let crossWarehouseNegativeBlocked = false;
     try {
       await postStockMovementAtomic({
-        movementId: \`UAT-WH-BLOCK-\${suffix}\`,
+        movementId: `UAT-WH-BLOCK-${suffix}`,
         postingDate: "2099-08-02",
         itemRef: item.id,
         warehouseRef: lae.id,
         movementType: "PROJECT_ISSUE",
         qty: 1,
-        inventoryAccountId: \`ACC-\${inventory.code}\`,
-        defaultCostAccountId: \`ACC-\${cogs.code}\`,
-        stockAdjustmentAccountId: \`ACC-\${adjustment.code}\`,
-        expensesIncludedInValuationAccountId: \`ACC-\${clearing.code}\`,
+        inventoryAccountId: `ACC-${inventory.code}`,
+        defaultCostAccountId: `ACC-${cogs.code}`,
+        stockAdjustmentAccountId: `ACC-${adjustment.code}`,
+        expensesIncludedInValuationAccountId: `ACC-${clearing.code}`,
         createdBy: "warehouse-stock-uat",
       });
     } catch (error) {
@@ -136,13 +136,13 @@ async function main() {
     }
 
     const transfer = await transferStockAtomic({
-      transferId: \`UAT-TRF-\${suffix}\`,
+      transferId: `UAT-TRF-${suffix}`,
       postingDate: "2099-08-02",
       itemRef: item.id,
       fromWarehouseRef: pom.id,
       toWarehouseRef: lae.id,
       qty: 4,
-      sourceDocumentId: \`UAT-TRANSFER-REQ-\${suffix}\`,
+      sourceDocumentId: `UAT-TRANSFER-REQ-${suffix}`,
       createdBy: "warehouse-stock-uat",
     });
 
@@ -174,17 +174,17 @@ async function main() {
     ) throw new Error("Warehouse transfer did not preserve its no-GL internal movement design");
 
     await postStockMovementAtomic({
-      movementId: \`UAT-WH-LAE-IN-\${suffix}\`,
+      movementId: `UAT-WH-LAE-IN-${suffix}`,
       postingDate: "2099-08-03",
       itemRef: item.id,
       warehouseRef: lae.id,
       movementType: "ADJUSTMENT_IN",
       qty: 2,
       unitCost: 30,
-      inventoryAccountId: \`ACC-\${inventory.code}\`,
-      defaultCostAccountId: \`ACC-\${cogs.code}\`,
-      stockAdjustmentAccountId: \`ACC-\${adjustment.code}\`,
-      expensesIncludedInValuationAccountId: \`ACC-\${clearing.code}\`,
+      inventoryAccountId: `ACC-${inventory.code}`,
+      defaultCostAccountId: `ACC-${cogs.code}`,
+      stockAdjustmentAccountId: `ACC-${adjustment.code}`,
+      expensesIncludedInValuationAccountId: `ACC-${clearing.code}`,
       createdBy: "warehouse-stock-uat",
     });
 
@@ -198,17 +198,17 @@ async function main() {
     ) throw new Error("Independent warehouse moving-average valuation failed");
 
     await postStockValueAdjustmentAtomic({
-      movementId: \`UAT-WH-POM-LC-\${suffix}\`,
+      movementId: `UAT-WH-POM-LC-${suffix}`,
       postingDate: "2099-08-04",
       itemRef: item.id,
       warehouseRef: pom.id,
       adjustmentType: "LANDED_COST",
       amount: 12,
       targetUnitCost: 0,
-      inventoryAccountId: \`ACC-\${inventory.code}\`,
-      defaultCostAccountId: \`ACC-\${cogs.code}\`,
-      stockAdjustmentAccountId: \`ACC-\${adjustment.code}\`,
-      expensesIncludedInValuationAccountId: \`ACC-\${clearing.code}\`,
+      inventoryAccountId: `ACC-${inventory.code}`,
+      defaultCostAccountId: `ACC-${cogs.code}`,
+      stockAdjustmentAccountId: `ACC-${adjustment.code}`,
+      expensesIncludedInValuationAccountId: `ACC-${clearing.code}`,
       createdBy: "warehouse-stock-uat",
     });
 
@@ -221,14 +221,14 @@ async function main() {
 
     const supplier = await prisma.supplier.create({
       data: {
-        code: \`UAT-WH-SUP-\${suffix}\`,
+        code: `UAT-WH-SUP-${suffix}`,
         name: "UAT Warehouse Supplier",
         isActive: true,
       },
     });
     const po = await prisma.purchaseOrder.create({
       data: {
-        code: \`UAT-WH-PO-\${suffix}\`,
+        code: `UAT-WH-PO-${suffix}`,
         supplierId: supplier.id,
         orderDate: new Date("2099-08-05T00:00:00+10:00"),
         status: POStatus.SENT,
@@ -250,13 +250,13 @@ async function main() {
     });
 
     const receipt = await postPurchaseReceiptAtomic({
-      receiptNumber: \`UAT-WH-PR-\${suffix}\`,
+      receiptNumber: `UAT-WH-PR-${suffix}`,
       postingDate: "2099-08-06",
       purchaseOrderRef: po.id,
       warehouseRef: lae.id,
       lines: [{ itemRef: item.id, qty: 5 }],
-      inventoryAccountId: \`ACC-\${inventory.code}\`,
-      grniAccountId: \`ACC-\${grni.code}\`,
+      inventoryAccountId: `ACC-${inventory.code}`,
+      grniAccountId: `ACC-${grni.code}`,
       createdBy: "warehouse-stock-uat",
     });
 
@@ -272,14 +272,14 @@ async function main() {
 
     const customer = await prisma.customer.create({
       data: {
-        code: \`UAT-WH-CUST-\${suffix}\`,
+        code: `UAT-WH-CUST-${suffix}`,
         name: "UAT Warehouse Customer",
         isActive: true,
       },
     });
     const salesOrder = await prisma.quote.create({
       data: {
-        code: \`SO-UAT-WH-\${suffix}\`,
+        code: `SO-UAT-WH-${suffix}`,
         customerId: customer.id,
         issuedDate: new Date("2099-08-07T00:00:00+10:00"),
         status: QuoteStatus.ACCEPTED,
@@ -300,12 +300,12 @@ async function main() {
     });
 
     const delivery = await postSalesDeliveryAtomic({
-      deliveryNumber: \`DN-UAT-WH-\${suffix}\`,
+      deliveryNumber: `DN-UAT-WH-${suffix}`,
       postingDate: "2099-08-08",
       salesOrderRef: salesOrder.id,
       warehouseRef: lae.id,
-      inventoryAccountId: \`ACC-\${inventory.code}\`,
-      defaultCostAccountId: \`ACC-\${cogs.code}\`,
+      inventoryAccountId: `ACC-${inventory.code}`,
+      defaultCostAccountId: `ACC-${cogs.code}`,
       createdBy: "warehouse-stock-uat",
       approvedBy: "Finance Controller",
     });
@@ -362,7 +362,7 @@ async function main() {
     await prisma.$disconnect();
     const resolved = path.resolve(temporaryRoot);
     const root = path.resolve(os.tmpdir());
-    if (!resolved.startsWith(\`\${root}\${path.sep}\`)) throw new Error("Unsafe UAT cleanup path");
+    if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error("Unsafe UAT cleanup path");
     await fs.rm(resolved, { recursive: true, force: true });
   }
 }
