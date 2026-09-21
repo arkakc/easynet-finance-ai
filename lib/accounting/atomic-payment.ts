@@ -162,12 +162,12 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         });
       }
     } else if (directAllocation && !directAllocation.alreadyAllocated) {
-      const settlementBaseAmount = Number(settlementBaseAmount || 0);
-      const documentBaseAmount = Number(documentBaseAmount || 0);
-      const settlementExchangeRate = Number(settlementExchangeRate || fx.exchangeRate);
-      const documentExchangeRate = Number(documentExchangeRate || fx.exchangeRate);
-      const realizedGain = Number(realizedGain || 0);
-      const realizedLoss = Number(realizedLoss || 0);
+      const settlementBaseAmount = Number(directAllocation.settlementBaseAmount || 0);
+      const documentBaseAmount = Number(directAllocation.documentBaseAmount || 0);
+      const settlementExchangeRate = Number(directAllocation.settlementExchangeRate || fx.exchangeRate);
+      const documentExchangeRate = Number(directAllocation.documentExchangeRate || fx.exchangeRate);
+      const realizedGain = Number(directAllocation.realizedGain || 0);
+      const realizedLoss = Number(directAllocation.realizedLoss || 0);
       const cashAccount = input.cashBankAccountId;
       const settlementAccount = input.lines.find(
         (line) => String(line.accountId || "").toUpperCase() !== String(cashAccount || "").toUpperCase(),
