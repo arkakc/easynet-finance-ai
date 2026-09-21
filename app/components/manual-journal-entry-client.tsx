@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import AccountPicker from "@/app/components/account-picker";
 
 export type ManualJournalAccount = {
   accountId: string;
@@ -12,6 +13,7 @@ export type ManualJournalAccount = {
   parentAccount?: string;
   active?: boolean;
   isGroup?: boolean;
+  balance?: number;
 };
 
 type JournalLine = {
@@ -254,14 +256,15 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
                 <tr key={index}>
                   <td>{index + 1}</td>
                   <td>
-                    <select value={line.accountId} onChange={(event) => updateLine(index, { accountId: event.target.value })} required disabled={busy}>
-                      <option value="">Select ledger account</option>
-                      {postingAccounts.map((account) => (
-                        <option key={`${account.postingAccountId || account.accountId}-${account.accountCode}`} value={account.postingAccountId || account.accountId}>
-                          {account.accountCode} — {account.accountName}
-                        </option>
-                      ))}
-                    </select>
+                    <AccountPicker
+                      name={`journalAccount-${index}`}
+                      value={line.accountId}
+                      onChange={(accountId) => updateLine(index, { accountId })}
+                      accounts={postingAccounts.map((account) => ({ ...account, accountId: account.postingAccountId || account.accountId }))}
+                      required
+                      disabled={busy}
+                      placeholder="Search account by code or name"
+                    />
                   </td>
                   <td><input value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} disabled={busy} /></td>
                   <td><input type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(index, { debit: event.target.value, credit: event.target.value ? "" : line.credit })} disabled={busy} /></td>
