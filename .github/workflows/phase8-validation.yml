@@ -1,0 +1,51 @@
+name: Phase 8 Reporting and Reconciliation Validation
+
+on:
+  push:
+    branches:
+      - fix/phase-8-reporting-reconciliation-hardening
+  pull_request:
+    branches:
+      - fix/phase-7-multi-currency
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Prisma validate
+        run: npx prisma validate
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Create isolated validation database
+        run: npx prisma db push --skip-generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Phase 7 multi-currency regression
+        run: npm run test:multi-currency
+
+      - name: Phase 8 reporting reconciliation UAT
+        run: npm run test:reporting-reconciliation
+
+      - name: Production build
+        env:
+          SESSION_SECRET: phase8-ci-session-secret-please-change-only-for-ci
+          DATABASE_URL: file:./prisma/dev.db
+        run: npm run build
