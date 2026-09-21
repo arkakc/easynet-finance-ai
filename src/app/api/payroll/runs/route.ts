@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { processPayrollRun } from '@/src/lib/services/payroll.service';
 import { requirePermission } from '@/lib/auth';
+import { appendAuditEvent, requestAuditContext } from '@/lib/security/audit';
 import { z } from 'zod';
 
 const datePattern = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -55,6 +56,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const user = await requirePermission('post.approve');
+    const context = requestAuditContext(request);
     const body = runSchema.parse(await request.json());
     if (body.confirmation !== `PROCESS PAYROLL ${body.periodStart} TO ${body.periodEnd}`) throw new Error(`Type PROCESS PAYROLL ${body.periodStart} TO ${body.periodEnd} to confirm`);
     const periodStart = pngDate(body.periodStart);
@@ -81,8 +83,23 @@ export async function POST(request: NextRequest) {
       },
       user.email,
     );
-    const dbUser = await prisma.user.findUnique({ where: { email: user.email }, select: { id: true } });
-    if (dbUser) await prisma.auditLog.create({ data: { action: 'POST', entityType: 'PayrollRun', entityId: run.id, entityCode: run.code, description: `Processed payroll for ${body.periodStart} to ${body.periodEnd}`, changes: JSON.stringify({ paymentDate: body.paymentDate, journalId: run.journalId, totalGross: run.totalGross, totalNet: run.totalNet }), userId: dbUser.id } });
+    await appendAuditEvent({
+      action: 'PAYROLL_PROCESS',
+      entityType: 'PayrollRun',
+      entityId: run.id,
+      entityCode: run.code,
+      description: `Processed payroll for ${body.periodStart} to ${body.periodEnd}`,
+      changes: {
+        paymentDate: body.paymentDate,
+        journalId: run.journalId,
+        totalGross: run.totalGross,
+        totalNet: run.totalNet,
+      },
+      actorEmail: user.email,
+      userId: user.userId,
+      outcome: 'SUCCESS',
+      ...context,
+    });
     return NextResponse.json({ success: true, data: run }, { status: 201 });
   } catch (error: unknown) {
     return status(error);
