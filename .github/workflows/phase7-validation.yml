@@ -24,7 +24,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        # package-lock.json predates a transitive optional-dependency refresh,
+        # so validation installs from package.json without changing the repo.
+        run: npm install --no-audit --no-fund
 
       - name: Prisma validate
         run: npx prisma validate
@@ -32,8 +34,14 @@ jobs:
       - name: Prisma generate
         run: npx prisma generate
 
+      - name: Create isolated validation database
+        run: npx prisma db push --skip-generate
+
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Multi-currency UAT
+        run: npm run test:multi-currency
 
       - name: Build
         env:
