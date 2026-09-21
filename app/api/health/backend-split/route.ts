@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/auth";
 import { backendConfigStatus, backendHealthAll, CORE_DATA_AUTHORITY } from "@/lib/backend/apps-script";
 
 export async function GET() {
   try {
+    await requirePermission("settings.manage");
     const configuration = backendConfigStatus();
     const services = await backendHealthAll();
 
@@ -22,12 +24,16 @@ export async function GET() {
       integrationWarnings,
     }, { status: coreOk ? 200 : 503 });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Backend health check failed";
+    if (message === "Unauthorized" || message === "Forbidden") {
+      return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : 403 });
+    }
     return NextResponse.json(
       {
         ok: false,
         coreAuthority: CORE_DATA_AUTHORITY,
         configuration: backendConfigStatus(),
-        error: error instanceof Error ? error.message : "Backend health check failed",
+        error: message,
       },
       { status: 503 },
     );
