@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission, getRequestUser, hasPermission } from "@/lib/auth";
+import { requireValidatedRequestPermission } from "@/lib/auth";
+import { appendAuditEvent, requestAuditContext } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 
 async function checkAuth(req: Request, permission: "accounts.read" | "accounts.write") {
-  try {
-    const user = getRequestUser(req);
-    if (user && hasPermission(user, permission)) {
-      return user;
-    }
-  } catch {}
-  try {
-    return await requirePermission(permission);
-  } catch (err) {
-    throw err;
-  }
+  return requireValidatedRequestPermission(req, permission);
 }
 
 /**
@@ -85,7 +76,8 @@ export function inferParentCode(code: string, allCodes: Set<string>): string | n
  */
 export async function POST(req: NextRequest) {
   try {
-    await checkAuth(req, "accounts.write");
+    const actor = await checkAuth(req, "accounts.write");
+    const context = requestAuditContext(req);
 
     const accounts = await prisma.chartOfAccounts.findMany({
       select: { id: true, code: true, name: true, parentId: true },
@@ -104,36 +96,53 @@ export async function POST(req: NextRequest) {
       allCodes.add(acc.code);
     });
 
-    let linkedCount = 0;
-    let rootCount = 0;
+    const result = await prisma.$transaction(async (tx) => {
+      let linkedCount = 0;
+      let rootCount = 0;
 
-    for (const acc of accounts) {
-      const parentCode = inferParentCode(acc.code, allCodes);
-      if (parentCode && codeToIdMap.has(parentCode)) {
-        const parentId = codeToIdMap.get(parentCode)!;
-        if (parentId !== acc.id) {
-          await prisma.chartOfAccounts.update({
-            where: { id: acc.id },
-            data: { parentId },
-          });
-          linkedCount++;
-          continue;
+      for (const acc of accounts) {
+        const parentCode = inferParentCode(acc.code, allCodes);
+        if (parentCode && codeToIdMap.has(parentCode)) {
+          const parentId = codeToIdMap.get(parentCode)!;
+          if (parentId !== acc.id) {
+            await tx.chartOfAccounts.update({
+              where: { id: acc.id },
+              data: { parentId },
+            });
+            linkedCount++;
+            continue;
+          }
         }
+
+        await tx.chartOfAccounts.update({
+          where: { id: acc.id },
+          data: { parentId: null },
+        });
+        rootCount++;
       }
 
-      await prisma.chartOfAccounts.update({
-        where: { id: acc.id },
-        data: { parentId: null },
-      });
-      rootCount++;
-    }
+      const audit = await appendAuditEvent({
+        action: "COA_REBUILD_TREE",
+        entityType: "ChartOfAccounts",
+        entityCode: "COA_TREE",
+        description: `Chart of Accounts hierarchy rebuilt by ${actor.email}`,
+        changes: { totalAccounts: accounts.length, linkedCount, rootCount },
+        actorEmail: actor.email,
+        userId: actor.userId || null,
+        outcome: "SUCCESS",
+        ...context,
+      }, tx);
+
+      return { linkedCount, rootCount, auditId: audit.id };
+    });
 
     return NextResponse.json({
       ok: true,
-      message: `Successfully rebuilt hierarchy: ${linkedCount} accounts staged under parents, ${rootCount} root categories.`,
+      message: `Successfully rebuilt hierarchy: ${result.linkedCount} accounts staged under parents, ${result.rootCount} root categories.`,
       totalAccounts: accounts.length,
-      linkedCount,
-      rootCount,
+      linkedCount: result.linkedCount,
+      rootCount: result.rootCount,
+      auditId: result.auditId,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to rebuild hierarchy";
