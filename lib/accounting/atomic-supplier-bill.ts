@@ -17,6 +17,8 @@ export type AtomicSupplierBillInput = {
   stockReceivedButNotBilledAccountId: string;
   defaultCostAccountId: string;
   purchasePriceVarianceAccountId?: string;
+  exchangeGainAccountId?: string;
+  exchangeLossAccountId?: string;
   purchasePriceVarianceTolerancePct: number;
   approveIfDraft?: boolean;
   createdBy?: string;
@@ -261,7 +263,7 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
     }
 
     const serviceCostLines: Array<{ accountId: string; amount: number; description?: string }> = [];
-    const stockLines: Array<{ invoiceAmount: number; receiptValue: number; description?: string }> = [];
+    const stockLines: Array<{ invoiceAmount: number; poAmount: number; receiptValue: number; description?: string }> = [];
     const currentBillQty = new Map<string, number>();
 
     for (const line of bill.lines) {
@@ -324,6 +326,7 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
 
         stockLines.push({
           invoiceAmount: Number(line.amount || 0),
+          poAmount: round2(currentQty * poRate),
           receiptValue: round2(currentQty * receiptRate),
           description: line.description || line.item.name || line.item.code,
         });
@@ -357,6 +360,8 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       payableAccountId: input.payableAccountId,
       stockReceivedButNotBilledAccountId: input.stockReceivedButNotBilledAccountId,
       purchasePriceVarianceAccountId: input.purchasePriceVarianceAccountId,
+      exchangeGainAccountId: input.exchangeGainAccountId,
+      exchangeLossAccountId: input.exchangeLossAccountId,
       currency: fx.currency,
       baseCurrency: fx.baseCurrency,
       exchangeRate: fx.exchangeRate,
@@ -433,6 +438,7 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       journalId: journal.journalId,
       status: "POSTED" as const,
       purchasePriceVariance: mixed.purchasePriceVariance,
+      exchangeVariance: mixed.exchangeVariance,
       grniCleared: mixed.receiptValue,
       purchaseOrderStatus: fullyBilled ? "BILLED" : purchaseOrder.status,
       alreadyPosted: false,
