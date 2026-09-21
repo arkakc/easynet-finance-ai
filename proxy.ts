@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionCookie, verifySessionToken, type Permission } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/health", "/api/backend/health"];
+const PUBLIC_EXACT_PATHS = ["/login", "/api/auth/login", "/api/health", "/api/backend/health"];
 const LEGACY_WRITE_PATHS = [
   "/api/transactions",
   "/api/conversions",
@@ -131,7 +131,7 @@ export function proxy(request: NextRequest) {
   }
 
   if (
-    PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
+    PUBLIC_EXACT_PATHS.includes(pathname)
     || pathname.startsWith("/_next/")
     || pathname === "/favicon.ico"
     || /\.(png|jpg|jpeg|svg|webp|gif|ico)$/i.test(pathname)
