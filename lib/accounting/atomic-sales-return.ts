@@ -5,6 +5,7 @@ import { round2, round4 } from "@/lib/accounting/inventory";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 import { resolveWarehouse, syncWarehouseBalance, warehouseInventoryState } from "@/lib/accounting/warehouse-stock";
+import { assertSettlementCurrency, resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 export type AtomicSalesCreditNoteInput = {
   creditNoteId: string;
@@ -73,6 +74,17 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     if (original.customerId !== credit.customerId) {
       throw new Error("Credit Note customer does not match the original Sales Invoice");
     }
+    assertSettlementCurrency(credit.currency, original.currency);
+    const originalFx = await resolveDocumentExchangeRate(tx, {
+      currency: original.currency,
+      exchangeRate: Number(original.exchangeRate || 0) || undefined,
+      postingDate: original.issuedDate,
+    });
+    const creditFx = {
+      currency: originalFx.currency,
+      baseCurrency: originalFx.baseCurrency,
+      exchangeRate: originalFx.exchangeRate,
+    };
     if (!credit.lines.length) throw new Error("Credit Note has no lines");
 
     const reasons = await findPaymentSchedules("SALES_RETURN_REASON", credit.id, tx);
@@ -98,7 +110,11 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     for (const [accountId, amount] of revenue.entries()) {
       postingLines.push({
         accountId,
-        debit: amount,
+        debit: toBaseAmount(amount, creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
+        transactionCurrency: creditFx.currency,
+        exchangeRate: creditFx.exchangeRate,
+        transactionDebit: amount,
+        transactionCredit: 0,
         customerId: customerRef,
         projectId: projectRef,
         description: "Sales return / revenue reversal",
@@ -109,7 +125,11 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     if (gst > 0) {
       postingLines.push({
         accountId: INITIAL_ACCOUNT_IDS.gstPayable,
-        debit: gst,
+        debit: toBaseAmount(gst, creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
+        transactionCurrency: creditFx.currency,
+        exchangeRate: creditFx.exchangeRate,
+        transactionDebit: gst,
+        transactionCredit: 0,
         customerId: customerRef,
         projectId: projectRef,
         taxCode: "GST",
@@ -125,7 +145,11 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     if (arCredit > 0) {
       postingLines.push({
         accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
-        credit: arCredit,
+        credit: toBaseAmount(arCredit, originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate),
+        transactionCurrency: originalFx.currency,
+        exchangeRate: originalFx.exchangeRate,
+        transactionDebit: 0,
+        transactionCredit: arCredit,
         customerId: customerRef,
         projectId: projectRef,
         description: "Reduce Accounts Receivable",
@@ -134,7 +158,11 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     if (customerCredit > 0) {
       postingLines.push({
         accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
-        credit: customerCredit,
+        credit: toBaseAmount(customerCredit, originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate),
+        transactionCurrency: originalFx.currency,
+        exchangeRate: originalFx.exchangeRate,
+        transactionDebit: 0,
+        transactionCredit: customerCredit,
         customerId: customerRef,
         projectId: projectRef,
         description: "Customer credit / refundable balance",
@@ -312,6 +340,10 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       postingLines.push({
         accountId: INITIAL_ACCOUNT_IDS.inventory,
         debit: inventoryDebit,
+        transactionCurrency: originalFx.baseCurrency,
+        exchangeRate: 1,
+        transactionDebit: inventoryDebit,
+        transactionCredit: 0,
         customerId: customerRef,
         projectId: projectRef,
         description: "Inventory returned by customer",
@@ -321,6 +353,10 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       postingLines.push({
         accountId,
         credit: amount,
+        transactionCurrency: originalFx.baseCurrency,
+        exchangeRate: 1,
+        transactionDebit: 0,
+        transactionCredit: amount,
         customerId: customerRef,
         projectId: projectRef,
         description: "Reverse cost of goods sold",
@@ -344,11 +380,22 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       Number(original.amountPaid || 0) + arCredit,
     ));
     const newOutstanding = round2(Math.max(0, Number(original.total || 0) - newPaid));
+    const originalBaseTotal = Number(original.baseTotal || 0) > 0
+      ? Number(original.baseTotal)
+      : toBaseAmount(Number(original.total || 0), originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate);
+    const creditBaseAgainstAr = toBaseAmount(arCredit, originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate);
+    const newBasePaid = round2(Math.min(
+      originalBaseTotal,
+      Number(original.baseAmountPaid || 0) + creditBaseAgainstAr,
+    ));
+    const newBaseOutstanding = round2(Math.max(0, originalBaseTotal - newBasePaid));
     await tx.invoice.update({
       where: { id: original.id },
       data: {
         amountPaid: newPaid,
         outstanding: newOutstanding,
+        baseAmountPaid: newBasePaid,
+        baseOutstanding: newBaseOutstanding,
         status: newOutstanding <= 0.001
           ? "PAID"
           : newPaid > 0.001
@@ -366,6 +413,9 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       documentNumber: credit.code,
       reference: String(reason.milestone || `Credit Note ${credit.code}`),
       projectId: projectRef,
+      currency: creditFx.currency,
+      baseCurrency: creditFx.baseCurrency,
+      exchangeRate: creditFx.exchangeRate,
       createdBy: input.createdBy || "sales-return:post",
       approvedBy: input.approvedBy || "Finance Controller",
       lines: postingLines,
@@ -379,7 +429,14 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     }
     await tx.invoice.update({
       where: { id: credit.id },
-      data: { journalId: journal.journalId },
+      data: {
+        journalId: journal.journalId,
+        exchangeRate: creditFx.exchangeRate,
+        baseSubtotal: toBaseAmount(Number(credit.subtotal || 0), creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
+        baseTaxTotal: toBaseAmount(Number(credit.taxTotal || 0), creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
+        baseTotal: toBaseAmount(Number(credit.total || 0), creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
+        baseOutstanding: 0,
+      },
     });
 
     return {
