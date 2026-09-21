@@ -27,6 +27,7 @@ type DecisionInput = {
   journalId: string;
   checkerEmail: string;
   note?: string;
+  allowSelfApproval?: boolean;
 };
 
 const round2 = (value: number) =>
@@ -370,7 +371,7 @@ export async function approvePendingManualJournal(
     if (journal.status !== "PENDING") {
       throw new Error(`Only PENDING manual journals can be approved. Current status: ${journal.status}`);
     }
-    if (journal.createdBy.trim().toLowerCase() === checker.email.trim().toLowerCase()) {
+    if (!input.allowSelfApproval && journal.createdBy.trim().toLowerCase() === checker.email.trim().toLowerCase()) {
       throw new Error("Maker-checker control: the creator cannot approve their own manual journal");
     }
 
@@ -436,7 +437,7 @@ export async function rejectPendingManualJournal(
     if (journal.status !== "PENDING") {
       throw new Error(`Only PENDING manual journals can be rejected. Current status: ${journal.status}`);
     }
-    if (journal.createdBy.trim().toLowerCase() === checker.email.trim().toLowerCase()) {
+    if (!input.allowSelfApproval && journal.createdBy.trim().toLowerCase() === checker.email.trim().toLowerCase()) {
       throw new Error("Maker-checker control: the creator cannot reject their own submitted manual journal");
     }
 
