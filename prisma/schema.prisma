@@ -1414,6 +1414,7 @@ model AuditLog {
   userAgent     String?
   previousHash  String?
   integrityHash String?  @unique
+  sequence      Int?     @unique
   createdAt     DateTime @default(now())
   user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -1425,6 +1426,13 @@ model AuditLog {
   @@index([createdAt])
   @@index([entityType, entityCode])
 }
+model AuditChainState {
+  id           String   @id
+  nextSequence Int      @default(0)
+  headHash     String?
+  updatedAt    DateTime @updatedAt
+}
+
 
 // ============================================
 // TIME & BILLING (for service businesses)
