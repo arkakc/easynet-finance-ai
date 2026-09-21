@@ -10,7 +10,7 @@ const schema = z.object({
 });
 
 function requireSecret(secret?: string) {
-  if (!env.APP_SECRET) return;
+  if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
 
