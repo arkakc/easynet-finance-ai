@@ -24,8 +24,9 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
   payment:{numberField:"paymentNumber",title:"Payment / Receipt"},
   expense:{numberField:"expenseNumber",title:"Expense"},
 };
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Unallocated",allocationCount:"Allocation Entries"};
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Unallocated",allocationCount:"Allocation Entries"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
+const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
 const VALID_MODES=new Set(["menu","create","list"]);
@@ -128,6 +129,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const itemMap=useMemo(()=>new Map<string, any>((references.items||[]).map((item:any)=>[String(item.itemId||item.itemCode||""),item])),[references.items]);
 
   const number=record?String(record[config?.numberField||""]||id):id;
+  const transactionCurrency=String(record?.currency||references.baseCurrency||"PGK").toUpperCase();
+  const baseCurrency=String(references.baseCurrency||"PGK").toUpperCase();
+  const transactionMoney=(value:unknown)=>`${transactionCurrency} ${n(value).toFixed(2)}`;
+  const baseMoney=(value:unknown)=>`${baseCurrency} ${n(value).toFixed(2)}`;
   const isSalesOrder=type==="quote"&&number.toUpperCase().startsWith("SO-");
   const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
   const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
@@ -180,6 +185,12 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     }
     if(key==="projectId")return linkedValue(masterHref("project",value),named(value,projectMap));
     if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);
+    if(key==="exchangeRate"){
+      if(transactionCurrency===baseCurrency)return "1.00000000";
+      return `1 ${transactionCurrency} = ${n(value).toFixed(8).replace(/0+$/,"").replace(/\.$/,"")} ${baseCurrency}`;
+    }
+    if(moneyFields.has(key))return transactionMoney(value);
+    if(baseMoneyFields.has(key))return baseMoney(value);
     return display(key,value);
   };
 
@@ -237,7 +248,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
         {previous&&<div className="document-meta" style={{marginBottom:20}}><div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div></div>}
         <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>
-        {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`K${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>K{n(line.rate).toFixed(2)}</td><td>K{n(line.netAmount).toFixed(2)}</td><td>K{n(line.gstAmount).toFixed(2)}</td><td><strong>K{n(line.totalAmount).toFixed(2)}</strong></td></tr>;})}</tbody></table></div>}
+        {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`${baseCurrency} ${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>{transactionMoney(line.rate)}</td><td>{transactionMoney(line.netAmount)}</td><td>{transactionMoney(line.gstAmount)}</td><td><strong>{transactionMoney(line.totalAmount)}</strong></td></tr>;})}</tbody></table></div>}
         {lines.length>0&&(()=>{
           const lineNetTotal = lines.reduce((sum: number, l: any) => sum + n(l.netAmount || (n(l.qty) * n(l.rate))), 0);
           const lineGstTotal = lines.reduce((sum: number, l: any) => sum + n(l.gstAmount), 0);
@@ -250,15 +261,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
               <div style={{ width: "min(380px, 100%)", border: "1px solid #cbd5e1", borderRadius: 8, background: "#f8fafc", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
                   <span>Net Total</span>
-                  <strong>K{docNet.toFixed(2)}</strong>
+                  <strong>{transactionMoney(docNet)}</strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
                   <span>GST</span>
-                  <strong>K{docGst.toFixed(2)}</strong>
+                  <strong>{transactionMoney(docGst)}</strong>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", borderTop: "2px solid #cbd5e1", marginTop: 6, fontSize: "1.15rem", color: "#0f172a" }}>
                   <strong>Total</strong>
-                  <strong style={{ color: "#0f172a" }}>K{docTotal.toFixed(2)}</strong>
+                  <strong style={{ color: "#0f172a" }}>{transactionMoney(docTotal)}</strong>
                 </div>
               </div>
             </div>
