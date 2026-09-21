@@ -85,6 +85,8 @@ const groups: readonly NavGroup[] = [
     icon: "📈",
     links: [
       ["Financial Reports", "/reports", "reports.read"],
+      ["General Ledger", "/reports/general-ledger", "reports.read"],
+      ["Trial Balance", "/reports/trial-balance", "reports.read"],
       ["Cash Flow", "/reports/cashflow", "reports.read"],
       ["GST Report", "/reports/gst", "reports.read"],
     ],
