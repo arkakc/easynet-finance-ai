@@ -416,6 +416,13 @@ export async function allocateAdvancePaymentAtomic(input: {
       };
     }
 
+    const settlementBaseAmount = Number(settlementBaseAmount || 0);
+    const documentBaseAmount = Number(documentBaseAmount || 0);
+    const settlementExchangeRate = Number(settlementExchangeRate || 1);
+    const documentExchangeRate = Number(documentExchangeRate || 1);
+    const realizedGain = Number(realizedGain || 0);
+    const realizedLoss = Number(realizedLoss || 0);
+
     const transactionAudit = (side: "debit" | "credit", rate: number) => ({
       transactionCurrency: allocation.currency,
       exchangeRate: rate,
@@ -433,16 +440,16 @@ export async function allocateAdvancePaymentAtomic(input: {
       ? [
           {
             accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
-            debit: allocation.settlementBaseAmount,
-            ...transactionAudit("debit", allocation.settlementExchangeRate),
+            debit: settlementBaseAmount,
+            ...transactionAudit("debit", settlementExchangeRate),
             customerId: partyRef,
             projectId: projectRef,
             description: "Apply customer advance",
           },
           {
             accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
-            credit: allocation.documentBaseAmount,
-            ...transactionAudit("credit", allocation.documentExchangeRate),
+            credit: documentBaseAmount,
+            ...transactionAudit("credit", documentExchangeRate),
             customerId: partyRef,
             projectId: projectRef,
             description: "Settle Accounts Receivable from advance",
@@ -451,35 +458,35 @@ export async function allocateAdvancePaymentAtomic(input: {
       : [
           {
             accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
-            debit: allocation.documentBaseAmount,
-            ...transactionAudit("debit", allocation.documentExchangeRate),
+            debit: documentBaseAmount,
+            ...transactionAudit("debit", documentExchangeRate),
             supplierId: partyRef,
             projectId: projectRef,
             description: "Settle Accounts Payable from advance",
           },
           {
             accountId: INITIAL_ACCOUNT_IDS.supplierAdvances,
-            credit: allocation.settlementBaseAmount,
-            ...transactionAudit("credit", allocation.settlementExchangeRate),
+            credit: settlementBaseAmount,
+            ...transactionAudit("credit", settlementExchangeRate),
             supplierId: partyRef,
             projectId: projectRef,
             description: "Apply supplier advance",
           },
         ];
 
-    if (allocation.realizedGain > 0) {
+    if (realizedGain > 0) {
       journalLines.push({
         accountId: INITIAL_ACCOUNT_IDS.exchangeGain,
-        credit: allocation.realizedGain,
+        credit: realizedGain,
         ...zeroFxAudit,
         projectId: projectRef,
         description: "Realized foreign exchange gain on advance allocation",
       } as any);
     }
-    if (allocation.realizedLoss > 0) {
+    if (realizedLoss > 0) {
       journalLines.push({
         accountId: INITIAL_ACCOUNT_IDS.exchangeLoss,
-        debit: allocation.realizedLoss,
+        debit: realizedLoss,
         ...zeroFxAudit,
         projectId: projectRef,
         description: "Realized foreign exchange loss on advance allocation",
@@ -497,7 +504,7 @@ export async function allocateAdvancePaymentAtomic(input: {
       projectId: projectRef,
       currency: allocation.currency,
       baseCurrency: allocation.baseCurrency,
-      exchangeRate: allocation.settlementExchangeRate,
+      exchangeRate: settlementExchangeRate,
       createdBy: input.createdBy || "advance-allocation",
       approvedBy: input.approvedBy || "Finance Controller",
       lines: journalLines,
@@ -519,8 +526,8 @@ export async function allocateAdvancePaymentAtomic(input: {
       currency: allocation.currency,
       baseCurrency: allocation.baseCurrency,
       realizedFx: allocation.realizedFx,
-      realizedGain: allocation.realizedGain,
-      realizedLoss: allocation.realizedLoss,
+      realizedGain: realizedGain,
+      realizedLoss: realizedLoss,
       alreadyAllocated: false,
     };
   });
