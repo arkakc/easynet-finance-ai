@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission, getRequestUser, hasPermission } from "@/lib/auth";
+import { requireValidatedRequestPermission } from "@/lib/auth";
+import { appendAuditEvent, requestAuditContext } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 import { AccountTypeGL, NormalBalance } from "@prisma/client";
 import * as XLSX from "xlsx";
 import { inferParentCode } from "@/app/api/ui/accounts/rebuild-tree/route";
 
 async function checkAuth(req: Request, permission: "accounts.read" | "accounts.write") {
-  try {
-    const user = getRequestUser(req);
-    if (user && hasPermission(user, permission)) {
-      return user;
-    }
-  } catch {}
-  try {
-    return await requirePermission(permission);
-  } catch (err) {
-    throw err;
-  }
+  return requireValidatedRequestPermission(req, permission);
 }
 
 /**
@@ -315,6 +306,7 @@ export function normalizeHeaderKey(key: string): string {
 export async function POST(req: NextRequest) {
   try {
     const actor = await checkAuth(req, "accounts.write");
+    const context = requestAuditContext(req);
 
     let rawRows: any[] = [];
     const contentType = req.headers.get("content-type") || "";
@@ -749,16 +741,17 @@ export async function POST(req: NextRequest) {
 
       const dbUser = await tx.user.findUnique({ where: { email: actor.email.toLowerCase() }, select: { id: true } });
       if (!dbUser) throw new Error("Authenticated user record not found for import audit");
-      const audit = await tx.auditLog.create({
-        data: {
-          action: "IMPORT",
-          entityType: "ChartOfAccounts",
-          entityCode: "COA_IMPORT",
-          description: `Chart of Accounts import by ${actor.email}: ${accountRows.length} rows processed.`,
-          changes: JSON.stringify({ accountRows: accountRows.length, createdCount, updatedCount, parentLinksUpdated, rootAccountsCount, warnings }),
-          userId: dbUser.id,
-        },
-      });
+      const audit = await appendAuditEvent({
+        action: "COA_IMPORT",
+        entityType: "ChartOfAccounts",
+        entityCode: "COA_IMPORT",
+        description: `Chart of Accounts import by ${actor.email}: ${accountRows.length} rows processed.`,
+        changes: { accountRows: accountRows.length, createdCount, updatedCount, parentLinksUpdated, rootAccountsCount, warnings },
+        actorEmail: actor.email,
+        userId: dbUser.id,
+        outcome: "SUCCESS",
+        ...context,
+      }, tx);
       return { createdCount, updatedCount, parentLinksUpdated, rootAccountsCount, auditId: audit.id };
     });
     return NextResponse.json({
