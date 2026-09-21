@@ -20,6 +20,7 @@ export type ConfiguredPostingAccounts = {
   exchangeUnrealizedLossAccount: string;
   defaultEmployeeAdvanceAccount: string;
   defaultCostOfGoodsSoldAccount: string;
+  purchasePriceVarianceAccount: string;
   defaultIncomeAccount: string;
   defaultDeferredRevenueAccount: string;
   defaultDeferredExpenseAccount: string;
@@ -91,6 +92,7 @@ export async function loadConfiguredPostingAccounts(): Promise<ConfiguredPosting
     exchangeUnrealizedLossAccount: resolve("exchange_unrealized_loss_account", INITIAL_ACCOUNT_IDS.exchangeUnrealizedLoss),
     defaultEmployeeAdvanceAccount: resolve("default_employee_advance_account", "ACC-1180"),
     defaultCostOfGoodsSoldAccount: resolve("default_cost_of_goods_sold_account", "ACC-5100"),
+    purchasePriceVarianceAccount: resolve("purchase_price_variance_account", INITIAL_ACCOUNT_IDS.purchasePriceVariance),
     defaultIncomeAccount: resolve("default_income_account", "ACC-4100"),
     defaultDeferredRevenueAccount: resolve("default_deferred_revenue_account", INITIAL_ACCOUNT_IDS.customerAdvances),
     defaultDeferredExpenseAccount: resolve("default_deferred_expense_account", "ACC-1170"),
