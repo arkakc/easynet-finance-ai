@@ -40,7 +40,7 @@ export default async function ManualJournalEntryPage({ searchParams }: { searchP
     if (!backendConfigured) {
       const chartOfAccounts = await prisma.chartOfAccounts.findMany({
         orderBy: { code: "asc" },
-        include: { children: { select: { id: true } }, parent: { select: { code: true } } },
+        include: { children: { select: { id: true } }, parent: { select: { code: true } }, journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } } },
       });
       const currencySetting = await prisma.globalSettings.findFirst({ where: { key: { in: ["currency", "base_currency"] } }, orderBy: { updatedAt: "desc" } });
       baseCurrency = String(currencySetting?.value || "PGK").trim().toUpperCase();
@@ -53,6 +53,7 @@ export default async function ManualJournalEntryPage({ searchParams }: { searchP
         parentAccount: row.parent ? `ACC-${row.parent.code}` : "",
         active: row.isActive,
         isGroup: row.children.length > 0,
+        balance: row.journalLines.reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0),
       }));
     } else {
       const result = await listTable<ManualJournalAccount>("Accounts", 500, 0);
