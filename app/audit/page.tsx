@@ -33,7 +33,7 @@ export default async function AuditPage() {
       <div className="page-head">
         <div>
           <h2>Audit Trail</h2>
-          <p className="small">Append-only application audit review with HMAC integrity sealing for Phase 9 events.</p>
+          <p className="small">Application audit review with HMAC integrity sealing for Phase 9 events.</p>
         </div>
         <div className="page-head-actions">
           {viewer.permissions.includes("security.manage") && <Link className="button-link secondary-link" href="/security">Security Controls</Link>}
@@ -49,12 +49,12 @@ export default async function AuditPage() {
         </div>
         <div className="card"><div className="label">Sealed Events</div><div className="value">{integrity.sealedEntries}</div></div>
         <div className="card"><div className="label">Legacy Unsealed</div><div className="value">{integrity.legacyUnsealedEntries}</div></div>
-        <div className="card"><div className="label">Chain Head</div><div className="value small-value">{integrity.headHash ? integrity.headHash.slice(0, 12) : "—"}</div></div>
+        <div className="card"><div className="label">Latest Seal</div><div className="value small-value">{integrity.headHash ? integrity.headHash.slice(0, 12) : "—"}</div></div>
       </div>
 
       {!integrity.valid && (
         <section className="panel warning-panel">
-          <strong>Audit integrity verification failed.</strong> Chain break detected at event {integrity.brokenAtId || "unknown"}.
+          <strong>Audit integrity verification failed.</strong> Audit integrity failure detected at event {integrity.brokenAtId || "unknown"}.
         </section>
       )}
 
