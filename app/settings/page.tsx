@@ -630,6 +630,9 @@ export default function SettingsPage() {
               ⚠️ Mandatory Setup Required
             </span>
           )}
+          <Link prefetch={false} className="button-link secondary-link" href="/accounting/exchange-rates">
+            Exchange Rates
+          </Link>
           <Link prefetch={false} className="button-link secondary-link" href="/setup/finance">
             Verify Initialization
           </Link>
