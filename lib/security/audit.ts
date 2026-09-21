@@ -72,7 +72,9 @@ function auditPayload(row: {
     outcome: row.outcome,
     requestId: row.requestId,
     actorEmail: row.actorEmail,
-    userId: row.userId,
+    // userId is intentionally excluded from the seal. It is a navigational
+    // foreign key that may become null when a user is deleted; actorEmail is
+    // the immutable actor snapshot used for integrity verification.
     ipAddress: row.ipAddress,
     userAgent: row.userAgent,
     previousHash: row.previousHash,
