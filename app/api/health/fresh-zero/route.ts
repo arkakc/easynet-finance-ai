@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/auth";
 import { listReportingTable, listTable } from "@/lib/backend/apps-script";
 
 const CORE_OPERATIONAL_TABLES = [
@@ -27,6 +28,7 @@ async function countReporting(table: string) {
 
 export async function GET() {
   try {
+    await requirePermission("settings.manage");
     const coreEntries = await Promise.all(
       CORE_OPERATIONAL_TABLES.map(async (table) => [table, await countCore(table)] as const),
     );
@@ -58,9 +60,10 @@ export async function GET() {
       note: "Reporting tables are derived and may contain zero-value KPI rows after the automatic materializer runs; they are not user-entered data.",
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Fresh-zero verification failed";
     return NextResponse.json({
       ok: false,
-      error: error instanceof Error ? error.message : "Fresh-zero verification failed",
-    }, { status: 500 });
+      error: message,
+    }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
