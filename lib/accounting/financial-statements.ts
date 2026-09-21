@@ -1,4 +1,5 @@
 import type { AccountTypeGL, PrismaClient } from "@prisma/client";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { prisma } from "@/src/lib/prisma";
 
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -90,6 +91,21 @@ function emptyBuckets(): Record<AgingBucket, number> {
   return { Current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
 }
 
+function pngDateText(value: Date | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Pacific/Port_Moresby",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
+}
+
+function accountCodeFromReference(value: string | null | undefined, fallback: string) {
+  const clean = String(value || fallback).trim();
+  return clean.toUpperCase().startsWith("ACC-") ? clean.slice(4) : clean;
+}
+
 export async function buildFinancialStatements(input: { from?: string; asOf: string }, client: PrismaClient = prisma): Promise<FinancialStatements> {
   const asOfDate = accountingDate(input.asOf, true);
   const from = input.from || await configuredFiscalYearStart(input.asOf, client);
@@ -111,7 +127,11 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
     client.journalHeader.aggregate({ where: { status: "POSTED", date: { gte: fromDate, lte: asOfDate } }, _sum: { totalDebit: true, totalCredit: true } }),
     client.journalHeader.aggregate({ where: { status: "POSTED", date: { lte: asOfDate } }, _sum: { totalDebit: true, totalCredit: true } }),
     client.invoice.findMany({
-      where: { issuedDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
+      where: {
+        issuedDate: { lte: asOfDate },
+        glPosted: true,
+        code: { not: { startsWith: "CN-" } },
+      },
       include: {
         customer: { select: { code: true, name: true } },
         paymentAllocations: {
@@ -121,12 +141,15 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
           },
           select: { amount: true, baseAmount: true },
         },
-        originalCreditNotes: { where: { issueDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
+        originalCreditNotes: {
+          where: { issueDate: { lte: asOfDate }, glPosted: true },
+          select: { total: true, journalId: true, status: true },
+        },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
     }),
     client.supplierBill.findMany({
-      where: { billDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
+      where: { billDate: { lte: asOfDate }, glPosted: true },
       include: {
         supplier: { select: { code: true, name: true } },
         paymentAllocations: {
@@ -136,12 +159,24 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
           },
           select: { amount: true, baseAmount: true },
         },
-        refunds: { where: { refundDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
+        refunds: {
+          where: { refundDate: { lte: asOfDate }, glPosted: true },
+          select: { total: true, journalId: true, status: true },
+        },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
     }),
     client.globalSettings.findMany({
-      where: { key: { in: ["currency", "base_currency"] } },
+      where: {
+        key: {
+          in: [
+            "currency",
+            "base_currency",
+            "default_receivable_account",
+            "default_payable_account",
+          ],
+        },
+      },
       select: { key: true, value: true },
     }),
     client.fxRevaluationLine.findMany({
@@ -155,6 +190,46 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       select: { documentType: true, documentId: true, baseDifference: true },
     }),
   ]);
+
+  const sourceJournalCodes = [
+    ...invoices.map((row) => String(row.journalId || "")).filter(Boolean),
+    ...bills.map((row) => String(row.journalId || "")).filter(Boolean),
+    ...invoices.flatMap((row) => row.originalCreditNotes.map((credit) => String(credit.journalId || ""))).filter(Boolean),
+    ...bills.flatMap((row) => row.refunds.map((refund) => String(refund.journalId || ""))).filter(Boolean),
+  ];
+  const sourceJournals = sourceJournalCodes.length
+    ? await client.journalHeader.findMany({
+        where: { code: { in: [...new Set(sourceJournalCodes)] } },
+        select: { id: true, code: true },
+      })
+    : [];
+  const sourceJournalCodeById = new Map(sourceJournals.map((row) => [row.id, row.code]));
+  const reversalRows = sourceJournals.length
+    ? await client.journalHeader.findMany({
+        where: {
+          reversalOfJournalId: { in: sourceJournals.map((row) => row.id) },
+          status: "POSTED",
+        },
+        select: { reversalOfJournalId: true, date: true },
+        orderBy: { date: "asc" },
+      })
+    : [];
+  const reversalDateBySourceCode = new Map<string, Date>();
+  for (const row of reversalRows) {
+    if (!row.reversalOfJournalId) continue;
+    const code = sourceJournalCodeById.get(row.reversalOfJournalId);
+    if (!code || reversalDateBySourceCode.has(code)) continue;
+    reversalDateBySourceCode.set(code, row.date);
+  }
+  const activeAsOf = (journalCode: string | null | undefined, currentStatus: string) => {
+    const reversalDate = journalCode ? reversalDateBySourceCode.get(journalCode) : undefined;
+    if (reversalDate && reversalDate <= asOfDate) return false;
+    const cancelledNow = ["CANCELLED", "VOID"].includes(String(currentStatus || "").toUpperCase());
+    if (cancelledNow && !reversalDate) return false;
+    return true;
+  };
+  const activeInvoices = invoices.filter((row) => activeAsOf(row.journalId, row.status));
+  const activeBills = bills.filter((row) => activeAsOf(row.journalId, row.status));
 
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const periodById = new Map(periodBalances.map((row) => [row.accountId, round(Number(row._sum.debit || 0) - Number(row._sum.credit || 0))]));
@@ -195,11 +270,13 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
     );
   }
 
-  const receivableRows: AgingRow[] = invoices.map((invoice) => {
+  const receivableRows: AgingRow[] = activeInvoices.map((invoice) => {
     const aging = bucketFor(invoice.dueDate, asOfDate);
     const rate = Number(invoice.exchangeRate || 1);
     const transactionReceipts = invoice.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
-    const transactionCredits = invoice.originalCreditNotes.reduce((sum, credit) => sum + Number(credit.total), 0);
+    const transactionCredits = invoice.originalCreditNotes
+      .filter((credit) => activeAsOf(credit.journalId, credit.status))
+      .reduce((sum, credit) => sum + Number(credit.total), 0);
     const transactionOutstanding = round(Math.max(0, Number(invoice.total) - transactionReceipts - transactionCredits));
     const baseTotal = Number(invoice.baseTotal || 0) > 0 ? Number(invoice.baseTotal) : round(Number(invoice.total || 0) * rate);
     const baseReceipts = invoice.paymentAllocations.reduce((sum, allocation) => {
@@ -214,7 +291,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       code: invoice.code,
       partyCode: invoice.customer.code,
       partyName: invoice.customer.name,
-      dueDate: invoice.dueDate?.toISOString().slice(0, 10) || null,
+      dueDate: pngDateText(invoice.dueDate),
       overdueDays: aging.days,
       bucket: aging.bucket,
       outstanding,
@@ -223,11 +300,13 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       historicalExchangeRate: rate,
     };
   }).filter((invoice) => invoice.outstanding >= 0.005);
-  const payableRows: AgingRow[] = bills.map((bill) => {
+  const payableRows: AgingRow[] = activeBills.map((bill) => {
     const aging = bucketFor(bill.dueDate, asOfDate);
     const rate = Number(bill.exchangeRate || 1);
     const transactionPayments = bill.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
-    const transactionCredits = bill.refunds.reduce((sum, refund) => sum + Number(refund.total), 0);
+    const transactionCredits = bill.refunds
+      .filter((refund) => activeAsOf(refund.journalId, refund.status))
+      .reduce((sum, refund) => sum + Number(refund.total), 0);
     const transactionOutstanding = round(Math.max(0, Number(bill.total) - transactionPayments - transactionCredits));
     const baseTotal = Number(bill.baseTotal || 0) > 0 ? Number(bill.baseTotal) : round(Number(bill.total || 0) * rate);
     const basePayments = bill.paymentAllocations.reduce((sum, allocation) => {
@@ -242,7 +321,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       code: bill.code,
       partyCode: bill.supplier.code,
       partyName: bill.supplier.name,
-      dueDate: bill.dueDate?.toISOString().slice(0, 10) || null,
+      dueDate: pngDateText(bill.dueDate),
       overdueDays: aging.days,
       bucket: aging.bucket,
       outstanding,
@@ -264,15 +343,21 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
   const rolledBalance = (code: string, creditNormal: boolean) => {
     const root = accounts.find((account) => account.code === code);
     if (!root) return 0;
-    const legacySiblingPrefix = code.slice(0, -1);
-    const ids = accounts.filter((account) => account.code.startsWith(legacySiblingPrefix)).map((account) => account.id);
-    if (!ids.includes(root.id)) ids.push(root.id);
+    const ids = [root.id];
     for (let index = 0; index < ids.length; index += 1) ids.push(...(children.get(ids[index]) || []));
     const raw = [...new Set(ids)].reduce((sum, id) => sum + (cumulativeById.get(id) || 0), 0);
     return round(raw * (creditNormal ? -1 : 1));
   };
-  const arGl = rolledBalance("1130", false);
-  const apGl = rolledBalance("2110", true);
+  const arControlCode = accountCodeFromReference(
+    baseCurrencySetting.find((row) => row.key === "default_receivable_account")?.value,
+    INITIAL_ACCOUNT_IDS.accountsReceivable,
+  );
+  const apControlCode = accountCodeFromReference(
+    baseCurrencySetting.find((row) => row.key === "default_payable_account")?.value,
+    INITIAL_ACCOUNT_IDS.accountsPayable,
+  );
+  const arGl = rolledBalance(arControlCode, false);
+  const apGl = rolledBalance(apControlCode, true);
   const periodDebit = round(Number(periodLedger._sum.totalDebit || 0));
   const periodCredit = round(Number(periodLedger._sum.totalCredit || 0));
   const cumulativeDebit = round(Number(cumulativeLedger._sum.totalDebit || 0));
