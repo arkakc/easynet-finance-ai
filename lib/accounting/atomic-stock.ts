@@ -267,7 +267,7 @@ export async function transferStockAtomic(input:{
       },
     ]});
 
-    const sourceQty=round4(source.qty-qty), sourceValue=round2(source.value-value);
+    const sourceQty=round4(source.qty-qty), sourceValue=round2(Math.max(0,source.value-value));
     const destinationQty=round4(destination.qty+qty), destinationValue=round2(destination.value+value);
     const destinationRate=destinationQty>0?round4(destinationValue/destinationQty):rate;
     await syncWarehouseBalance(tx,{itemId:item.id,warehouseId:fromWarehouse.id,quantity:sourceQty,value:sourceValue,rate:sourceQty>0?source.rate:0});
