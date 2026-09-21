@@ -1,5 +1,6 @@
 import { prisma } from "@/src/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { appendAuditEvent } from "@/lib/security/audit";
 
 type DbClient = typeof prisma | Prisma.TransactionClient;
 
@@ -179,6 +180,7 @@ export type DeleteTransactionsOptions = {
   resetStockQuantities?: boolean;
   ipAddress?: string;
   userAgent?: string;
+  requestId?: string;
   transactionClient?: Prisma.TransactionClient;
 };
 
@@ -301,29 +303,24 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       adminUserId = u?.id;
     }
 
-    // Fallback if no user ID exists in DB
-    if (!adminUserId) {
-      const firstUser = await tx.user.findFirst();
-      adminUserId = firstUser?.id || "admin-system";
-    }
-
-    // 21. Write an immutable AuditLog entry
-    const audit = await tx.auditLog.create({
-      data: {
-        action: "DELETE_COMPANY_TRANSACTIONS",
-        entityType: "Company",
-        entityCode: "ALL_TRANSACTIONS",
-        description: `Company transactions wiped by ${options.adminName || options.adminEmail} (${options.adminEmail}). Easynet-style transaction reset executed.`,
-        changes: JSON.stringify({
-          wipedSummary: summaryBefore,
-          resetStockQuantities: options.resetStockQuantities !== false,
-          timestamp: new Date().toISOString(),
-        }),
-        userId: adminUserId,
-        ipAddress: options.ipAddress || null,
-        userAgent: options.userAgent || null,
+    // 21. Write a Phase 9 sealed audit event. userId may be null for
+    // imported/legacy administrators; actorEmail remains the immutable actor snapshot.
+    const audit = await appendAuditEvent({
+      action: "DELETE_COMPANY_TRANSACTIONS",
+      entityType: "Company",
+      entityCode: "ALL_TRANSACTIONS",
+      description: `Company transactions wiped by ${options.adminName || options.adminEmail} (${options.adminEmail}). Controlled transaction reset executed.`,
+      changes: {
+        wipedSummary: summaryBefore,
+        resetStockQuantities: options.resetStockQuantities !== false,
       },
-    });
+      outcome: "SUCCESS",
+      requestId: options.requestId || null,
+      actorEmail: options.adminEmail,
+      userId: adminUserId || null,
+      ipAddress: options.ipAddress || null,
+      userAgent: options.userAgent || null,
+    }, tx);
 
     return {
       success: true,
