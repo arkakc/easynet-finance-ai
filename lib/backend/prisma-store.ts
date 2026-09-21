@@ -2,9 +2,24 @@ import { prisma } from "@/src/lib/prisma";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { insertPaymentSchedule, listPaymentSchedules, updatePaymentSchedule } from "@/lib/accounting/payment-schedule-store";
+import { normalizeCurrency, roundCurrency } from "@/lib/accounting/currency";
 
 export function generatedCode(prefix: string) {
   return documentSeriesId(prefix);
+}
+
+async function draftCurrencyValues(record: Record<string, unknown>, fallbackCurrency = "PGK") {
+  const baseSetting = await prisma.globalSettings.findUnique({ where: { key: "currency" } });
+  const baseCurrency = normalizeCurrency(baseSetting?.value || "PGK");
+  const currency = normalizeCurrency(record.currency || fallbackCurrency || baseCurrency);
+  const explicitRate = Number(record.exchangeRate || 0);
+  const exchangeRate = currency === baseCurrency ? 1 : explicitRate > 0 ? explicitRate : null;
+  const base = (value: unknown) => {
+    const amount = Number(value || 0);
+    if (currency === baseCurrency) return roundCurrency(amount);
+    return exchangeRate ? roundCurrency(amount * exchangeRate) : 0;
+  };
+  return { currency, baseCurrency, exchangeRate, base };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +134,11 @@ function mapPurchaseOrder(po: any) {
     projectName: po.project?.name || "",
     poDate: po.orderDate?.toISOString?.().slice(0, 10) || String(po.orderDate || "").slice(0, 10),
     expectedDate: po.expectedDate?.toISOString?.().slice(0, 10) || "",
+    currency: po.currency || "PGK",
+    exchangeRate: Number(po.exchangeRate || (po.currency === "PGK" ? 1 : 0)),
+    baseNetAmount: Number(po.baseSubtotal || 0),
+    baseGstAmount: Number(po.baseTaxTotal || 0),
+    baseTotalAmount: Number(po.baseTotal || 0),
     netAmount: Number(po.subtotal || 0),
     gstAmount: Number(po.taxTotal || 0),
     totalAmount: Number(po.total || 0),
@@ -171,6 +191,11 @@ function mapQuote(q: any) {
     projectName: q.project?.name || "",
     quoteDate: q.issuedDate?.toISOString?.().slice(0, 10) || String(q.issuedDate || "").slice(0, 10),
     expiryDate: q.validUntil?.toISOString?.().slice(0, 10) || "",
+    currency: q.currency || "PGK",
+    exchangeRate: Number(q.exchangeRate || (q.currency === "PGK" ? 1 : 0)),
+    baseNetAmount: Number(q.baseSubtotal || 0),
+    baseGstAmount: Number(q.baseTaxTotal || 0),
+    baseTotalAmount: Number(q.baseTotal || 0),
     netAmount: Number(q.subtotal || 0),
     gstAmount: Number(q.taxTotal || 0),
     totalAmount: Number(q.total || 0),
@@ -222,6 +247,13 @@ function mapInvoice(inv: any) {
     projectName: inv.project?.name || "",
     invoiceDate: inv.issuedDate?.toISOString?.().slice(0, 10) || String(inv.issuedDate || "").slice(0, 10),
     dueDate: inv.dueDate?.toISOString?.().slice(0, 10) || "",
+    currency: inv.currency || "PGK",
+    exchangeRate: Number(inv.exchangeRate || (inv.currency === "PGK" ? 1 : 0)),
+    baseNetAmount: Number(inv.baseSubtotal || 0),
+    baseGstAmount: Number(inv.baseTaxTotal || 0),
+    baseTotalAmount: Number(inv.baseTotal || 0),
+    basePaidAmount: Number(inv.baseAmountPaid || 0),
+    baseOutstandingAmount: Number(inv.baseOutstanding || 0),
     netAmount: Number(inv.subtotal || 0),
     gstAmount: Number(inv.taxTotal || 0),
     totalAmount: Number(inv.total || 0),
@@ -269,6 +301,13 @@ function mapSupplierBill(b: any) {
     projectName: b.project?.name || "",
     billDate: b.billDate?.toISOString?.().slice(0, 10) || String(b.billDate || "").slice(0, 10),
     dueDate: b.dueDate?.toISOString?.().slice(0, 10) || "",
+    currency: b.currency || "PGK",
+    exchangeRate: Number(b.exchangeRate || (b.currency === "PGK" ? 1 : 0)),
+    baseNetAmount: Number(b.baseSubtotal || 0),
+    baseGstAmount: Number(b.baseTaxTotal || 0),
+    baseTotalAmount: Number(b.baseTotal || 0),
+    basePaidAmount: Number(b.baseAmountPaid || 0),
+    baseOutstandingAmount: Number(b.baseOutstanding || 0),
     netAmount: Number(b.subtotal || 0),
     gstAmount: Number(b.taxTotal || 0),
     totalAmount: Number(b.total || 0),
@@ -335,6 +374,9 @@ function mapPayment(pay: any) {
     projectName: pay.project?.name || "",
     paymentType: pay.type?.includes?.("RECEIPT") ? "RECEIVE" : "PAY",
     paymentDate: pay.date?.toISOString?.().slice(0, 10) || String(pay.date || "").slice(0, 10),
+    currency: pay.currency || "PGK",
+    exchangeRate: Number(pay.exchangeRate || (pay.currency === "PGK" ? 1 : 0)),
+    baseAmount: Number(pay.baseAmount || 0),
     amount: Number(pay.amount || 0),
     paymentMethod: pay.paymentMethod || "Cash",
     cashBankAccountId: pay.depositAccount || "ACC-1110",
@@ -346,6 +388,7 @@ function mapPayment(pay: any) {
     journalId: pay.journalId || "",
     allocationCount: allocations.length,
     allocatedAmount,
+    baseAllocatedAmount: allocations.reduce((sum: number, row: any) => sum + Number(row.baseAmount || 0), 0),
     unallocatedAmount: Math.max(0, Number(pay.amount || 0) - allocatedAmount),
     createdAt: pay.createdAt?.toISOString?.() || String(pay.createdAt || ""),
   };
@@ -699,6 +742,9 @@ export async function prismaPostJournal(input: LocalJournalBundle) {
     documentNumber: String(input.header.documentNumber || journalCode),
     reference: String(input.header.reference || ""),
     projectId: String(input.header.projectId || ""),
+    currency: String(input.header.currency || input.header.baseCurrency || "PGK"),
+    baseCurrency: String(input.header.baseCurrency || "PGK"),
+    exchangeRate: input.header.exchangeRate !== undefined ? Number(input.header.exchangeRate || 0) : undefined,
     createdBy: String(input.header.createdBy || input.actor || "finance-ui"),
     approvedBy: String(input.header.approvedBy || "") || undefined,
     lines: input.lines.map((line) => ({
@@ -710,6 +756,10 @@ export async function prismaPostJournal(input: LocalJournalBundle) {
       projectId: String(line.projectId || input.header.projectId || "") || undefined,
       taxCode: String(line.taxCode || "") || undefined,
       costCenter: String(line.costCenter || "") || undefined,
+      transactionCurrency: String(line.transactionCurrency || input.header.currency || input.header.baseCurrency || "PGK"),
+      exchangeRate: line.exchangeRate !== undefined ? Number(line.exchangeRate || 0) : undefined,
+      transactionDebit: line.transactionDebit !== undefined ? Number(line.transactionDebit || 0) : undefined,
+      transactionCredit: line.transactionCredit !== undefined ? Number(line.transactionCredit || 0) : undefined,
       description: String(line.description || input.header.reference || input.header.documentNumber || "Journal entry"),
     })),
   }));
@@ -770,6 +820,11 @@ function mapJournalHeader(journal: any) {
     projectId: journal.lines?.[0]?.projectId || "",
     status: journal.status,
     reversalOfJournalId: journal.reversalOfJournalId || "",
+    currency: journal.currency || "PGK",
+    baseCurrency: journal.baseCurrency || "PGK",
+    exchangeRate: Number(journal.exchangeRate || 1),
+    transactionTotalDebit: Number(journal.transactionTotalDebit || 0),
+    transactionTotalCredit: Number(journal.transactionTotalCredit || 0),
     totalDebit: Number(journal.totalDebit || 0),
     totalCredit: Number(journal.totalCredit || 0),
     isBalanced: journal.isBalanced,
@@ -792,6 +847,11 @@ function mapJournalLine(line: any) {
     projectId: line.projectId || "",
     debit: Number(line.debit || 0),
     credit: Number(line.credit || 0),
+    currency: line.currency || "PGK",
+    transactionCurrency: line.transactionCurrency || line.currency || "PGK",
+    exchangeRate: Number(line.exchangeRate || 1),
+    transactionDebit: Number(line.transactionDebit || 0),
+    transactionCredit: Number(line.transactionCredit || 0),
     taxCode: line.taxCode || "",
     costCenter: line.costCenter || "",
     description: line.description || "",
@@ -910,6 +970,7 @@ export async function prismaAppendRecord<T = any>(
         if (p) projectId = p.id;
       }
 
+      const fx = await draftCurrencyValues(record);
       const created = await prisma.purchaseOrder.create({
         data: {
           id: record.poId ? String(record.poId) : undefined,
@@ -917,6 +978,11 @@ export async function prismaAppendRecord<T = any>(
           supplierId,
           projectId,
           orderDate: record.poDate ? new Date(String(record.poDate)) : new Date(),
+          currency: fx.currency,
+          exchangeRate: fx.exchangeRate,
+          baseSubtotal: fx.base(record.netAmount),
+          baseTaxTotal: fx.base(record.gstAmount),
+          baseTotal: fx.base(record.totalAmount),
           subtotal: Number(record.netAmount || 0),
           taxTotal: Number(record.gstAmount || 0),
           total: Number(record.totalAmount || 0),
@@ -967,6 +1033,7 @@ export async function prismaAppendRecord<T = any>(
         if (p) projectId = p.id;
       }
 
+      const fx = await draftCurrencyValues(record);
       const requestedStatus = String(record.status || "DRAFT").trim().toUpperCase().replace(/[\s-]+/g, "_");
       const quoteStatus = requestedStatus === "APPROVED" ? "ACCEPTED" : requestedStatus;
       const created = await prisma.quote.create({
@@ -977,6 +1044,11 @@ export async function prismaAppendRecord<T = any>(
           projectId,
           issuedDate: record.quoteDate ? new Date(String(record.quoteDate)) : new Date(),
           validUntil: record.expiryDate ? new Date(String(record.expiryDate)) : null,
+          currency: fx.currency,
+          exchangeRate: fx.exchangeRate,
+          baseSubtotal: fx.base(record.netAmount),
+          baseTaxTotal: fx.base(record.gstAmount),
+          baseTotal: fx.base(record.totalAmount),
           subtotal: Number(record.netAmount || 0),
           taxTotal: Number(record.gstAmount || 0),
           total: Number(record.totalAmount || 0),
@@ -1028,6 +1100,7 @@ export async function prismaAppendRecord<T = any>(
       }
 
       const total = Number(record.totalAmount || 0);
+      const fx = await draftCurrencyValues(record);
       const created = await prisma.invoice.create({
         data: {
           id: record.invoiceId ? String(record.invoiceId) : undefined,
@@ -1036,6 +1109,12 @@ export async function prismaAppendRecord<T = any>(
           projectId,
           issuedDate: record.invoiceDate ? new Date(String(record.invoiceDate)) : new Date(),
           dueDate: record.dueDate ? new Date(String(record.dueDate)) : null,
+          currency: fx.currency,
+          exchangeRate: fx.exchangeRate,
+          baseSubtotal: fx.base(record.netAmount),
+          baseTaxTotal: fx.base(record.gstAmount),
+          baseTotal: fx.base(total),
+          baseOutstanding: fx.base(total),
           subtotal: Number(record.netAmount || 0),
           taxTotal: Number(record.gstAmount || 0),
           total,
@@ -1093,6 +1172,7 @@ export async function prismaAppendRecord<T = any>(
         : null;
 
       const total = Number(record.totalAmount || 0);
+      const fx = await draftCurrencyValues(record, linkedPo?.currency || "PGK");
       const created = await prisma.supplierBill.create({
         data: {
           id: record.billId ? String(record.billId) : undefined,
@@ -1101,6 +1181,12 @@ export async function prismaAppendRecord<T = any>(
           projectId,
           billDate: record.billDate ? new Date(String(record.billDate)) : new Date(),
           dueDate: record.dueDate ? new Date(String(record.dueDate)) : null,
+          currency: fx.currency,
+          exchangeRate: fx.exchangeRate,
+          baseSubtotal: fx.base(record.netAmount),
+          baseTaxTotal: fx.base(record.gstAmount),
+          baseTotal: fx.base(total),
+          baseOutstanding: fx.base(total),
           subtotal: Number(record.netAmount || 0),
           taxTotal: Number(record.gstAmount || 0),
           total,
@@ -1160,6 +1246,7 @@ export async function prismaAppendRecord<T = any>(
       if (againstInput && customer && !invoice) throw new Error(`Sales Invoice ${againstInput} not found`);
       if (againstInput && supplier && !bill) throw new Error(`Supplier Invoice ${againstInput} not found`);
 
+      const fx = await draftCurrencyValues(record, invoice?.currency || bill?.currency || customer?.currency || supplier?.currency || "PGK");
       const paymentType = String(record.paymentType || "").toUpperCase();
       const prismaType = customer
         ? (paymentType === "PAY" ? "CUSTOMER_REFUND" : "CUSTOMER_RECEIPT")
@@ -1177,6 +1264,9 @@ export async function prismaAppendRecord<T = any>(
           type: prismaType as any,
           date: record.paymentDate ? new Date(String(record.paymentDate)) : new Date(),
           amount: Number(record.amount || 0),
+          baseAmount: fx.base(record.amount),
+          currency: fx.currency,
+          exchangeRate: fx.exchangeRate,
           paymentMethod: String(record.paymentMethod || "Cash"),
           referenceNumber: record.reference ? String(record.reference) : null,
           status: prismaStatus as any,
