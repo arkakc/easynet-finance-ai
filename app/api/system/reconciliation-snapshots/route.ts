@@ -47,7 +47,10 @@ export async function GET() {
       receivables: snapshot.receivables.outstanding,
       payables: snapshot.payables.outstanding,
       inventoryValue: snapshot.inventory.estimatedValue,
+      inventoryGlBalance: snapshot.inventory.glBalance,
+      inventoryDifference: snapshot.inventory.difference,
       bankBookBalance: snapshot.banking.glBookBalance,
+      bankReconciliationDrift: snapshot.banking.reconciliationDrift,
       controls: snapshot.controls,
     })) });
   } catch (error) {
