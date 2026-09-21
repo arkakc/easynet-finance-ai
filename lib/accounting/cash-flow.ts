@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { companyBaseCurrency } from "@/lib/accounting/currency";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { prisma } from "@/src/lib/prisma";
 
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -47,14 +48,31 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const asOfDate = accountingDate(input.asOf, true);
   if (fromDate > asOfDate) throw new Error("from must be on or before asOf");
 
-  const [accounts, mappedBanks, baseCurrency] = await Promise.all([
+  const [accounts, mappedBanks, baseCurrency, settings] = await Promise.all([
     client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, parentId: true } }),
     client.bankAccount.findMany({ where: { isActive: true, chartOfAccountsId: { not: null } }, select: { chartOfAccountsId: true } }),
     client.$transaction((tx) => companyBaseCurrency(tx)),
+    client.globalSettings.findMany({
+      where: { key: { in: ["default_cash_account", "default_bank_account"] } },
+      select: { key: true, value: true },
+    }),
   ]);
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
-  const cashIds = new Set(accounts.filter((account) => /^(111|112)/.test(account.code)).map((account) => account.id));
+  const setting = new Map(settings.map((row) => [row.key, String(row.value || "")]));
+  const resolveAccountId = (value: string | undefined, fallback: string) => {
+    const clean = String(value || fallback).split("—")[0].trim();
+    const code = clean.replace(/^ACC-/i, "");
+    return accounts.find((account) => account.id === clean || account.code === code)?.id || null;
+  };
+  const cashIds = new Set<string>();
+  for (const [value, fallback] of [
+    [setting.get("default_cash_account"), INITIAL_ACCOUNT_IDS.cash],
+    [setting.get("default_bank_account"), INITIAL_ACCOUNT_IDS.bank],
+  ] as const) {
+    const id = resolveAccountId(value, fallback);
+    if (id) cashIds.add(id);
+  }
   for (const bank of mappedBanks) if (bank.chartOfAccountsId) cashIds.add(bank.chartOfAccountsId);
   const queue = [...cashIds];
   for (let index = 0; index < queue.length; index += 1) {
