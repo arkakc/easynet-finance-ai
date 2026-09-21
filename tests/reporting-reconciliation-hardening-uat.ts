@@ -247,6 +247,12 @@ async function main() {
       });
     }
 
+    const baselineCashFlow = await buildCashFlowStatement({
+      from: "2026-01-01",
+      asOf: "2026-01-31",
+    }, client);
+    const baselineClosingCash = baselineCashFlow.totals.closingCash;
+
     await journal({
       code: `UAT8-JRN-BANK-${suffix}`,
       date: "2026-01-01",
@@ -495,9 +501,10 @@ async function main() {
       from: "2026-01-01",
       asOf: "2026-01-31",
     }, client);
-    if (cashFlow.currency !== "PGK" || cashFlow.totals.closingCash !== 100 || !cashFlow.control.balanced) {
+    const expectedClosingCash = Math.round((baselineClosingCash + 100 + Number.EPSILON) * 100) / 100;
+    if (cashFlow.currency !== "PGK" || cashFlow.totals.closingCash !== expectedClosingCash || !cashFlow.control.balanced) {
       throw new Error(
-        `Cash-flow base-currency control failed: ${cashFlow.currency}/${cashFlow.totals.closingCash}/${cashFlow.control.difference}`,
+        `Cash-flow base-currency control failed: ${cashFlow.currency}/${cashFlow.totals.closingCash}/expected ${expectedClosingCash}/${cashFlow.control.difference}`,
       );
     }
 
@@ -574,6 +581,8 @@ async function main() {
       },
       cashFlow: {
         currency: cashFlow.currency,
+        baselineClosingCash,
+        expectedClosingCash,
         closingCash: cashFlow.totals.closingCash,
         ledgerClosingCash: cashFlow.control.ledgerClosingCash,
         difference: cashFlow.control.difference,
