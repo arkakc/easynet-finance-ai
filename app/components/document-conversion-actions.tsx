@@ -53,6 +53,7 @@ export default function DocumentConversionActions({
   const isPurchaseOrder = type === "purchaseOrder" && !isSupplierQuotation && PO_LIFECYCLE.has(normalizedStatus);
   const canSupplierPayment = type === "supplierBill" && ["POSTED", "PARTLY_PAID"].includes(normalizedStatus);
   const [receiptInfo, setReceiptInfo] = useState<ReceiptInfo | null>(null);
+  const [existingSupplierBill, setExistingSupplierBill] = useState<any | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -63,9 +64,13 @@ export default function DocumentConversionActions({
     void (async () => {
       setChecking(true);
       try {
-        const response = await fetch("/api/stock", { cache: "no-store" });
-        const body = await response.json();
-        if (!response.ok || !body.ok) throw new Error(body.error || "Unable to check Purchase Receipt balance");
+        const [stockResponse, transactionResponse] = await Promise.all([
+          fetch("/api/stock", { cache: "no-store" }),
+          fetch("/api/erp/transactions", { cache: "no-store" }),
+        ]);
+        const body = await stockResponse.json();
+        if (!stockResponse.ok || !body.ok) throw new Error(body.error || "Unable to check Purchase Receipt balance");
+        const transactionBody = await transactionResponse.json();
         if (!active) return;
 
         const itemMap = new Map<string, any>((body.items || []).map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
@@ -100,6 +105,12 @@ export default function DocumentConversionActions({
           partial: received > 0.0001 && remaining > 0.0001,
           fullyReceived: hasStock && ordered > 0.0001 && remaining <= 0.0001,
         });
+        if (transactionResponse.ok && transactionBody.ok) {
+          const refs = new Set([id, documentNumber].map((value) => String(value || "")).filter(Boolean));
+          const linkedBill = (transactionBody.supplierBills || []).find((bill: any) => !["CANCELLED", "REVERSED"].includes(String(bill.status || "").toUpperCase())
+            && [bill.poId, bill.orderId, bill.sourceDocumentId].some((value) => refs.has(String(value || ""))));
+          setExistingSupplierBill(linkedBill || null);
+        }
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : "Unable to check Purchase Receipt balance");
       } finally {
@@ -107,7 +118,7 @@ export default function DocumentConversionActions({
       }
     })();
     return () => { active = false; };
-  }, [id, isPurchaseOrder]);
+  }, [documentNumber, id, isPurchaseOrder]);
 
   if (!isPurchaseOrder && !canSupplierPayment) return null;
 
@@ -183,9 +194,11 @@ export default function DocumentConversionActions({
       >
         {receiptButtonLabel}
       </button>
-      <button type="button" disabled={busy || normalizedStatus === "BILLED"} onClick={() => void createSupplierInvoice()}>
-        {busy ? "Saving…" : normalizedStatus === "BILLED" ? "Supplier Invoice Complete" : "Create Supplier Invoice"}
-      </button>
+      {existingSupplierBill
+        ? <span className="auto-badge">Supplier Invoice {["POSTED","PARTLY_PAID","PAID"].includes(String(existingSupplierBill.status || "").toUpperCase()) ? "Posted" : "Draft"}: {existingSupplierBill.billNumber || existingSupplierBill.billId}</span>
+        : <button type="button" disabled={busy || normalizedStatus === "BILLED"} onClick={() => void createSupplierInvoice()}>
+          {busy ? "Saving…" : normalizedStatus === "BILLED" ? "Supplier Invoice Complete" : "Create Supplier Invoice"}
+        </button>}
     </div>
 
     {poClosed && <div className="status-banner" style={{ marginTop: 12 }}>

@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { listConfiguredUsers, requirePermission, ROLE_PERMISSIONS } from "@/lib/auth";
 
 export default async function UsersPage() {
   await requirePermission("users.manage");
-  const users = listConfiguredUsers();
+  const users = await listConfiguredUsers();
   const enabledUsers = users.filter((u) => !u.disabled).length;
   const roleCount = Object.keys(ROLE_PERMISSIONS).length;
 
@@ -16,13 +17,15 @@ export default async function UsersPage() {
           </p>
         </div>
         <div className="page-head-actions">
+          <Link className="button-link secondary-link" href="/security">Security Controls</Link>
+          <Link className="button-link secondary-link" href="/audit">Audit Trail</Link>
           <details className="system-notice-tab">
             <summary>
               <span>ℹ️ System Notice</span>
               <span className="notice-arrow">▾</span>
             </summary>
             <div className="system-notice-dropdown">
-              <strong>Credential management:</strong> Users are provisioned through server environment configuration using scrypt password hashes. This prevents plain-text credentials from entering client code or logs.
+              <strong>Credential management:</strong> Users and password hashes are stored in the local database. Credentials are never returned to the browser.
             </div>
           </details>
           <span className="badge">RBAC Security</span>
@@ -43,8 +46,8 @@ export default async function UsersPage() {
           <div className="value">{roleCount}</div>
         </div>
         <div className="card">
-          <div className="label">Security Hash</div>
-          <div className="value small-value">scrypt / AES-GCM</div>
+          <div className="label">Credential Security</div>
+          <div className="value small-value">bcrypt(12) / HMAC-SHA256</div>
         </div>
       </div>
 
@@ -60,6 +63,9 @@ export default async function UsersPage() {
               <th>Email</th>
               <th>Assigned Roles</th>
               <th>Status</th>
+              <th>Login Security</th>
+              <th>Last Login</th>
+              <th>Session Ver.</th>
             </tr>
           </thead>
           <tbody>
@@ -72,14 +78,22 @@ export default async function UsersPage() {
                 <td>{user.roles.join(", ")}</td>
                 <td>
                   <span className={`auto-badge ${user.disabled ? "warning-text" : ""}`}>
-                    {user.disabled ? "Disabled" : "Active"}
+                    {user.disabled ? user.status : "Active"}
                   </span>
                 </td>
+                <td>
+                  {user.lockedUntil && new Date(user.lockedUntil).getTime() > Date.now()
+                    ? <span className="warning-text">LOCKED</span>
+                    : <strong>OK</strong>}
+                  <br /><span className="small">Failed: {user.failedLoginCount}</span>
+                </td>
+                <td>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never"}</td>
+                <td>{user.sessionVersion}</td>
               </tr>
             ))}
             {!users.length && (
               <tr>
-                <td colSpan={4}>No ERP users configured. Add ERP_USERS_JSON in the server environment before production use.</td>
+              <td colSpan={7}>No ERP users have been provisioned.</td>
               </tr>
             )}
           </tbody>

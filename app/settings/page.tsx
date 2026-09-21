@@ -2,8 +2,45 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 type Setting = { key: string; value: string; notes: string; updatedAt?: string };
+type SetupWorkflowPayload = {
+  status?: string;
+  config?: {
+    companyName?: string;
+    companyShortName?: string;
+    country?: string;
+    registrationNo?: string;
+    baseCurrency?: string;
+    financialYearPeriod?: string;
+    gstStatus?: string;
+    gstNumber?: string;
+    gstEvidenceNote?: string;
+    gstEvidenceDocName?: string;
+  };
+};
+
+type BankLedgerOption = {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  currency?: string;
+};
+
+type BankAccountDraft = {
+  localId: string;
+  id?: string;
+  code?: string;
+  displayName: string;
+  bankName: string;
+  accountNumber: string;
+  bsb: string;
+  currency: string;
+  linkedAccountCode: string;
+  linkedAccountName?: string;
+  isActive: boolean;
+};
 
 type RetainedDocument = {
   id: string;
@@ -95,7 +132,21 @@ const GST_STATUSES = [
   { value: "EXEMPT", label: "EXEMPT — Statutory exemption under PNG tax legislation" },
 ];
 
+function newBankDraft(): BankAccountDraft {
+  return {
+    localId: `bank-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    displayName: "",
+    bankName: "",
+    accountNumber: "",
+    bsb: "",
+    currency: "PGK",
+    linkedAccountCode: "",
+    isActive: true,
+  };
+}
+
 export default function SettingsPage() {
+  const router = useRouter();
   const [settings, setSettings] = useState<Setting[]>([]);
   const [existingDocs, setExistingDocs] = useState<RetainedDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,20 +158,22 @@ export default function SettingsPage() {
   // Form Fields
   const [companyName, setCompanyName] = useState("");
   const [companyShortName, setCompanyShortName] = useState("");
-  const [baseCurrency, setBaseCurrency] = useState("PGK");
-  const [financialYearPeriod, setFinancialYearPeriod] = useState("FY 2026 (01 Jan 2026 - 31 Dec 2026)");
-  const [gstStatus, setGstStatus] = useState("UNVERIFIED");
+  const [companyCountry, setCompanyCountry] = useState("");
+  const [companyRegistrationNo, setCompanyRegistrationNo] = useState("");
+  const [baseCurrency, setBaseCurrency] = useState("");
+  const [financialYearPeriod, setFinancialYearPeriod] = useState("");
+  const [postingLockDate, setPostingLockDate] = useState("");
+  const [gstStatus, setGstStatus] = useState("");
   const [gstNumber, setGstNumber] = useState("");
   const [evidenceNotes, setEvidenceNotes] = useState("");
   const [retainedDocName, setRetainedDocName] = useState("");
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
   // Banking Details
-  const [bankName, setBankName] = useState("");
-  const [bankAccount, setBankAccount] = useState("");
-  const [bankBsb, setBankBsb] = useState("");
+  const [bankAccounts, setBankAccounts] = useState<BankAccountDraft[]>([newBankDraft()]);
+  const [bankLedgerAccounts, setBankLedgerAccounts] = useState<BankLedgerOption[]>([]);
 
-  // Danger Zone - ERPNext Transaction Deletion State
+  // Danger Zone - Easynet Finance Transaction Deletion State
   const [dangerSummary, setDangerSummary] = useState<TransactionSummary | null>(null);
   const [loadingDangerSummary, setLoadingDangerSummary] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -148,6 +201,10 @@ export default function SettingsPage() {
 
   // Track initial values to detect unsaved changes
   const [initialSnapshot, setInitialSnapshot] = useState<string>("");
+  const [setupStatus, setSetupStatus] = useState("NEW_INSTALLATION");
+  const settingsReadOnly = setupStatus !== "ACTIVE";
+  const settingsFieldDisabled = loading || saving || settingsReadOnly;
+  const linkedSetupFieldDisabled = true;
 
   const loadTransactionSummary = async () => {
     setLoadingDangerSummary(true);
@@ -263,6 +320,8 @@ export default function SettingsPage() {
       await loadMasterSummary();
       await loadTransactionSummary();
       await loadSettings();
+      router.replace(data.redirectTo || "/setup/finance");
+      router.refresh();
     } catch (err) {
       setMasterDeleteError(err instanceof Error ? err.message : "Master data deletion failed");
     } finally {
@@ -274,44 +333,81 @@ export default function SettingsPage() {
     setLoading(true);
     setErrorMessage("");
     try {
-      const res = await fetch("/api/settings", { cache: "no-store" });
+      const [res, setupRes] = await Promise.all([
+        fetch("/api/settings", { cache: "no-store" }),
+        fetch("/api/setup/workflow", { cache: "no-store" }),
+      ]);
       const data = await res.json();
+      const setupData = setupRes.ok ? await setupRes.json() as SetupWorkflowPayload : null;
       if (!res.ok || !data.ok) throw new Error(data.error || "Failed to load finance settings");
 
-      const rows: Setting[] = data.settings || [];
+      const loadedSetupStatus = String(setupData?.status || "NEW_INSTALLATION").toUpperCase();
+      const setupActive = loadedSetupStatus === "ACTIVE";
+      setSetupStatus(loadedSetupStatus);
+
+      const rows: Setting[] = setupActive ? data.settings || [] : [];
       setSettings(rows);
-      setExistingDocs(data.documents || []);
+      setExistingDocs(setupActive ? data.documents || [] : []);
 
       const val = (k: string) => rows.find((r) => r.key === k)?.value || "";
       const desc = (k: string) => rows.find((r) => r.key === k)?.notes || "";
 
-      const cName = val("company_name") || "Easynet IT Solutions Limited";
-      const cShort = val("company_short_name") || "Easynet PNG";
-      const bCurr = val("base_currency") || val("currency") || "PGK";
-      const fyPeriod = val("financial_year_period") || "FY 2026 (01 Jan 2026 - 31 Dec 2026)";
-      const gStatus = (val("gst_status") || "UNVERIFIED").toUpperCase();
-      const gNumber = val("gst_number") || val("company_tin") || "";
-      const bName = val("company_bank_name") || "Bank South Pacific (BSP)";
+      const setupConfig = setupData?.config || {};
+      const cName = val("company_name") || setupConfig.companyName || "";
+      const cShort = val("company_short_name") || setupConfig.companyShortName || "";
+      const cCountry = val("company_country") || setupConfig.country || "";
+      const cRegistrationNo = val("company_registration_no") || setupConfig.registrationNo || "";
+      const bCurr = val("base_currency") || val("currency") || setupConfig.baseCurrency || "";
+      const fyPeriod = val("financial_year_period") || setupConfig.financialYearPeriod || "";
+      const lockDate = val("posting_lock_date");
+      const gStatus = (val("gst_status") || setupConfig.gstStatus || "").toUpperCase();
+      const gNumber = val("gst_number") || val("company_tin") || setupConfig.gstNumber || "";
+      const gstDocName = val("gst_evidence_doc_name") || setupConfig.gstEvidenceDocName || "";
+      const bName = val("company_bank_name");
       const bAcc = val("company_bank_account") || "";
       const bBsb = val("company_bank_bsb") || "";
-      const notes = desc("gst_status") || "";
+      const notes = val("gst_evidence_note") || desc("gst_status") || setupConfig.gstEvidenceNote || "";
+      const loadedBankAccounts: BankAccountDraft[] = Array.isArray(data.bankAccounts) && data.bankAccounts.length
+        ? data.bankAccounts.map((row: any) => ({
+          localId: String(row.id || `bank-${Math.random().toString(36).slice(2)}`),
+          id: String(row.id || ""),
+          code: String(row.code || ""),
+          displayName: String(row.displayName || ""),
+          bankName: String(row.bankName || ""),
+          accountNumber: String(row.accountNumber || ""),
+          bsb: String(row.bsb || ""),
+          currency: String(row.currency || bCurr || "PGK"),
+          linkedAccountCode: String(row.linkedAccountCode || ""),
+          linkedAccountName: String(row.linkedAccountName || ""),
+          isActive: row.isActive !== false,
+        }))
+        : bName || bAcc || bBsb
+          ? [{ ...newBankDraft(), displayName: bName, bankName: bName, accountNumber: bAcc, bsb: bBsb, currency: bCurr || "PGK" }]
+          : [newBankDraft()];
 
       setCompanyName(cName);
       setCompanyShortName(cShort);
+      setCompanyCountry(cCountry);
+      setCompanyRegistrationNo(cRegistrationNo);
       setBaseCurrency(bCurr);
       setFinancialYearPeriod(fyPeriod);
+      setPostingLockDate(lockDate);
       setGstStatus(gStatus);
       setGstNumber(gNumber);
-      setBankName(bName);
-      setBankAccount(bAcc);
-      setBankBsb(bBsb);
+      setBankAccounts(loadedBankAccounts);
+      setBankLedgerAccounts(Array.isArray(data.bankLedgerAccounts) ? data.bankLedgerAccounts : []);
       setEvidenceNotes(notes);
 
-      if (data.documents && data.documents.length > 0) {
+      setUploadedFile(null);
+      if (setupActive && data.documents && data.documents.length > 0) {
         setRetainedDocName(data.documents[0].name);
+      } else if (setupActive && gstDocName) {
+        setRetainedDocName(gstDocName);
+      } else {
+        setRetainedDocName("");
       }
 
-      const snapshot = JSON.stringify({ cName, cShort, bCurr, fyPeriod, gStatus, gNumber, bName, bAcc, bBsb, notes });
+      const snapshot = JSON.stringify({ cName, cShort, cCountry, cRegistrationNo, bCurr, fyPeriod, lockDate, gStatus, gNumber, bankAccounts: loadedBankAccounts, notes });
       setInitialSnapshot(snapshot);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Settings load failed");
@@ -330,13 +426,14 @@ export default function SettingsPage() {
   const currentSnapshot = JSON.stringify({
     cName: companyName,
     cShort: companyShortName,
+    cCountry: companyCountry,
+    cRegistrationNo: companyRegistrationNo,
     bCurr: baseCurrency,
     fyPeriod: financialYearPeriod,
+    lockDate: postingLockDate,
     gStatus: gstStatus,
     gNumber: gstNumber,
-    bName: bankName,
-    bAcc: bankAccount,
-    bBsb: bankBsb,
+    bankAccounts,
     notes: evidenceNotes,
   });
   const isDirty = initialSnapshot !== "" && currentSnapshot !== initialSnapshot;
@@ -353,6 +450,9 @@ export default function SettingsPage() {
 
   // Strict VERIFIED check: blocked if missing either GST number or retained source evidence document
   const isVerifiedBlocked = isGstVerified && (!hasGstNumber || !hasGstEvidence);
+  const activeBankAccounts = bankAccounts.filter((row) => row.isActive !== false);
+  const hasMandatoryBankAccount = activeBankAccounts.some((row) => row.bankName.trim() && row.accountNumber.trim());
+  const hasIncompleteBankAccount = activeBankAccounts.some((row) => !row.bankName.trim() || !row.accountNumber.trim());
 
   // Overall Mandatory setup completion check
   const isMandatoryComplete = Boolean(
@@ -360,6 +460,8 @@ export default function SettingsPage() {
     baseCurrency.trim() &&
     financialYearPeriod.trim() &&
     gstStatus.trim() &&
+    hasMandatoryBankAccount &&
+    !hasIncompleteBankAccount &&
     !isVerifiedBlocked
   );
 
@@ -374,9 +476,51 @@ export default function SettingsPage() {
     }
   };
 
+  const updateBankAccount = (localId: string, patch: Partial<BankAccountDraft>) => {
+    setBankAccounts((rows) => rows.map((row) => (row.localId === localId ? { ...row, ...patch } : row)));
+  };
+
+  const addBankAccount = () => {
+    setBankAccounts((rows) => [...rows, { ...newBankDraft(), currency: baseCurrency || "PGK" }]);
+  };
+
+  const removeBankAccount = (localId: string) => {
+    setBankAccounts((rows) => {
+      const activeRows = rows.filter((row) => row.isActive !== false);
+      if (activeRows.length <= 1) return rows.map((row) => (row.localId === localId ? { ...row, bankName: "", accountNumber: "", bsb: "", displayName: "", linkedAccountCode: "" } : row));
+      return rows.map((row) => (row.localId === localId ? { ...row, isActive: false } : row));
+    });
+  };
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     if (saving) return;
+    if (settingsReadOnly) {
+      setErrorMessage("Finance settings are locked until the Fresh Company Setup Wizard is activated.");
+      return;
+    }
+    const bankPayload = bankAccounts
+      .filter((row) => row.isActive !== false)
+      .map((row) => ({
+        id: row.id || undefined,
+        displayName: row.displayName.trim(),
+        bankName: row.bankName.trim(),
+        accountNumber: row.accountNumber.trim(),
+        bsb: row.bsb.trim(),
+        currency: (row.currency || baseCurrency || "PGK").trim(),
+        linkedAccountCode: row.linkedAccountCode.trim(),
+        isActive: true,
+      }));
+    if (!bankPayload.length || !bankPayload.some((row) => row.bankName && row.accountNumber)) {
+      setErrorMessage("At least one company bank account is mandatory after setup activation.");
+      return;
+    }
+    const incompleteBankRow = bankPayload.find((row) => !row.bankName || !row.accountNumber);
+    if (incompleteBankRow) {
+      setErrorMessage("Every active bank row requires Bank Name and Bank Account Number. Remove blank rows or complete them.");
+      return;
+    }
+    const primaryBank = bankPayload[0];
 
     // Hard block if VERIFIED without required criteria
     if (isGstVerified) {
@@ -400,13 +544,18 @@ export default function SettingsPage() {
       const payloadSettings = [
         { key: "company_name", value: companyName.trim(), notes: "Company legal name" },
         { key: "company_short_name", value: companyShortName.trim(), notes: "Trading / brand name" },
+        { key: "company_country", value: companyCountry.trim(), notes: "Company country" },
+        { key: "company_registration_no", value: companyRegistrationNo.trim(), notes: "Company registration number" },
         { key: "base_currency", value: baseCurrency.trim(), notes: "Primary base currency" },
         { key: "financial_year_period", value: financialYearPeriod.trim(), notes: "PNG statutory fiscal year" },
+        { key: "posting_lock_date", value: postingLockDate, notes: "No journals may post on or before this closed-period date" },
         { key: "gst_status", value: gstStatus.trim(), notes: evidenceNotes.trim() || "GST control status" },
         { key: "gst_number", value: gstNumber.trim(), notes: "IRC Tax Identification Number" },
-        { key: "company_bank_name", value: bankName.trim(), notes: "Operating corporate bank" },
-        { key: "company_bank_account", value: bankAccount.trim(), notes: "Bank account number" },
-        { key: "company_bank_bsb", value: bankBsb.trim(), notes: "Branch BSB code" },
+        { key: "gst_evidence_note", value: evidenceNotes.trim(), notes: "GST evidence / audit reference note" },
+        { key: "gst_evidence_doc_name", value: retainedDocName.trim(), notes: "GST registration certificate document name" },
+        { key: "company_bank_name", value: primaryBank.bankName, notes: "Primary operating corporate bank" },
+        { key: "company_bank_account", value: primaryBank.accountNumber, notes: "Primary bank account number" },
+        { key: "company_bank_bsb", value: primaryBank.bsb, notes: "Primary branch BSB code" },
       ];
 
       const res = await fetch("/api/erp/actions", {
@@ -419,6 +568,7 @@ export default function SettingsPage() {
             retainedDoc: retainedDocName
               ? { name: retainedDocName, documentType: "GST_REGISTRATION" }
               : undefined,
+            bankAccounts: bankPayload,
           },
         }),
       });
@@ -442,15 +592,21 @@ export default function SettingsPage() {
   };
 
   const handleQuickFillDefaults = () => {
+    if (settingsReadOnly) return;
     setCompanyName("Easynet IT Solutions Limited");
     setCompanyShortName("Easynet PNG");
     setBaseCurrency("PGK");
     setFinancialYearPeriod("FY 2026 (01 Jan 2026 - 31 Dec 2026)");
     setGstNumber("TIN-50012389");
     setGstStatus("REGISTERED");
-    setBankName("Bank South Pacific (BSP)");
-    setBankAccount("1001234567");
-    setBankBsb("088-301");
+    setBankAccounts([{
+      ...newBankDraft(),
+      displayName: "Main Operating Bank",
+      bankName: "Bank South Pacific (BSP)",
+      accountNumber: "1001234567",
+      bsb: "088-301",
+      currency: "PGK",
+    }]);
     setErrorMessage("");
   };
 
@@ -474,6 +630,9 @@ export default function SettingsPage() {
               ⚠️ Mandatory Setup Required
             </span>
           )}
+          <Link prefetch={false} className="button-link secondary-link" href="/accounting/exchange-rates">
+            Exchange Rates
+          </Link>
           <Link prefetch={false} className="button-link secondary-link" href="/setup/finance">
             Verify Initialization
           </Link>
@@ -486,7 +645,7 @@ export default function SettingsPage() {
         <div className="settings-blocked-banner" style={{ marginBottom: "16px" }}>
           <span>⚠️</span>
           <div>
-            <strong>Mandatory Setup Incomplete:</strong> You must configure and confirm your Base Currency, Papua New Guinea Financial Year Period, and GST Compliance before using the system for financial transactions.
+            <strong>Mandatory Setup Incomplete:</strong> Complete the Fresh Company Setup Wizard before using operational finance pages.
           </div>
         </div>
       )}
@@ -560,9 +719,9 @@ export default function SettingsPage() {
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="e.g. Easynet IT Solutions Limited"
                 required
-                disabled={loading || saving}
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
               />
-              <span className="settings-field-hint">Legal entity name registered with IPA Papua New Guinea.</span>
+              <span className="settings-field-hint">Linked from the Fresh Company Setup Wizard; read-only here.</span>
             </label>
 
             <label className="settings-field-label">
@@ -573,9 +732,35 @@ export default function SettingsPage() {
                 value={companyShortName}
                 onChange={(e) => setCompanyShortName(e.target.value)}
                 placeholder="e.g. Easynet PNG"
-                disabled={loading || saving}
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
               />
-              <span className="settings-field-hint">Displayed on user headers and informal communications.</span>
+              <span className="settings-field-hint">Linked from the Fresh Company Setup Wizard; read-only here.</span>
+            </label>
+
+            <label className="settings-field-label">
+              Country
+              <input
+                type="text"
+                className="settings-input"
+                value={companyCountry}
+                onChange={(e) => setCompanyCountry(e.target.value)}
+                placeholder="Papua New Guinea"
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
+              />
+              <span className="settings-field-hint">Linked from the Fresh Company Setup Wizard; read-only here.</span>
+            </label>
+
+            <label className="settings-field-label">
+              Company registration no.
+              <input
+                type="text"
+                className="settings-input"
+                value={companyRegistrationNo}
+                onChange={(e) => setCompanyRegistrationNo(e.target.value)}
+                placeholder="IPA registration number"
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
+              />
+              <span className="settings-field-hint">Linked from the Fresh Company Setup Wizard; read-only here.</span>
             </label>
 
             <label className="settings-field-label" style={{ gridColumn: "1 / -1" }}>
@@ -585,9 +770,10 @@ export default function SettingsPage() {
                 value={baseCurrency}
                 onChange={(e) => setBaseCurrency(e.target.value)}
                 required
-                disabled={loading || saving}
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                 style={{ fontWeight: 600 }}
               >
+                <option value="">Select base operating currency</option>
                 {BASE_CURRENCIES.map((curr) => (
                   <option key={curr.code} value={curr.code}>
                     {curr.label}
@@ -595,7 +781,7 @@ export default function SettingsPage() {
                 ))}
               </select>
               <span className="settings-field-hint">
-                All accounting ledger entries, journal vouchers, tax returns, and roll-ups are posted in this statutory currency.
+                Linked from the Fresh Company Setup Wizard. All accounting ledger entries, journal vouchers, tax returns, and roll-ups are posted in this statutory currency.
               </span>
             </label>
           </div>
@@ -619,9 +805,10 @@ export default function SettingsPage() {
                 value={financialYearPeriod}
                 onChange={(e) => setFinancialYearPeriod(e.target.value)}
                 required
-                disabled={loading || saving}
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                 style={{ fontWeight: 600 }}
               >
+                <option value="">Select financial year period</option>
                 {FINANCIAL_YEAR_PERIODS.map((fy) => (
                   <option key={fy.value} value={fy.value}>
                     {fy.label}
@@ -629,7 +816,7 @@ export default function SettingsPage() {
                 ))}
               </select>
               <span className="settings-field-hint">
-                Select the current operating financial year. In Papua New Guinea, IRC statutory tax periods run on the calendar year basis (01 January - 31 December).
+                Linked from the Fresh Company Setup Wizard; read-only here. In Papua New Guinea, IRC statutory tax periods run on the calendar year basis (01 January - 31 December).
               </span>
             </label>
 
@@ -639,6 +826,20 @@ export default function SettingsPage() {
                 <strong>Papua New Guinea IRC Standard:</strong> The default statutory accounting year starts on <strong>January 1</strong> and closes on <strong>December 31</strong>.
               </div>
             </div>
+
+            <label className="settings-field-label">
+              Close ledger through date (optional)
+              <input
+                className="settings-input"
+                type="date"
+                value={postingLockDate}
+                onChange={(e) => setPostingLockDate(e.target.value)}
+                disabled={settingsFieldDisabled}
+              />
+              <span className="settings-field-hint">
+                Stops new postings dated on or before this date. Use a linked reversal, or reopen the period with Finance Controller approval.
+              </span>
+            </label>
           </div>
         </div>
 
@@ -661,12 +862,13 @@ export default function SettingsPage() {
                   value={gstStatus}
                   onChange={(e) => setGstStatus(e.target.value)}
                   required
-                  disabled={loading || saving}
+                  disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                   style={{
                     fontWeight: 700,
                     color: gstStatus === "VERIFIED" ? "#166534" : gstStatus === "REGISTERED" ? "#0052cc" : "#0f172a",
                   }}
                 >
+                  <option value="">Select GST control status</option>
                   {GST_STATUSES.map((status) => (
                     <option key={status.value} value={status.value}>
                       {status.label}
@@ -674,7 +876,7 @@ export default function SettingsPage() {
                   ))}
                 </select>
                 <span className="settings-field-hint">
-                  Defines whether 10% GST output/input tax posting is authorized on taxable sales and vendor bills.
+                  Linked from the Fresh Company Setup Wizard; read-only here. Defines whether 10% GST output/input tax posting is authorized on taxable sales and vendor bills.
                 </span>
               </label>
 
@@ -686,11 +888,11 @@ export default function SettingsPage() {
                   value={gstNumber}
                   onChange={(e) => setGstNumber(e.target.value)}
                   placeholder="e.g. TIN-50012389"
-                  disabled={loading || saving}
+                  disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                   style={{ fontFamily: "var(--font-mono, monospace)" }}
                 />
                 <span className="settings-field-hint">
-                  Official 9-digit or TIN formatted registration number issued by PNG Internal Revenue Commission.
+                  Linked from the Fresh Company Setup Wizard; read-only here. Official 9-digit or TIN formatted registration number issued by PNG Internal Revenue Commission.
                 </span>
               </label>
             </div>
@@ -754,6 +956,7 @@ export default function SettingsPage() {
                       setRetainedDocName("");
                       setUploadedFile(null);
                     }}
+                    disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                     style={{ background: "#fee2e2", color: "#991b1b" }}
                   >
                     Remove
@@ -782,13 +985,13 @@ export default function SettingsPage() {
                   accept=".pdf,image/png,image/jpeg"
                   style={{ display: "none" }}
                   onChange={handleFileUpload}
-                  disabled={loading || saving}
+                  disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                 />
                 <button
                   type="button"
                   className="coa-btn"
                   onClick={() => document.getElementById("gst-cert-input")?.click()}
-                  disabled={loading || saving}
+                  disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
                 >
                   <span>📎</span> {retainedDocName ? "Replace Certificate File" : "Upload GST Registration Certificate"}
                 </button>
@@ -813,63 +1016,134 @@ export default function SettingsPage() {
                     ? "Required: IRC Certificate reference number, issuance date, or compliance audit notes."
                     : "Reason, certificate reference, or statutory note (optional for non-VERIFIED)."
                 }
-                disabled={loading || saving}
+                disabled={settingsFieldDisabled || linkedSetupFieldDisabled}
               />
               <span className="settings-field-hint">
-                Permanently logged in the compliance audit trail for Internal Revenue Commission reviews.
+                Linked from the Fresh Company Setup Wizard; read-only here. Permanently logged in the compliance audit trail for Internal Revenue Commission reviews.
               </span>
             </label>
           </div>
         </div>
 
-        {/* SECTION 4: Company Banking Details (Optional) */}
+        {/* SECTION 4: Company Banking Details (Mandatory) */}
         <div className="settings-section-card">
           <div className="settings-section-header">
             <div className="settings-section-title-wrap">
               <span style={{ fontSize: "18px" }}>🏦</span>
               <h3 className="settings-section-title">Company Banking Details (PNG Operations)</h3>
             </div>
-            <span className="settings-badge-optional">Optional / Banking Reference</span>
+            <span className={hasMandatoryBankAccount && !hasIncompleteBankAccount ? "settings-badge-ready" : "settings-badge-required"}>
+              Mandatory Bank Master
+            </span>
           </div>
 
-          <div className="settings-grid-2col">
-            <label className="settings-field-label">
-              Bank Name
-              <input
-                type="text"
-                className="settings-input"
-                value={bankName}
-                onChange={(e) => setBankName(e.target.value)}
-                placeholder="e.g. Bank South Pacific (BSP) / Kina Bank"
-                disabled={loading || saving}
-              />
-            </label>
+          <p className="settings-field-hint" style={{ marginTop: 0 }}>
+            At least one active physical bank account is required after setup activation. Each bank is linked to a leaf ASSET ledger account;
+            if you leave the ledger as Auto, the system links the default bank ledger first and then creates the next bank ledger automatically.
+          </p>
 
-            <label className="settings-field-label">
-              Bank Account Number
-              <input
-                type="text"
-                className="settings-input"
-                value={bankAccount}
-                onChange={(e) => setBankAccount(e.target.value)}
-                placeholder="e.g. 1001234567"
-                disabled={loading || saving}
-                style={{ fontFamily: "var(--font-mono, monospace)" }}
-              />
-            </label>
+          <div className="bank-account-stack">
+            {bankAccounts.filter((row) => row.isActive !== false).map((row, index) => (
+              <div className="bank-account-card" key={row.localId}>
+                <div className="form-title-row">
+                  <div>
+                    <strong>Bank Account {index + 1}</strong>
+                    {row.code && <span className="settings-field-hint" style={{ marginLeft: 8 }}>{row.code}</span>}
+                  </div>
+                  <button type="button" className="coa-btn" onClick={() => removeBankAccount(row.localId)} disabled={settingsFieldDisabled}>
+                    Remove
+                  </button>
+                </div>
+                <div className="settings-grid-2col" style={{ marginTop: 12 }}>
+                  <label className="settings-field-label">
+                    Account Display Name
+                    <input
+                      type="text"
+                      className="settings-input"
+                      value={row.displayName}
+                      onChange={(e) => updateBankAccount(row.localId, { displayName: e.target.value })}
+                      placeholder="e.g. Main Operating Bank"
+                      disabled={settingsFieldDisabled}
+                    />
+                  </label>
+                  <label className="settings-field-label">
+                    Bank Name *
+                    <input
+                      type="text"
+                      className="settings-input"
+                      value={row.bankName}
+                      onChange={(e) => updateBankAccount(row.localId, { bankName: e.target.value })}
+                      placeholder="e.g. Bank South Pacific (BSP) / Kina Bank"
+                      disabled={settingsFieldDisabled}
+                      required
+                    />
+                  </label>
+                  <label className="settings-field-label">
+                    Bank Account Number *
+                    <input
+                      type="text"
+                      className="settings-input"
+                      value={row.accountNumber}
+                      onChange={(e) => updateBankAccount(row.localId, { accountNumber: e.target.value })}
+                      placeholder="e.g. 1001234567"
+                      disabled={settingsFieldDisabled}
+                      required
+                      style={{ fontFamily: "var(--font-mono, monospace)" }}
+                    />
+                  </label>
+                  <label className="settings-field-label">
+                    Branch BSB Code
+                    <input
+                      type="text"
+                      className="settings-input"
+                      value={row.bsb}
+                      onChange={(e) => updateBankAccount(row.localId, { bsb: e.target.value })}
+                      placeholder="e.g. 088-301"
+                      disabled={settingsFieldDisabled}
+                      style={{ fontFamily: "var(--font-mono, monospace)" }}
+                    />
+                  </label>
+                  <label className="settings-field-label">
+                    Currency
+                    <select
+                      className="settings-select"
+                      value={row.currency || baseCurrency || "PGK"}
+                      onChange={(e) => updateBankAccount(row.localId, { currency: e.target.value })}
+                      disabled={settingsFieldDisabled}
+                    >
+                      {BASE_CURRENCIES.map((currency) => <option key={currency.code} value={currency.code}>{currency.code}</option>)}
+                    </select>
+                  </label>
+                  <label className="settings-field-label">
+                    Linked GL Bank Ledger
+                    <select
+                      className="settings-select"
+                      value={row.linkedAccountCode}
+                      onChange={(e) => updateBankAccount(row.localId, { linkedAccountCode: e.target.value })}
+                      disabled={settingsFieldDisabled}
+                    >
+                      <option value="">Auto-link / create bank ledger</option>
+                      {bankLedgerAccounts.map((account) => (
+                        <option key={account.accountId} value={account.accountId}>
+                          {account.accountCode} — {account.accountName}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="settings-field-hint">
+                      {row.linkedAccountCode
+                        ? `Linked to ${row.linkedAccountCode}${row.linkedAccountName ? ` — ${row.linkedAccountName}` : ""}`
+                        : "Auto uses the default bank ledger if free; otherwise creates the next 112x bank ledger."}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
 
-            <label className="settings-field-label">
-              Branch BSB Code
-              <input
-                type="text"
-                className="settings-input"
-                value={bankBsb}
-                onChange={(e) => setBankBsb(e.target.value)}
-                placeholder="e.g. 088-301"
-                disabled={loading || saving}
-                style={{ fontFamily: "var(--font-mono, monospace)" }}
-              />
-            </label>
+          <div className="button-row" style={{ marginTop: 14 }}>
+            <button type="button" className="coa-btn" onClick={addBankAccount} disabled={settingsFieldDisabled}>
+              + Add another bank account
+            </button>
           </div>
         </div>
 
@@ -886,13 +1160,17 @@ export default function SettingsPage() {
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span
               className={`settings-save-status ${
-                saving ? "saving" : isVerifiedBlocked ? "blocked" : isDirty ? "unsaved" : "saved"
+                saving ? "saving" : isVerifiedBlocked || !hasMandatoryBankAccount || hasIncompleteBankAccount ? "blocked" : isDirty ? "unsaved" : "saved"
               }`}
             >
               {saving
                 ? "⏳ Saving changes…"
                 : isVerifiedBlocked
                 ? "🚫 Save Blocked (Evidence Missing)"
+                : !hasMandatoryBankAccount
+                ? "🚫 Bank Account Required"
+                : hasIncompleteBankAccount
+                ? "🚫 Complete or Remove Blank Bank Rows"
                 : isDirty
                 ? "🟡 Unsaved Changes"
                 : lastSavedTime
@@ -907,7 +1185,7 @@ export default function SettingsPage() {
               type="button"
               className="coa-btn"
               onClick={handleQuickFillDefaults}
-              disabled={loading || saving}
+              disabled={settingsFieldDisabled}
               title="Populate with Easynet PNG standard corporate profile"
             >
               Fill Easynet PNG Defaults
@@ -916,21 +1194,25 @@ export default function SettingsPage() {
             <button
               type="submit"
               className="coa-btn coa-btn-primary"
-              disabled={loading || saving || isVerifiedBlocked}
+              disabled={settingsFieldDisabled || isVerifiedBlocked || !hasMandatoryBankAccount || hasIncompleteBankAccount}
               style={{ minWidth: "160px" }}
               title={
                 isVerifiedBlocked
                   ? "Save blocked: VERIFIED requires GST number and retained source document."
+                  : !hasMandatoryBankAccount
+                  ? "Save blocked: add at least one company bank account."
+                  : hasIncompleteBankAccount
+                  ? "Save blocked: complete or remove blank bank rows."
                   : "Save all finance & ERP configurations"
               }
             >
-              {saving ? "Saving…" : isVerifiedBlocked ? "Save Blocked" : "💾 Save Configuration"}
+              {saving ? "Saving…" : isVerifiedBlocked || !hasMandatoryBankAccount || hasIncompleteBankAccount ? "Save Blocked" : "💾 Save Configuration"}
             </button>
           </div>
         </div>
       </form>
 
-      {/* SECTION 6: Danger Zone - Delete Company Transactions (ERPNext Architecture) */}
+      {/* SECTION 6: Danger Zone - Delete Company Transactions (Easynet Finance Architecture) */}
       <div className="settings-danger-card">
         <div className="settings-danger-header">
           <div className="settings-danger-title-wrap">
@@ -938,7 +1220,7 @@ export default function SettingsPage() {
             <div>
               <h3 className="settings-danger-title">Danger Zone: Delete Company Transactions</h3>
               <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#991b1b" }}>
-                ERPNext Architecture Wipe: Permanently erase all company transactions while strictly preserving your master data.
+                Easynet Finance Architecture Wipe: Permanently erase all company transactions while strictly preserving your master data.
               </p>
             </div>
           </div>
@@ -1166,18 +1448,18 @@ export default function SettingsPage() {
         </table>
       </section>
 
-      {/* ERPNext-style Delete Company Transactions Confirmation Modal */}
+      {/* Easynet-style Delete Company Transactions Confirmation Modal */}
       {isDeleteModalOpen && (
-        <div className="erpnext-modal-overlay" role="dialog" aria-modal="true">
-          <div className="erpnext-modal-container">
-            <div className="erpnext-modal-header">
-              <div className="erpnext-modal-header-title">
+        <div className="finance-modal-overlay" role="dialog" aria-modal="true">
+          <div className="finance-modal-container">
+            <div className="finance-modal-header">
+              <div className="finance-modal-header-title">
                 <span style={{ fontSize: "20px" }}>🛡️</span>
                 <h3>Delete Company Transactions — Security Verification</h3>
               </div>
               <button
                 type="button"
-                className="erpnext-modal-close-btn"
+                className="finance-modal-close-btn"
                 onClick={() => setIsDeleteModalOpen(false)}
                 disabled={isDeleting}
                 aria-label="Close"
@@ -1186,7 +1468,7 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="erpnext-modal-body">
+            <div className="finance-modal-body">
               {deleteSuccess ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center", textAlign: "center", padding: "16px 0" }}>
                   <span style={{ fontSize: "44px" }}>✅</span>
@@ -1224,10 +1506,10 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <>
-                  <div className="erpnext-scope-box">
+                  <div className="finance-scope-box">
                     <div>
                       <strong style={{ color: "#991b1b", fontSize: "12.5px" }}>🔴 Records to be DELETED:</strong>
-                      <ul className="erpnext-scope-list deleted">
+                      <ul className="finance-scope-list deleted">
                         <li>General Ledger & Journals</li>
                         <li>Invoices & Sales Quotations</li>
                         <li>Purchase Orders & Vendor Bills</li>
@@ -1238,7 +1520,7 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <strong style={{ color: "#166534", fontSize: "12.5px" }}>🟢 Master Data PRESERVED:</strong>
-                      <ul className="erpnext-scope-list preserved">
+                      <ul className="finance-scope-list preserved">
                         <li>Company Profile & Settings</li>
                         <li>Chart of Accounts Hierarchy</li>
                         <li>Customer & Supplier Master</li>
@@ -1256,13 +1538,13 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  <div className="erpnext-modal-field">
+                  <div className="finance-modal-field">
                     <label htmlFor="admin-reauth-password">1. Re-enter Administrator Password *</label>
-                    <div className="erpnext-modal-input-wrap">
+                    <div className="finance-modal-input-wrap">
                       <input
                         id="admin-reauth-password"
                         type={showAdminPassword ? "text" : "password"}
-                        className="erpnext-modal-input"
+                        className="finance-modal-input"
                         value={adminPassword}
                         onChange={(e) => setAdminPassword(e.target.value)}
                         placeholder="Enter your current login password"
@@ -1292,14 +1574,14 @@ export default function SettingsPage() {
                     </span>
                   </div>
 
-                  <div className="erpnext-modal-field">
+                  <div className="finance-modal-field">
                     <label htmlFor="confirm-company-name">
                       2. Confirmation Prompt: Type <code>{companyName || "Easynet IT Solutions Limited"}</code> *
                     </label>
                     <input
                       id="confirm-company-name"
                       type="text"
-                      className="erpnext-modal-input"
+                      className="finance-modal-input"
                       value={confirmationText}
                       onChange={(e) => setConfirmationText(e.target.value)}
                       placeholder={`Type "${companyName || 'Easynet IT Solutions Limited'}" or "DELETE ALL TRANSACTIONS"`}
@@ -1324,7 +1606,7 @@ export default function SettingsPage() {
             </div>
 
             {!deleteSuccess && (
-              <div className="erpnext-modal-footer">
+              <div className="finance-modal-footer">
                 <button
                   type="button"
                   className="coa-btn"
@@ -1355,16 +1637,16 @@ export default function SettingsPage() {
 
       {/* Master Data Deletion Confirmation Modal */}
       {isMasterDeleteModalOpen && (
-        <div className="erpnext-modal-overlay" role="dialog" aria-modal="true">
-          <div className="erpnext-modal-container">
-            <div className="erpnext-modal-header" style={{ background: "#fff1f2", borderTopColor: "#881337" }}>
-              <div className="erpnext-modal-header-title">
+        <div className="finance-modal-overlay" role="dialog" aria-modal="true">
+          <div className="finance-modal-container">
+            <div className="finance-modal-header" style={{ background: "#fff1f2", borderTopColor: "#881337" }}>
+              <div className="finance-modal-header-title">
                 <span style={{ fontSize: "20px" }}>🚨</span>
                 <h3 style={{ color: "#881337" }}>Delete All Master Data — Complete Factory Reset</h3>
               </div>
               <button
                 type="button"
-                className="erpnext-modal-close-btn"
+                className="finance-modal-close-btn"
                 onClick={() => setIsMasterDeleteModalOpen(false)}
                 disabled={isMasterDeleting}
                 aria-label="Close"
@@ -1373,7 +1655,7 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="erpnext-modal-body">
+            <div className="finance-modal-body">
               {masterDeleteSuccess ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px", alignItems: "center", textAlign: "center", padding: "16px 0" }}>
                   <span style={{ fontSize: "44px" }}>✅</span>
@@ -1430,13 +1712,13 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  <div className="erpnext-modal-field">
+                  <div className="finance-modal-field">
                     <label htmlFor="master-admin-password">1. Re-enter Administrator Password *</label>
-                    <div className="erpnext-modal-input-wrap">
+                    <div className="finance-modal-input-wrap">
                       <input
                         id="master-admin-password"
                         type={showMasterAdminPassword ? "text" : "password"}
-                        className="erpnext-modal-input"
+                        className="finance-modal-input"
                         value={masterAdminPassword}
                         onChange={(e) => setMasterAdminPassword(e.target.value)}
                         placeholder="Enter your current login password"
@@ -1466,14 +1748,14 @@ export default function SettingsPage() {
                     </span>
                   </div>
 
-                  <div className="erpnext-modal-field">
+                  <div className="finance-modal-field">
                     <label htmlFor="confirm-master-phrase">
                       2. Safety Confirmation Prompt: Type <code>WIPE ALL MASTER DATA</code> *
                     </label>
                     <input
                       id="confirm-master-phrase"
                       type="text"
-                      className="erpnext-modal-input"
+                      className="finance-modal-input"
                       value={masterConfirmationPhrase}
                       onChange={(e) => setMasterConfirmationPhrase(e.target.value)}
                       placeholder='Type "WIPE ALL MASTER DATA"'
@@ -1498,7 +1780,7 @@ export default function SettingsPage() {
             </div>
 
             {!masterDeleteSuccess && (
-              <div className="erpnext-modal-footer">
+              <div className="finance-modal-footer">
                 <button
                   type="button"
                   className="coa-btn"

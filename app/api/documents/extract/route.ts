@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { NextResponse } from "next/server";
@@ -12,6 +12,7 @@ import {
   uploadSourceFile,
 } from "@/lib/backend/apps-script";
 import { documentSchema } from "@/lib/ai/document-schema";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -187,7 +188,7 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    const documentId = `DOC-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const documentId = documentSeriesId("Document");
     const now = new Date().toISOString();
 
     const retained = await uploadSourceFile({

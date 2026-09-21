@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, findRecords, updateRecord } from "@/lib/backend/apps-script";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   quoteId: z.string().trim().min(1),
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const existing = await findRecords<any>("PaymentSchedules", { sourceId: input.quoteId, sourceType: "SALES_QUOTE_REMAINDER_CLOSE" }, 20);
     if ((existing.rows || []).some((row: any) => String(row.status || "").toUpperCase() === "POSTED")) throw new Error("Quotation remainder is already closed");
 
-    const scheduleId = `SQCLOSE-${randomUUID().slice(0, 12).toUpperCase()}`;
+    const scheduleId = documentSeriesId("Sales Quote Close");
     await appendRecord("PaymentSchedules", {
       scheduleId,
       sourceType: "SALES_QUOTE_REMAINDER_CLOSE",

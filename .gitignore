@@ -1,7 +1,38 @@
+# Dependencies
 node_modules/
+
+# Next.js / build
 .next/
-.prisma/
-*.db
-.env.local
 dist/
 build/
+out/
+.cache/
+
+# Prisma generated files
+.prisma/
+prisma/generated/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+backups/
+
+# TypeScript generated cache
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

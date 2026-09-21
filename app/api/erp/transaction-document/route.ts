@@ -38,13 +38,19 @@ export async function GET(request:NextRequest){
     const projectId=String(record.projectId||"");
     const accountId=String(record.cashBankAccountId||record.expenseAccountId||"");
 
-    const[itemResult,customerResult,supplierResult,projectResult,accountResult]=await Promise.all([
+    const[itemResult,customerResult,supplierResult,projectResult,accountResult,settingsResult]=await Promise.all([
       config.lineTable?listTable<any>("Items",500,0):Promise.resolve({rows:[] as any[]}),
       customerId?findRecords<any>("Customers",{customerId},1):Promise.resolve({rows:[] as any[]}),
-      supplierId?findRecords<any>("Suppliers",{supplierId},1):Promise.resolve({rows:[] as any[]}),
+      supplierId?listTable<any>("Suppliers",500,0):Promise.resolve({rows:[] as any[]}),
       projectId?findRecords<any>("Projects",{projectId},1):Promise.resolve({rows:[] as any[]}),
       accountId?findRecords<any>("Accounts",{accountId},1):Promise.resolve({rows:[] as any[]}),
+      listTable<any>("Settings",500,0),
     ]);
+    const baseCurrency=String(
+      (settingsResult.rows||[]).find((row:any)=>String(row.key||"")==="currency")?.value
+      || (settingsResult.rows||[]).find((row:any)=>String(row.key||"")==="base_currency")?.value
+      || "PGK"
+    ).trim().toUpperCase();
 
     const lineItemIds=new Set(lines.map((line:any)=>String(line.itemId||"")).filter(Boolean));
     const items=(itemResult.rows||[]).filter((item:any)=>lineItemIds.has(String(item.itemId||item.itemCode||"")));
@@ -62,6 +68,7 @@ export async function GET(request:NextRequest){
         projects:projectResult.rows||[],
         accounts:accountResult.rows||[],
         items,
+        baseCurrency,
       },
     });
   }catch(error){

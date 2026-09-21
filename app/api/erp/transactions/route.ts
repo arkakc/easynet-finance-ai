@@ -4,10 +4,11 @@ import { requirePermission, hasPermission, type Permission } from "@/lib/auth";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { GET as legacyGet, POST as legacyPost } from "@/app/api/transactions/route";
-import { postJournal, receiptPosting, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { receiptPosting, supplierPaymentPosting } from "@/lib/accounting/posting";
+import { finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
-import { synchronizeSettlement } from "@/lib/accounting/advance-allocation";
 import { round2 } from "@/lib/accounting/inventory";
+import { prisma } from "@/src/lib/prisma";
 import {
   prismaDeleteQuote,
   prismaDeleteInvoice,
@@ -19,6 +20,7 @@ import {
 
 const ACTION_PERMISSION: Record<string, Permission> = {
   createQuote: "sales.write",
+  createSalesOrder: "sales.write",
   createInvoice: "sales.write",
   createSupplierQuote: "purchase.write",
   createPurchaseOrder: "purchase.write",
@@ -28,6 +30,7 @@ const ACTION_PERMISSION: Record<string, Permission> = {
 
 const SERIES: Record<string, { table: string; field: string; prefix: string; payloadField: string }> = {
   createQuote: { table: "Quotes", field: "quoteNumber", prefix: "SQ", payloadField: "documentNumber" },
+  createSalesOrder: { table: "Quotes", field: "quoteNumber", prefix: "SO", payloadField: "documentNumber" },
   createInvoice: { table: "Invoices", field: "invoiceNumber", prefix: "SI", payloadField: "documentNumber" },
   createSupplierQuote: { table: "PurchaseOrders", field: "poNumber", prefix: "SUPQ", payloadField: "documentNumber" },
   createPurchaseOrder: { table: "PurchaseOrders", field: "poNumber", prefix: "PO", payloadField: "documentNumber" },
@@ -57,8 +60,55 @@ function permissionForAction(action: string, partyType?: string): Permission | u
   return ACTION_PERMISSION[action];
 }
 
+async function salesDeliveryNotes(salesOrders: any[]) {
+  const movements = await listTable<any>("StockMovements", 500, 0);
+  const orderById = new Map(salesOrders.map((row: any) => [String(row.quoteId || ""), row]));
+  const grouped = new Map<string, any>();
+  for (const movement of movements.rows || []) {
+    if (String(movement.movementType || "") !== "SALES_DELIVERY") continue;
+    const sourceDocumentId = String(movement.sourceDocumentId || "");
+    const order = orderById.get(sourceDocumentId);
+    const movementId = String(movement.movementId || "");
+    const deliveryNumber = movementId.replace(/-\d{3}$/, "") || movementId;
+    const current = grouped.get(deliveryNumber) || {
+      deliveryId: deliveryNumber,
+      deliveryNumber,
+      deliveryDate: movement.movementDate,
+      sourceDocumentId,
+      customerId: order?.customerId || "",
+      projectId: order?.projectId || movement.projectId || "",
+      status: "POSTED",
+      totalAmount: 0,
+      journalId: movement.journalId || "",
+      createdAt: movement.createdAt || movement.movementDate,
+    };
+    current.totalAmount += Number(movement.value || 0);
+    if (!current.journalId && movement.journalId) current.journalId = movement.journalId;
+    grouped.set(deliveryNumber, current);
+  }
+  return [...grouped.values()].sort((a, b) => new Date(b.deliveryDate || b.createdAt || 0).getTime() - new Date(a.deliveryDate || a.createdAt || 0).getTime());
+}
+
 async function cashBankAvailability(accountId: string) {
-  if (!CASH_BANK_IDS.has(accountId)) throw new Error("Select a valid Cash / Bank account from the controlled account list");
+  const allowed = new Set(CASH_BANK_IDS);
+  const [linkedBankAccounts, settings] = await Promise.all([
+    prisma.bankAccount.findMany({
+      where: { isActive: true, chartOfAccountsId: { not: null } },
+      include: { chartOfAccounts: { select: { code: true } } },
+    }).catch(() => []),
+    prisma.globalSettings.findMany({
+      where: { key: { in: ["default_cash_account", "default_bank_account"] } },
+      select: { value: true },
+    }).catch(() => []),
+  ]);
+  linkedBankAccounts.forEach((row) => {
+    if (row.chartOfAccounts?.code) allowed.add(`ACC-${row.chartOfAccounts.code}`);
+  });
+  settings.forEach((row) => {
+    const code = String(row.value || "").trim().replace(/^ACC-/i, "");
+    if (code) allowed.add(`ACC-${code}`);
+  });
+  if (!allowed.has(accountId)) throw new Error("Select a valid Cash / Bank account from the controlled account list");
   const [accountResult, lineResult] = await Promise.all([
     findRecords<any>("Accounts", { accountId }, 1),
     listTable<any>("JournalLines", 500, 0),
@@ -92,6 +142,10 @@ export async function GET(request: Request) {
     const body = await response.json();
     if (!body.ok) return NextResponse.json(body, { status: response.status });
     const canSales = hasPermission(user, "sales.read"), canPurchase = hasPermission(user, "purchase.read"), canAccounts = hasPermission(user, "accounts.read");
+    const allQuotes = Array.isArray(body.quotes) ? body.quotes : [];
+    const isSalesOrder = (row: any) => String(row.quoteNumber || row.documentNumber || row.code || row.quoteId || "").toUpperCase().startsWith("SO-");
+    const salesOrders = canSales ? allQuotes.filter(isSalesOrder) : [];
+    const quotes = canSales ? allQuotes.filter((row: any) => !isSalesOrder(row)) : [];
     const allPurchaseOrders = Array.isArray(body.purchaseOrders) ? body.purchaseOrders : [];
     const isSupq = (row: any) => String(row.poNumber || row.code || row.poId || "").toUpperCase().startsWith("SUPQ-");
     const supplierQuotes = canPurchase ? allPurchaseOrders.filter(isSupq) : [];
@@ -102,7 +156,8 @@ export async function GET(request: Request) {
       if (String(row.partyType || "") === "Supplier") return canPurchase;
       return false;
     }) : [];
-    return NextResponse.json({ ...body, quotes: canSales ? body.quotes || [] : [], invoices: canSales ? body.invoices || [] : [], supplierQuotes, purchaseOrders, supplierBills: canPurchase ? body.supplierBills || [] : [], expenses: canPurchase ? body.expenses || [] : [], payments });
+    const deliveryNotes = canSales ? await salesDeliveryNotes(salesOrders) : [];
+    return NextResponse.json({ ...body, quotes, salesOrders, deliveryNotes, invoices: canSales ? body.invoices || [] : [], supplierQuotes, purchaseOrders, supplierBills: canPurchase ? body.supplierBills || [] : [], expenses: canPurchase ? body.expenses || [] : [], payments });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unauthorized";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : 401 });
@@ -154,21 +209,25 @@ async function finalizeCustomerRefund(row: any, patch: { paymentDate: string; am
   if (String(refundable.creditNote.customerId || "") !== String(row.partyId || "")) throw new Error("Refund customer does not match Sales Credit Note customer");
   if (patch.amount > refundable.refundable + 0.001) throw new Error(`Refund exceeds remaining refundable customer credit. Available K${refundable.refundable.toFixed(2)}`);
 
-  await updateRecord("Payments", "paymentId", row.paymentId, patch, "payment-final-save:customer-refund");
-  const journal = await postJournal({
+  const result = await finalizePaymentAtomic({
+    paymentId: row.paymentId,
     postingDate: patch.paymentDate,
-    documentType: "CUSTOMER_REFUND",
-    documentId: row.paymentId,
-    documentNumber: String(row.paymentNumber || row.paymentId),
+    amount: patch.amount,
+    paymentMethod: patch.paymentMethod,
+    cashBankAccountId: patch.cashBankAccountId,
     reference: patch.reference || `Customer refund against ${refundable.creditNote.invoiceNumber}`,
+    documentType: "CUSTOMER_REFUND",
+    documentNumber: String(row.paymentNumber || row.paymentId),
     projectId: row.projectId || "",
+    createdBy: "payment-final-save:customer-refund",
+    approvedBy: "Finance Controller",
     lines: [
       { accountId: "ACC-2150", debit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Refund customer credit / advance" },
       { accountId: patch.cashBankAccountId, credit: patch.amount, customerId: row.partyId, projectId: row.projectId, description: "Customer refund paid" },
     ],
   });
-  await updateRecord("Payments", "paymentId", row.paymentId, { status: "POSTED", journalId: journal.journalId }, "payment-final-save:customer-refund");
-  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, refund: true, creditNoteId };
+
+  return { recordId: row.paymentId, status: "POSTED", journalId: result.journalId, refund: true, creditNoteId };
 }
 
 function referenceSourceId(row: any, prefix: "SQ" | "PO") {
@@ -230,20 +289,23 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
   if (!receive && partyType !== "Supplier") throw new Error("Supplier payments must use a Supplier");
 
   const againstDocumentId = String(row.againstDocumentId || "").trim();
+  const internalPartyId = String(row.internalPartyId || row.partyId || "");
   const advance = !againstDocumentId;
   if (advance) {
     await validateSourceLinkedAdvance(row, patch.amount);
   } else if (receive) {
     const invoice = (await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1)).rows[0];
     if (!invoice) throw new Error("Against Sales Invoice not found");
-    if (String(invoice.customerId || "") !== String(row.partyId || "")) throw new Error("Payment customer does not match the Sales Invoice customer");
+    const invoiceCustomerId = String(invoice.internalCustomerId || invoice.customerId || "");
+    if (invoiceCustomerId !== internalPartyId) throw new Error("Payment customer does not match the Sales Invoice customer");
     if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
     if (patch.amount > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds Sales Invoice outstanding amount");
     if (String(row.againstDocumentType || "") && !String(row.againstDocumentType || "").toLowerCase().includes("sales invoice")) throw new Error("Customer receipt has an invalid against-document type");
   } else {
     const bill = (await findRecords<any>("SupplierBills", { billId: againstDocumentId }, 1)).rows[0];
     if (!bill) throw new Error("Against Supplier Invoice not found");
-    if (String(bill.supplierId || "") !== String(row.partyId || "")) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
+    const billSupplierId = String(bill.internalSupplierId || bill.supplierId || "");
+    if (billSupplierId !== internalPartyId) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
     if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
     if (patch.amount > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds Supplier Invoice outstanding amount");
     const againstType = String(row.againstDocumentType || "").toLowerCase();
@@ -253,18 +315,26 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
   const lines = receive
     ? receiptPosting({ amount: patch.amount, customerId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance })
     : supplierPaymentPosting({ amount: patch.amount, supplierId: row.partyId, projectId: row.projectId, cashBankAccountId: patch.cashBankAccountId, advance });
-  const journal = await postJournal({
+
+  const result = await finalizePaymentAtomic({
+    paymentId: row.paymentId,
     postingDate: patch.paymentDate,
-    documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
-    documentId: row.paymentId,
-    documentNumber: String(row.paymentNumber || row.paymentId),
+    amount: patch.amount,
+    paymentMethod: patch.paymentMethod,
+    cashBankAccountId: patch.cashBankAccountId,
     reference: patch.reference || String(row.reference || row.paymentNumber || row.paymentId),
+    documentType: advance ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE") : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
+    documentNumber: String(row.paymentNumber || row.paymentId),
     projectId: row.projectId || "",
     lines,
+    againstInvoiceId: !advance && receive ? againstDocumentId : undefined,
+    againstBillId: !advance && !receive ? againstDocumentId : undefined,
+    createdBy: "payment-final-save:standard",
+    approvedBy: "Finance Controller",
   });
-  await updateRecord("Payments", "paymentId", row.paymentId, { ...patch, status: "POSTED", journalId: journal.journalId }, "payment-final-save:standard");
-  if (!advance) await synchronizeSettlement(receive ? "Customer" : "Supplier", againstDocumentId);
-  return { recordId: row.paymentId, status: "POSTED", journalId: journal.journalId, advance, finalized: true };
+
+  console.info("payment-final-save.posted", { paymentId: row.paymentId, journalId: result.journalId, partyType, againstDocumentId: againstDocumentId || null, advance });
+  return { recordId: row.paymentId, status: "POSTED", journalId: result.journalId, advance, finalized: true };
 }
 
 async function finalizePayment(payload: Record<string, unknown>) {
@@ -366,7 +436,7 @@ export async function POST(request: Request) {
     if (body.action && series && !String(payload[series.payloadField] || "").trim()) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
 
     let itemLinking: { created: number; linked: number; temporary: number } | undefined;
-    if (body.action && ["createQuote", "createInvoice", "createSupplierQuote", "createPurchaseOrder"].includes(body.action)) {
+    if (body.action && ["createQuote", "createSalesOrder", "createInvoice", "createSupplierQuote", "createPurchaseOrder"].includes(body.action)) {
       const rawLines = Array.isArray(payload.lines) ? payload.lines as any[] : [];
       const temporaryQuotation = body.action === "createSupplierQuote" || body.action === "createQuote";
       const resolved = await resolveTransactionItems(rawLines, {
@@ -379,13 +449,15 @@ export async function POST(request: Request) {
       itemLinking = { created: resolved.createdItems.length, linked: resolved.linkedCount, temporary: resolved.temporaryCount };
     }
 
-    const legacyAction = body.action === "createSupplierQuote" ? "createPurchaseOrder" : body.action!;
+    const legacyAction = body.action === "createSupplierQuote" ? "createPurchaseOrder" : body.action === "createSalesOrder" ? "createQuote" : body.action!;
     const result = await callLegacy(legacyAction, payload);
     if (body.action === "createSupplierQuote" && result) result.type = "supplierQuote";
+    if (body.action === "createSalesOrder" && result) result.type = "salesOrder";
     if (result && itemLinking) result.itemLinking = itemLinking;
     return NextResponse.json({ ok: true, result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction failed";
+    console.error("erp-transactions.failed", { message });
     const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }

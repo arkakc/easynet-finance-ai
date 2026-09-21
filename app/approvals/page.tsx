@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-type ApprovalRecordType = "quote" | "invoice" | "purchaseOrder" | "supplierBill" | "payment" | "expense";
+type ApprovalRecordType = "quote" | "invoice" | "purchaseOrder" | "supplierBill" | "payment" | "expense" | "manualJournal";
 type PendingRow = {
-  module: "Sales" | "Purchase";
+  module: "Sales" | "Purchase" | "Accounts";
   documentType: string;
   documentNo: string;
   recordId: string;
-  status: "DRAFT";
+  status: "DRAFT" | "PENDING";
   party: string;
   project: string;
   date: string;
@@ -38,7 +38,7 @@ export default function ApprovalsPage() {
       const response = await fetch("/api/approvals", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Approval queue load failed");
-      setPending((body.pending || []).filter((row: PendingRow) => String(row.status).toUpperCase() === "DRAFT"));
+      setPending((body.pending || []).filter((row: PendingRow) => ["DRAFT", "PENDING"].includes(String(row.status).toUpperCase())));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Load failed");
     } finally {
@@ -50,6 +50,28 @@ export default function ApprovalsPage() {
 
   async function decide(row: PendingRow, decision: "APPROVE" | "CANCEL") {
     try {
+      if (row.approvalRecordType === "manualJournal") {
+        const rejectionReason = decision === "CANCEL"
+          ? window.prompt("Enter rejection reason for this manual journal:", "Rejected by Finance Controller")
+          : "";
+        if (decision === "CANCEL" && rejectionReason === null) return;
+
+        const response = await fetch("/api/journals/manual/approval", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            journalId: row.recordId,
+            decision: decision === "APPROVE" ? "APPROVE" : "REJECT",
+            note: rejectionReason || "Finance Controller approval",
+          }),
+        });
+        const body = await response.json();
+        if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal approval failed");
+        setMessage(`${row.documentNo}: PENDING → ${body.result.status}`);
+        await load();
+        return;
+      }
+
       const response = await fetch("/api/erp/actions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,6 +88,7 @@ export default function ApprovalsPage() {
 
   const sales = pending.filter((row) => row.module === "Sales");
   const purchase = pending.filter((row) => row.module === "Purchase");
+  const accounts = pending.filter((row) => row.module === "Accounts");
   const totalAmount = pending.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
   const table = (title: string, rows: PendingRow[]) => (
@@ -102,7 +125,7 @@ export default function ApprovalsPage() {
               <td>{createdLabel(row)}</td>
               <td>{row.date || "—"}</td>
               <td>K{Number(row.amount || 0).toFixed(2)}</td>
-              <td><span className="auto-badge">DRAFT</span></td>
+              <td><span className="auto-badge">{row.status}</span></td>
               <td>
                 <div className="button-row">
                   <Link className="button-link secondary-link" href={row.href}>
@@ -112,7 +135,7 @@ export default function ApprovalsPage() {
                     Approve
                   </button>
                   <button type="button" className="secondary" onClick={() => decide(row, "CANCEL")}>
-                    Cancel
+                    {row.approvalRecordType === "manualJournal" ? "Reject" : "Cancel"}
                   </button>
                 </div>
               </td>
@@ -120,7 +143,7 @@ export default function ApprovalsPage() {
           ))}
           {!rows.length && (
             <tr>
-              <td colSpan={9}>No DRAFT documents pending approval.</td>
+              <td colSpan={9}>No documents pending approval.</td>
             </tr>
           )}
         </tbody>
@@ -134,7 +157,7 @@ export default function ApprovalsPage() {
         <div>
           <h2>Pending Approval Queue</h2>
           <p className="small">
-            Sequential approval control: DRAFT → APPROVED → POSTED. Only DRAFT documents appear here for executive sign-off.
+            Sequential approval control for business documents plus maker-checker approval for manual journals. PENDING manual journals have no GL effect until a different authorised checker approves them.
           </p>
         </div>
         <div className="page-head-actions">
@@ -170,6 +193,10 @@ export default function ApprovalsPage() {
           <div className="value">{purchase.length}</div>
         </div>
         <div className="card">
+          <div className="label">Manual Journals</div>
+          <div className="value">{accounts.length}</div>
+        </div>
+        <div className="card">
           <div className="label">Total Pending Value</div>
           <div className="value">K{totalAmount.toFixed(2)}</div>
         </div>
@@ -183,6 +210,7 @@ export default function ApprovalsPage() {
         <>
           {table("Sales — Pending Documents", sales)}
           {table("Purchase — Pending Documents", purchase)}
+          {table("Accounts — Manual Journals Pending Checker Approval", accounts)}
         </>
       )}
     </>

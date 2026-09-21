@@ -21,6 +21,7 @@ const schema = z.object({
   APP_SECRET: z.string().optional(),
   ALLOWED_EMAILS: z.string().optional(),
   SESSION_SECRET: z.string().min(32).optional(),
+  AUDIT_LOG_SECRET: z.string().min(32).optional(),
   ERP_USERS_JSON: z.string().optional(),
 });
 
@@ -41,5 +42,6 @@ if (process.env.VERCEL) {
     legacyToken: Boolean(env.APPS_SCRIPT_API_TOKEN),
     appSecret: Boolean(env.APP_SECRET),
     sessionSecret: Boolean(env.SESSION_SECRET),
+    auditLogSecret: Boolean(env.AUDIT_LOG_SECRET),
   });
 }

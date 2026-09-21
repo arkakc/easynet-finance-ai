@@ -163,6 +163,16 @@ export default function DashboardClient() {
       });
     }
 
+    if (Math.abs(arDifference) >= 0.01 || Math.abs(apDifference) >= 0.01) {
+      systemMessages.push({
+        id: "subledger-control",
+        type: "warning",
+        icon: "⚠️",
+        title: "Subledger Reconciliation Required",
+        text: `AR differs by ${money(arDifference)} and AP differs by ${money(apDifference)}. Restore or migrate the missing source invoices and supplier bills before closing the period.`,
+      });
+    }
+
     if (!reportingReady) {
       systemMessages.push({
         id: "reporting-upgrade",
@@ -219,7 +229,7 @@ export default function DashboardClient() {
                 <span>ℹ️ System Notice</span>
                 <span className="notice-arrow">▾</span>
               </summary>
-              <div className="system-notice-dropdown" style={{ maxHeight: "400px", overflowY: "auto", width: "360px" }}>
+              <div className="system-notice-dropdown" style={{ maxHeight: "400px", overflowY: "auto", width: "min(440px, calc(100vw - 32px))", whiteSpace: "normal" }}>
                 <div style={{ fontWeight: 600, marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #e2e8f0" }}>
                   System Notices & Diagnostics
                 </div>
@@ -227,7 +237,7 @@ export default function DashboardClient() {
                   {systemMessages.map((msg) => (
                     <div key={msg.id} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "12px" }}>
                       <span>{msg.icon}</span>
-                      <div>
+                      <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
                         <strong>{msg.title}:</strong> {msg.text}
                       </div>
                     </div>

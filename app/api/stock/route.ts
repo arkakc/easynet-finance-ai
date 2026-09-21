@@ -1,12 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
+import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
+import { requirePermission } from "@/lib/auth";
 import { inventoryState, round2, round4, weightedRate } from "@/lib/accounting/inventory";
 import {
   inventoryAdjustmentPosting,
@@ -15,16 +15,19 @@ import {
   purchaseReceiptPosting,
   type PostingLine,
 } from "@/lib/accounting/posting";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { postPurchaseReceiptAtomic, postStockMovementAtomic, postStockValueAdjustmentAtomic, transferStockAtomic } from "@/lib/accounting/atomic-stock";
+import { ensureDefaultWarehouse } from "@/lib/accounting/warehouse-stock";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
   itemCode: z.string().trim().optional().default(""),
   itemName: z.string().trim().min(2),
   itemType: z.enum(["STOCK", "SERVICE", "NON_STOCK"]).default("STOCK"),
-  revenueAccount: z.string().trim().optional().default("ACC-4200"),
-  costAccount: z.string().trim().optional().default("ACC-5100"),
+  revenueAccount: z.string().trim().min(1),
+  costAccount: z.string().trim().min(1),
   defaultRate: z.coerce.number().finite().nonnegative().optional().default(0),
-  taxCode: z.string().trim().optional().default(""),
+  taxCode: z.string().trim().min(1),
   uom: z.string().trim().min(1).default("Each"),
   deferredRevenueMonths: z.coerce.number().int().min(0).max(120).optional().default(0),
 });
@@ -33,6 +36,7 @@ const movementSchema = z.object({
   movementDate: z.string().trim().min(8),
   itemId: z.string().trim().min(1),
   projectId: z.string().trim().optional().default(""),
+  warehouseId: z.string().trim().optional().default(""),
   movementType: z.enum(["PROJECT_ISSUE", "ADJUSTMENT_IN", "ADJUSTMENT_OUT", "RETURN_IN", "RETURN_OUT"]),
   qty: z.coerce.number().finite().positive(),
   unitCost: z.coerce.number().finite().nonnegative().optional().default(0),
@@ -43,6 +47,7 @@ const purchaseReceiptSchema = z.object({
   movementDate: z.string().trim().min(8),
   sourceDocumentId: z.string().trim().min(1),
   projectId: z.string().trim().optional().default(""),
+  warehouseId: z.string().trim().optional().default(""),
   lines: z.array(z.object({
     itemId: z.string().trim().min(1),
     qty: z.coerce.number().finite().positive(),
@@ -53,10 +58,29 @@ const valueAdjustmentSchema = z.object({
   movementDate: z.string().trim().min(8),
   itemId: z.string().trim().min(1),
   projectId: z.string().trim().optional().default(""),
+  warehouseId: z.string().trim().optional().default(""),
   adjustmentType: z.enum(["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"]),
   amount: z.coerce.number().finite().nonnegative().optional().default(0),
   targetUnitCost: z.coerce.number().finite().nonnegative().optional().default(0),
   sourceDocumentId: z.string().trim().optional().default(""),
+});
+
+const warehouseSchema = z.object({
+  code: z.string().trim().min(2).max(24).regex(/^[A-Za-z0-9_-]+$/, "Warehouse code may use letters, numbers, underscore and hyphen only"),
+  name: z.string().trim().min(2).max(120),
+  location: z.string().trim().max(240).optional().default(""),
+  isDefault: z.coerce.boolean().optional().default(false),
+});
+
+const transferSchema = z.object({
+  movementDate: z.string().trim().min(8),
+  itemId: z.string().trim().min(1),
+  fromWarehouseId: z.string().trim().min(1),
+  toWarehouseId: z.string().trim().min(1),
+  qty: z.coerce.number().finite().positive(),
+  projectId: z.string().trim().optional().default(""),
+  sourceDocumentId: z.string().trim().optional().default(""),
+  note: z.string().trim().max(500).optional().default(""),
 });
 
 function requireSecret(secret?: string) {
@@ -75,7 +99,24 @@ function nextItemCode(items: any[]) {
 }
 
 function approvedPurchaseOrderStatus(value: unknown) {
-  return ["APPROVED", "PART_RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
+  return ["APPROVED", "SENT", "PART_RECEIVED", "PARTIAL_RECEIVED", "RECEIVED", "PART_BILLED", "CONVERTED", "BILL_CREATED", "BILLED"].includes(String(value || "").toUpperCase());
+}
+
+function publicPurchaseOrderStatus(value: unknown) {
+  const status = String(value || "DRAFT").toUpperCase();
+  if (status === "SENT") return "APPROVED";
+  if (status === "PARTIAL_RECEIVED") return "PART_RECEIVED";
+  if (status === "CANCELLED" || status === "CANCEL") return "CANCELLED";
+  return status || "DRAFT";
+}
+
+function stockItemType(value: unknown) {
+  const type = String(value || "").trim().toUpperCase();
+  return type === "GOOD" ? "STOCK" : type === "NON_INVENTORY" ? "NON_STOCK" : type;
+}
+
+function isStockItem(item: any) {
+  return stockItemType(item?.itemType || item?.type) === "STOCK";
 }
 
 function mergeReceiptLines(lines: Array<{ itemId: string; qty: number }>) {
@@ -92,67 +133,40 @@ function receiptQty(rows: any[], poId: string, itemId: string) {
     .reduce((sum: number, movement: any) => sum + Number(movement.qtyIn || 0), 0);
 }
 
-function inverseLines(lines: PostingLine[]) {
-  return lines.map((line) => ({
-    ...line,
-    debit: Number(line.credit || 0),
-    credit: Number(line.debit || 0),
-    description: `Rollback: ${line.description || "inventory posting"}`,
-  }));
-}
-
-async function compensateJournal(input: {
-  postingDate: string;
-  documentType: string;
-  documentId: string;
-  documentNumber: string;
-  projectId?: string;
-  lines: PostingLine[];
-  reason: string;
-}) {
-  try {
-    await postJournal({
-      postingDate: input.postingDate,
-      documentType: `${input.documentType}_ROLLBACK`,
-      documentId: input.documentId,
-      documentNumber: `${input.documentNumber}-ROLLBACK`,
-      reference: input.reason,
-      projectId: input.projectId,
-      lines: inverseLines(input.lines),
-      createdBy: "stock-rollback",
-      approvedBy: "System Compensation",
-    });
-  } catch (rollbackError) {
-    try {
-      await appendRecord("Exceptions", {
-        severity: "CRITICAL",
-        module: "Stock Accounting",
-        recordType: input.documentType,
-        recordId: input.documentId,
-        message: `Automatic GL compensation failed: ${rollbackError instanceof Error ? rollbackError.message : "Unknown rollback error"}`,
-        status: "OPEN",
-        assignedTo: "Finance Controller",
-      }, "stock-accounting-rollback");
-    } catch { /* best effort */ }
-  }
-}
-
 export async function GET(request: Request) {
   try {
+    await requirePermission("stock.read");
     const scope = new URL(request.url).searchParams.get("scope") || "full";
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
-      const [items, movements, purchaseOrders, poLines] = await Promise.all([
+      await prisma.$transaction(async (tx) => { await ensureDefaultWarehouse(tx); });
+      const [items, movements, purchaseOrders, poLines, warehouses, warehouseBalances] = await Promise.all([
         prisma.item.findMany({ orderBy: { code: "asc" } }),
-        prisma.stockMovement.findMany({ orderBy: { createdAt: "desc" } }),
+        prisma.stockMovement.findMany({ include: { warehouse: true }, orderBy: { createdAt: "desc" } }),
         prisma.purchaseOrder.findMany({ include: { lines: true }, orderBy: { code: "asc" } }),
         prisma.pOLine.findMany(),
+        prisma.warehouse.findMany({ where: { isActive: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] }),
+        prisma.warehouseStockBalance.findMany({ include: { warehouse: true, item: { select: { code: true, name: true } } }, orderBy: [{ warehouse: { code: "asc" } }, { item: { code: "asc" } }] }),
       ]);
       const localItems = items.map((item) => {
         const rows = movements.filter((movement) => movement.itemId === item.id);
-        const qtyIn = rows.filter((row) => ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
-        const qtyOut = rows.filter((row) => ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(row.type)).reduce((sum, row) => sum + Number(row.quantity), 0);
-        const stockValue = rows.reduce((sum, row) => sum + (Number(row.totalCost || 0) || Number(row.quantity) * Number(row.unitCost || 0)), 0);
+        const state = inventoryState(rows.map((row) => {
+          const type = String(row.type || "").toUpperCase();
+          const quantity = Number(row.quantity || 0);
+          const totalCost = Number(row.totalCost || 0);
+          const adjustment = ["LANDED_COST", "REVALUATION", "NRV_WRITEDOWN"].includes(type);
+          const incoming = ["PURCHASE_IN", "PURCHASE_RECEIPT", "SALES_ISSUE_ROLLBACK", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(type);
+          const outgoing = ["SALES_DELIVERY", "SALES_ISSUE", "SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(type);
+          return {
+            qtyIn: incoming ? quantity : 0,
+            qtyOut: outgoing ? quantity : 0,
+            value: adjustment ? 0 : Math.abs(totalCost),
+            valueAdjustment: adjustment ? totalCost : 0,
+          };
+        }), Number(item.purchasePrice || 0));
+        const stockValue = state.value;
         return {
           itemId: item.id,
           itemCode: item.code,
@@ -161,36 +175,56 @@ export async function GET(request: Request) {
           uom: item.unit,
           revenueAccount: item.revenueAccount || "",
           costAccount: item.costAccount || "",
-          defaultRate: item.sellPrice || 0,
+          defaultRate: state.rate,
           taxCode: item.taxCode || "",
-          stockQty: qtyIn - qtyOut,
+          stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
         };
       });
-      if (scope === "items") return NextResponse.json({ ok: true, source: "prisma", items: localItems, nextItemCode: nextItemCode(localItems) });
+      if (scope === "items") return NextResponse.json({
+        ok: true, source: "prisma", items: localItems,
+        warehouses: warehouses.map((warehouse) => ({ warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive })),
+        nextItemCode: nextItemCode(localItems),
+      });
       return NextResponse.json({
         ok: true,
         source: "prisma",
         items: localItems,
+        warehouses: warehouses.map((warehouse) => ({
+          warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name,
+          location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive,
+        })),
+        warehouseBalances: warehouseBalances.map((balance) => ({
+          balanceId: balance.id, itemId: balance.itemId, itemCode: balance.item.code, itemName: balance.item.name,
+          warehouseId: balance.warehouseId, warehouseCode: balance.warehouse.code, warehouseName: balance.warehouse.name,
+          quantity: Number(balance.quantity || 0), reserved: Number(balance.reserved || 0),
+          available: Number(balance.available || 0), valuationRate: Number(balance.valuationRate || 0), stockValue: Number(balance.stockValue || 0),
+        })),
         movements: movements.map((movement) => ({
           movementId: movement.id,
           movementDate: movement.createdAt.toISOString(),
           itemId: movement.itemId,
           projectId: movement.projectId || "",
+          warehouseId: movement.warehouseId || "",
+          warehouseCode: movement.warehouse?.code || "",
+          warehouseName: movement.warehouse?.name || "",
+          transferId: movement.transferId || "",
           movementType: movement.type,
-          qtyIn: ["PURCHASE_IN", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
-          qtyOut: ["SALE_OUT", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
+          referenceType: movement.referenceType || "",
+          qtyIn: ["PURCHASE_IN", "PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
+          qtyOut: ["SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
           unitCost: Number(movement.unitCost || 0),
           value: Number(movement.totalCost || 0),
           sourceDocumentId: movement.referenceId || "",
+          journalId: movement.journalId || "",
         })),
         purchaseOrders: purchaseOrders.map((order) => ({
           poId: order.id,
           poNumber: order.code,
           supplierId: order.supplierId,
           projectId: order.projectId || "",
-          status: order.status,
+          status: publicPurchaseOrderStatus(order.status),
           totalAmount: Number(order.total),
         })),
         poLines: poLines.map((line) => ({
@@ -247,7 +281,8 @@ export async function GET(request: Request) {
       nextItemCode: nextItemCode(items.rows),
     });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Stock read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Stock read failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
 
@@ -255,279 +290,146 @@ async function createPurchaseReceipt(raw: unknown) {
   const record = purchaseReceiptSchema.parse(raw || {});
   const lines = mergeReceiptLines(record.lines);
   await ensureAccountingInfrastructure();
-
-  const [poResult, poLinesResult, itemsResult, movementsResult] = await Promise.all([
-    findRecords<any>("PurchaseOrders", { poId: record.sourceDocumentId }, 1),
-    findRecords<any>("POLines", { poId: record.sourceDocumentId }, 500),
-    listTable<any>("Items", 500, 0),
-    listTable<any>("StockMovements", 500, 0),
-  ]);
-
-  const po = poResult.rows[0];
-  if (!po || String(po.poNumber || "").toUpperCase().startsWith("SUPQ-")) throw new Error("Purchase Receipt source must be a valid Purchase Order");
-  if (!approvedPurchaseOrderStatus(po.status)) throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
-  if (record.projectId && String(po.projectId || "") !== record.projectId) throw new Error("Purchase Receipt project does not match the Purchase Order");
-
-  const itemMap = new Map(itemsResult.rows.map((item: any) => [String(item.itemId || ""), item]));
-  const receiptNumber = `PR-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const defaults = await loadConfiguredPostingAccounts();
+  const receiptNumber = documentSeriesId("PR");
   const movementDate = normalizeAccountingDate(record.movementDate);
-  const movementsToCreate: any[] = [];
-  const valuations: any[] = [];
-  let inventoryValue = 0;
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const item = itemMap.get(line.itemId);
-    if (!item) throw new Error(`Item does not exist: ${line.itemId}`);
-    if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error(`Purchase Receipt can only receive STOCK items: ${item.itemCode || line.itemId}`);
-
-    const matchingPoLines = poLinesResult.rows.filter((poLine: any) => String(poLine.itemId || "") === line.itemId);
-    if (!matchingPoLines.length) throw new Error(`Purchase Order item is not linked to Item Master: ${item.itemCode || line.itemId}`);
-    const orderedQty = matchingPoLines.reduce((sum: number, poLine: any) => sum + Number(poLine.qty || 0), 0);
-    const alreadyReceived = receiptQty(movementsResult.rows, record.sourceDocumentId, line.itemId);
-    const remainingBefore = Math.max(0, orderedQty - alreadyReceived);
-    if (remainingBefore <= 0.0001) throw new Error(`Item is already fully received: ${item.itemCode || line.itemId}`);
-    if (line.qty > remainingBefore + 0.0001) throw new Error(`Receipt quantity exceeds remaining PO quantity for ${item.itemCode || line.itemId}. Remaining ${remainingBefore}`);
-
-    const itemMovements = movementsResult.rows.filter((movement: any) => String(movement.itemId || "") === line.itemId);
-    const current = inventoryState(itemMovements, Number(item.defaultRate || 0));
-    const poRate = weightedRate(matchingPoLines);
-    const value = round2(line.qty * poRate);
-    const newQty = round4(current.qty + line.qty);
-    const newValue = round2(current.value + value);
-    const movingAverageRate = newQty > 0 ? round4(newValue / newQty) : poRate;
-    inventoryValue = round2(inventoryValue + value);
-
-    movementsToCreate.push({
-      movementId: `${receiptNumber}-${String(index + 1).padStart(3, "0")}`,
-      movementDate,
-      itemId: line.itemId,
-      projectId: record.projectId || po.projectId || "",
-      movementType: "PURCHASE_RECEIPT",
-      qtyIn: line.qty,
-      qtyOut: 0,
-      unitCost: poRate,
-      value,
-      valueAdjustment: 0,
-      sourceDocumentId: record.sourceDocumentId,
-      journalId: "",
-    });
-    valuations.push({
-      itemId: line.itemId,
-      itemCode: item.itemCode || line.itemId,
-      orderedQty,
-      alreadyReceived,
-      receivedNow: line.qty,
-      remainingAfter: Math.max(0, remainingBefore - line.qty),
-      poRate,
-      previousQty: current.qty,
-      previousRate: current.rate,
-      newQty,
-      movingAverageRate,
-    });
-  }
-
-  const glLines = purchaseReceiptPosting({
-    inventoryValue,
-    supplierId: po.supplierId,
-    projectId: record.projectId || po.projectId || "",
-  });
-  const journal = await postJournal({
+  return postPurchaseReceiptAtomic({
+    receiptNumber,
     postingDate: movementDate,
-    documentType: "PURCHASE_RECEIPT",
-    documentId: receiptNumber,
-    documentNumber: receiptNumber,
-    reference: `Purchase Receipt against ${po.poNumber || po.poId}`,
-    projectId: record.projectId || po.projectId || "",
-    lines: glLines,
+    purchaseOrderRef: record.sourceDocumentId,
+    projectRef: record.projectId || undefined,
+    warehouseRef: record.warehouseId || undefined,
+    lines: lines.map((line) => ({ itemRef: line.itemId, qty: line.qty })),
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    grniAccountId: defaults.stockReceivedButNotBilledAccount,
+    createdBy: "purchase-receipt-ui",
+    approvedBy: "Finance Controller",
   });
-
-  try {
-    const rowsWithJournal = movementsToCreate.map((movement) => ({ ...movement, journalId: journal.journalId }));
-    const created = await batchAppend("StockMovements", rowsWithJournal, "purchase-receipt-ui");
-    await Promise.all(valuations.map((valuation) => updateRecord(
-      "Items", "itemId", valuation.itemId, { defaultRate: valuation.movingAverageRate }, "stock-valuation",
-    )));
-
-    const poItemIds = [...new Set(poLinesResult.rows.map((line: any) => String(line.itemId || "")).filter(Boolean))];
-    const allFullyReceived = poItemIds.every((itemId) => {
-      const item = itemMap.get(itemId);
-      if (String(item?.itemType || "").toUpperCase() !== "STOCK") return true;
-      const ordered = poLinesResult.rows.filter((line: any) => String(line.itemId || "") === itemId).reduce((sum: number, line: any) => sum + Number(line.qty || 0), 0);
-      const nowReceived = receiptQty([...movementsResult.rows, ...rowsWithJournal], record.sourceDocumentId, itemId);
-      return nowReceived + 0.0001 >= ordered;
-    });
-    const currentStatus = String(po.status || "").toUpperCase();
-    if (!currentStatus.includes("BILL")) {
-      await updateRecord("PurchaseOrders", "poId", po.poId, { status: allFullyReceived ? "RECEIVED" : "PART_RECEIVED" }, "purchase-receipt-ui");
-    }
-
-    return {
-      receiptNumber,
-      purchaseOrderId: record.sourceDocumentId,
-      purchaseOrderNumber: po.poNumber || po.poId,
-      journalId: journal.journalId,
-      rows: created.rows || rowsWithJournal,
-      valuations,
-      inventoryValue,
-    };
-  } catch (error) {
-    await compensateJournal({
-      postingDate: movementDate,
-      documentType: "PURCHASE_RECEIPT",
-      documentId: receiptNumber,
-      documentNumber: receiptNumber,
-      projectId: record.projectId || po.projectId || "",
-      lines: glLines,
-      reason: `Automatic rollback because stock persistence failed for ${receiptNumber}`,
-    });
-    throw error;
-  }
 }
 
 async function createPhysicalMovement(raw: unknown) {
   const record = movementSchema.parse(raw || {});
   await ensureAccountingInfrastructure();
-  const itemResult = await findRecords<any>("Items", { itemId: record.itemId }, 1);
-  const item = itemResult.rows[0];
-  if (!item) throw new Error("Item does not exist");
-  if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Stock movements are only allowed for STOCK items");
-  if (record.projectId) {
-    const project = await findRecords("Projects", { projectId: record.projectId }, 1);
-    if (!project.rows.length) throw new Error("Project does not exist");
-  }
-
-  const movementRows = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
-  const current = inventoryState(movementRows.rows, Number(item.defaultRate || 0));
-  const incoming = ["ADJUSTMENT_IN", "RETURN_IN"].includes(record.movementType);
-  if (!incoming && record.qty > current.qty + 0.0001) throw new Error(`Insufficient stock. On hand ${current.qty}, requested ${record.qty}`);
-
-  const effectiveUnitCost = record.movementType === "ADJUSTMENT_IN" ? Number(record.unitCost || 0) : current.rate;
-  if (record.movementType === "ADJUSTMENT_IN" && !(effectiveUnitCost > 0)) throw new Error("Adjustment In requires a positive Unit Cost");
-  const movementId = `MOV-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const defaults = await loadConfiguredPostingAccounts();
+  const movementId = documentSeriesId("Movement");
   const movementDate = normalizeAccountingDate(record.movementDate);
-  const value = round2(record.qty * effectiveUnitCost);
-  const costAccountId = String(item.costAccount || "ACC-5100");
 
-  let glLines: PostingLine[];
-  if (["PROJECT_ISSUE", "RETURN_OUT"].includes(record.movementType)) {
-    glLines = inventoryIssuePosting({ amount: value, costAccountId, projectId: record.projectId, description: record.movementType === "PROJECT_ISSUE" ? "Project material issue" : "Inventory return out" });
-  } else if (record.movementType === "RETURN_IN") {
-    glLines = [
-      { accountId: "ACC-1150", debit: value, projectId: record.projectId, description: "Inventory returned in" },
-      { accountId: costAccountId, credit: value, projectId: record.projectId, description: "Reverse prior inventory cost" },
-    ];
-  } else {
-    glLines = inventoryAdjustmentPosting({
-      amountDelta: incoming ? value : -value,
-      projectId: record.projectId,
-      type: record.movementType,
-      costAccountId,
-    });
-  }
-
-  const journal = await postJournal({
+  const posted = await postStockMovementAtomic({
+    movementId,
     postingDate: movementDate,
-    documentType: `STOCK_${record.movementType}`,
-    documentId: movementId,
-    documentNumber: movementId,
-    reference: record.sourceDocumentId || record.movementType.replaceAll("_", " "),
-    projectId: record.projectId,
-    lines: glLines,
+    itemRef: record.itemId,
+    projectRef: record.projectId || undefined,
+    warehouseRef: record.warehouseId || undefined,
+    movementType: record.movementType,
+    qty: record.qty,
+    unitCost: record.unitCost,
+    sourceDocumentId: record.sourceDocumentId || undefined,
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    defaultCostAccountId: defaults.defaultCostOfGoodsSoldAccount,
+    stockAdjustmentAccountId: defaults.stockAdjustmentAccount,
+    expensesIncludedInValuationAccountId: defaults.expensesIncludedInValuationAccount,
+    createdBy: "stock-ui",
+    approvedBy: "Finance Controller",
   });
 
-  try {
-    const result = await appendRecord("StockMovements", {
-      movementId,
-      movementDate,
+  return {
+    row: {
+      movementId: posted.movementId,
       itemId: record.itemId,
-      projectId: record.projectId,
       movementType: record.movementType,
-      qtyIn: incoming ? record.qty : 0,
-      qtyOut: incoming ? 0 : record.qty,
-      unitCost: round4(effectiveUnitCost),
-      value,
-      valueAdjustment: 0,
-      sourceDocumentId: record.sourceDocumentId,
-      journalId: journal.journalId,
-    }, "stock-ui");
-
-    const projectedQty = round4(incoming ? current.qty + record.qty : current.qty - record.qty);
-    const projectedValue = round2(incoming ? current.value + value : current.value - value);
-    const nextRate = projectedQty > 0 ? round4(projectedValue / projectedQty) : current.rate;
-    await updateRecord("Items", "itemId", record.itemId, { defaultRate: Math.max(0, nextRate) }, "stock-valuation");
-
-    return { row: result.row, journalId: journal.journalId, valuation: { previousRate: current.rate, movementUnitCost: round4(effectiveUnitCost), movingAverageRate: Math.max(0, nextRate), previousQty: current.qty, newQty: projectedQty } };
-  } catch (error) {
-    await compensateJournal({ postingDate: movementDate, documentType: `STOCK_${record.movementType}`, documentId: movementId, documentNumber: movementId, projectId: record.projectId, lines: glLines, reason: `Automatic rollback because stock movement persistence failed for ${movementId}` });
-    throw error;
-  }
+      warehouseId: posted.warehouse.id,
+      warehouseCode: posted.warehouse.code,
+      journalId: posted.journalId,
+    },
+    journalId: posted.journalId,
+    valuation: posted.valuation,
+  };
 }
 
 async function createValueAdjustment(raw: unknown) {
   const record = valueAdjustmentSchema.parse(raw || {});
   await ensureAccountingInfrastructure();
-  const item = (await findRecords<any>("Items", { itemId: record.itemId }, 1)).rows[0];
-  if (!item) throw new Error("Item does not exist");
-  if (String(item.itemType || "").toUpperCase() !== "STOCK") throw new Error("Inventory value adjustments are only allowed for STOCK items");
-  const movements = await findRecords<any>("StockMovements", { itemId: record.itemId }, 500);
-  const current = inventoryState(movements.rows, Number(item.defaultRate || 0));
-  if (!(current.qty > 0)) throw new Error("Inventory value adjustment requires positive stock on hand");
-
-  let delta = 0;
-  if (record.adjustmentType === "LANDED_COST") {
-    if (!(record.amount > 0)) throw new Error("Landed Cost amount must be greater than zero");
-    delta = round2(record.amount);
-  } else {
-    if (!(record.targetUnitCost >= 0)) throw new Error("Target Unit Cost is required");
-    if (record.adjustmentType === "NRV_WRITEDOWN" && record.targetUnitCost > current.rate + 0.0001) throw new Error("NRV write-down cannot increase inventory unit cost");
-    delta = round2(current.qty * (record.targetUnitCost - current.rate));
-    if (record.adjustmentType === "NRV_WRITEDOWN" && delta >= 0) throw new Error("NRV write-down must reduce inventory value");
-    if (record.adjustmentType === "REVALUATION" && Math.abs(delta) < 0.005) throw new Error("Revaluation does not change inventory value");
-  }
-
-  const movementId = `VAL-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const defaults = await loadConfiguredPostingAccounts();
+  const movementId = documentSeriesId("Value Adjustment");
   const movementDate = normalizeAccountingDate(record.movementDate);
-  const glLines = inventoryAdjustmentPosting({ amountDelta: delta, projectId: record.projectId, type: record.adjustmentType, costAccountId: String(item.costAccount || "ACC-5100") });
-  const journal = await postJournal({
+
+  const posted = await postStockValueAdjustmentAtomic({
+    movementId,
     postingDate: movementDate,
-    documentType: `INVENTORY_${record.adjustmentType}`,
-    documentId: movementId,
-    documentNumber: movementId,
-    reference: record.sourceDocumentId || record.adjustmentType.replaceAll("_", " "),
-    projectId: record.projectId,
-    lines: glLines,
+    itemRef: record.itemId,
+    projectRef: record.projectId || undefined,
+    warehouseRef: record.warehouseId || undefined,
+    adjustmentType: record.adjustmentType,
+    amount: record.amount,
+    targetUnitCost: record.targetUnitCost,
+    sourceDocumentId: record.sourceDocumentId || undefined,
+    inventoryAccountId: defaults.defaultInventoryAccount,
+    defaultCostAccountId: defaults.defaultCostOfGoodsSoldAccount,
+    stockAdjustmentAccountId: defaults.stockAdjustmentAccount,
+    expensesIncludedInValuationAccountId: defaults.expensesIncludedInValuationAccount,
+    createdBy: "stock-value-adjustment",
+    approvedBy: "Finance Controller",
   });
 
-  try {
-    const newValue = round2(current.value + delta);
-    if (newValue < -0.005) throw new Error("Inventory adjustment would create a negative inventory value");
-    const nextRate = round4(Math.max(0, newValue / current.qty));
-    const result = await appendRecord("StockMovements", {
-      movementId,
-      movementDate,
+  return {
+    row: {
+      movementId: posted.movementId,
       itemId: record.itemId,
-      projectId: record.projectId,
       movementType: record.adjustmentType,
-      qtyIn: 0,
-      qtyOut: 0,
-      unitCost: nextRate,
-      value: Math.abs(delta),
-      valueAdjustment: delta,
-      sourceDocumentId: record.sourceDocumentId,
-      journalId: journal.journalId,
-    }, "stock-value-adjustment");
-    await updateRecord("Items", "itemId", record.itemId, { defaultRate: nextRate }, "stock-valuation");
-    return { row: result.row, journalId: journal.journalId, valuation: { previousRate: current.rate, previousValue: current.value, valueAdjustment: delta, movingAverageRate: nextRate, newValue } };
-  } catch (error) {
-    await compensateJournal({ postingDate: movementDate, documentType: `INVENTORY_${record.adjustmentType}`, documentId: movementId, documentNumber: movementId, projectId: record.projectId, lines: glLines, reason: `Automatic rollback because inventory value adjustment persistence failed for ${movementId}` });
-    throw error;
-  }
+      warehouseId: posted.warehouse.id,
+      warehouseCode: posted.warehouse.code,
+      journalId: posted.journalId,
+    },
+    journalId: posted.journalId,
+    valuation: posted.valuation,
+  };
+}
+
+async function createWarehouse(raw: unknown) {
+  const record = warehouseSchema.parse(raw || {});
+  const code = record.code.toUpperCase();
+  return prisma.$transaction(async (tx) => {
+    const duplicate = await tx.warehouse.findUnique({ where: { code } });
+    if (duplicate) throw new Error(`Warehouse code already exists: ${code}`);
+    const count = await tx.warehouse.count();
+    const makeDefault = record.isDefault || count === 0;
+    if (record.isDefault && count > 0) {
+      const legacyUnassigned = await tx.stockMovement.count({ where: { warehouseId: null } });
+      if (legacyUnassigned > 0) {
+        throw new Error(
+          "Legacy stock movements are still unassigned. Run the controlled warehouse backfill before changing the default warehouse.",
+        );
+      }
+    }
+    if (makeDefault) await tx.warehouse.updateMany({ data: { isDefault: false } });
+    const warehouse = await tx.warehouse.create({
+      data: { code, name: record.name, location: record.location || null, isDefault: makeDefault, isActive: true },
+    });
+    return { warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault };
+  });
+}
+
+async function createWarehouseTransfer(raw: unknown) {
+  const record = transferSchema.parse(raw || {});
+  const transferId = documentSeriesId("TRF");
+  return transferStockAtomic({
+    transferId,
+    postingDate: normalizeAccountingDate(record.movementDate),
+    itemRef: record.itemId,
+    fromWarehouseRef: record.fromWarehouseId,
+    toWarehouseRef: record.toWarehouseId,
+    qty: record.qty,
+    projectRef: record.projectId || undefined,
+    sourceDocumentId: record.sourceDocumentId || undefined,
+    note: record.note || undefined,
+    createdBy: "warehouse-transfer-ui",
+  });
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -552,6 +454,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, row: result.row });
     }
 
+    if (body.action === "createWarehouse") return NextResponse.json({ ok: true, warehouse: await createWarehouse(body.record) });
+    if (body.action === "createTransfer") return NextResponse.json({ ok: true, transfer: await createWarehouseTransfer(body.record) });
     if (body.action === "createPurchaseReceipt") return NextResponse.json({ ok: true, ...(await createPurchaseReceipt(body.record)) });
     if (body.action === "createMovement") return NextResponse.json({ ok: true, ...(await createPhysicalMovement(body.record)) });
     if (body.action === "createValueAdjustment") return NextResponse.json({ ok: true, ...(await createValueAdjustment(body.record)) });

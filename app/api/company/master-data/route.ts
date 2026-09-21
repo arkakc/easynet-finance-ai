@@ -1,122 +1,89 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
-import { getCurrentUser, getRequestUser, authenticate, verifyPassword } from "@/lib/auth";
-import { prisma } from "@/src/lib/prisma";
+import {
+  authenticateDetailed,
+  requireValidatedRequestPermission,
+} from "@/lib/auth";
+import {
+  appendAuditEvent,
+  requestAuditContext,
+} from "@/lib/security/audit";
 import {
   getMasterDataSummary,
   deleteCompanyMasterData,
 } from "@/lib/company/delete-master-data";
 
 const deleteMasterDataSchema = z.object({
-  password: z.string().min(1, "Administrator password is required"),
+  password: z.string().min(1, "Administrator password is required").max(200),
   confirmationPhrase: z.string().min(1, "Confirmation phrase is required"),
   preserveAdminUser: z.boolean().optional().default(true),
 });
 
-async function resolveUser(request?: Request) {
-  if (request) {
-    const fromReq = getRequestUser(request);
-    if (fromReq) return fromReq;
-  }
-  try {
-    return await getCurrentUser();
-  } catch {
-    return null;
-  }
+function responseStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "Failed to execute master data wipe";
+  return {
+    message,
+    status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500,
+  };
 }
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   try {
-    const user = await resolveUser(request);
-    if (!user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    const isSystemManager = user.roles.includes("System Manager");
-    const hasSettingsPerm = user.permissions.includes("settings.manage");
-    if (!isSystemManager && !hasSettingsPerm) {
-      return NextResponse.json(
-        { ok: false, error: "Forbidden: Only System Administrators can access master data reset settings" },
-        { status: 403 },
-      );
-    }
-
-    const summary = await getMasterDataSummary();
-
-    return NextResponse.json({
-      ok: true,
-      summary,
-    });
+    await requireValidatedRequestPermission(request, "security.manage");
+    return NextResponse.json({ ok: true, summary: await getMasterDataSummary() });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load master data summary";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const result = responseStatus(error);
+    return NextResponse.json({ ok: false, error: result.message }, { status: result.status });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await resolveUser(request);
-    if (!user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    const isSystemManager = user.roles.includes("System Manager");
-    const hasSettingsPerm = user.permissions.includes("settings.manage");
-    if (!isSystemManager && !hasSettingsPerm) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Forbidden: Only System Administrators (System Manager) can delete company master data.",
-        },
-        { status: 403 },
-      );
-    }
-
+    const user = await requireValidatedRequestPermission(request, "security.manage");
     const body = await request.json();
     const parsed = deleteMasterDataSchema.safeParse(body);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => i.message).join("; ");
-      return NextResponse.json({ ok: false, error: issues }, { status: 400 });
-    }
-
-    const { password, confirmationPhrase, preserveAdminUser } = parsed.data;
-
-    // 1. Re-authenticate Password
-    let passwordValid = false;
-    const authResult = authenticate(user.email, password);
-    if (authResult) {
-      passwordValid = true;
-    }
-
-    if (!passwordValid) {
-      const dbUser = await prisma.user.findUnique({
-        where: { email: user.email },
-      });
-      if (dbUser?.password) {
-        passwordValid = await bcrypt.compare(password, dbUser.password);
-      }
-    }
-
-    if (!passwordValid && user.email.toLowerCase() === "admin@easynet.local") {
-      const testHash =
-        "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a";
-      passwordValid = verifyPassword(password, testHash);
-    }
-
-    if (!passwordValid) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Re-authentication failed: Invalid administrator password.",
-        },
-        { status: 401 },
+        { ok: false, error: parsed.error.issues.map((issue) => issue.message).join("; ") },
+        { status: 400 },
       );
     }
 
-    // 2. Validate Confirmation Phrase
-    const normalizedConfirmation = confirmationPhrase.trim().toUpperCase();
-    if (normalizedConfirmation !== "WIPE ALL MASTER DATA") {
+    const { password, confirmationPhrase, preserveAdminUser } = parsed.data;
+    const context = requestAuditContext(request);
+    const reauth = await authenticateDetailed(user.email, password);
+    if (!reauth.ok) {
+      try {
+        await appendAuditEvent({
+          action: "DELETE_COMPANY_MASTER_DATA_REAUTH",
+          entityType: "Company",
+          entityCode: "ALL_MASTER_DATA",
+          description: "Factory reset re-authentication failed",
+          outcome: reauth.reason === "LOCKED" ? "LOCKED" : "DENIED",
+          actorEmail: user.email,
+          userId: user.userId || null,
+          metadata: { retryAfterSeconds: reauth.retryAfterSeconds },
+          ...context,
+        });
+      } catch (auditError) {
+        console.error("[factory-reset-reauth-audit-failed]", auditError);
+      }
+      const response = NextResponse.json(
+        {
+          ok: false,
+          error: reauth.reason === "LOCKED"
+            ? "Administrator account is temporarily locked after repeated failed re-authentication."
+            : "Re-authentication failed: Invalid administrator password.",
+        },
+        { status: reauth.reason === "LOCKED" ? 429 : 401 },
+      );
+      if (reauth.retryAfterSeconds > 0) {
+        response.headers.set("retry-after", String(reauth.retryAfterSeconds));
+      }
+      return response;
+    }
+
+    if (confirmationPhrase.trim().toUpperCase() !== "WIPE ALL MASTER DATA") {
       return NextResponse.json(
         {
           ok: false,
@@ -126,20 +93,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Network details for audit
-    const ipAddress =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "127.0.0.1";
-    const userAgent = request.headers.get("user-agent") || undefined;
-
-    // 4. Execute atomic master data deletion
     const result = await deleteCompanyMasterData({
+      adminUserId: user.userId,
       adminEmail: user.email,
       adminName: user.name,
       preserveAdminUser,
-      ipAddress,
-      userAgent,
+      ipAddress: context.ipAddress || undefined,
+      userAgent: context.userAgent || undefined,
+      requestId: context.requestId,
     });
 
     return NextResponse.json({
@@ -147,10 +108,10 @@ export async function POST(request: Request) {
       message: "All company master data and records have been successfully deleted.",
       wiped: result.wiped,
       auditId: result.auditId,
+      redirectTo: "/setup/finance",
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to execute master data wipe";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const result = responseStatus(error);
+    return NextResponse.json({ ok: false, error: result.message }, { status: result.status });
   }
 }

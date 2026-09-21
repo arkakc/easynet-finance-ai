@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { round2 } from "@/lib/accounting/inventory";
 import { isCreditNote } from "@/lib/accounting/sales-return";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
 
 const schema = z.object({
   creditNoteId: z.string().trim().min(1),
@@ -13,6 +14,7 @@ const schema = z.object({
   paymentMethod: z.string().trim().min(1),
   cashBankAccountId: z.string().trim().min(1),
   reference: z.string().trim().optional().default(""),
+  exchangeRate: z.coerce.number().finite().positive().optional(),
 });
 
 function year() {
@@ -20,34 +22,52 @@ function year() {
 }
 
 async function nextPaymentNumber() {
-  const prefix = `PE-${year()}-`;
-  const rows = await listTable<any>("Payments", 500, 0);
-  const max = (rows.rows || []).reduce((current: number, row: any) => {
-    const value = String(row.paymentNumber || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("Payment", Number(year()));
 }
 
 async function refundableBalance(creditNote: any) {
+  const defaults = await loadConfiguredPostingAccounts();
   const [journals, lines, payments] = await Promise.all([
     findRecords<any>("JournalHeaders", { documentType: "SALES_CREDIT_NOTE", documentId: creditNote.invoiceId }, 20),
     listTable<any>("JournalLines", 500, 0),
     findRecords<any>("Payments", { sourceDocumentId: creditNote.invoiceId }, 500),
   ]);
-  const journalIds = new Set((journals.rows || []).filter((row: any) => String(row.status || "").toUpperCase() === "POSTED").map((row: any) => String(row.journalId || "")));
+  const journalIds = new Set(
+    (journals.rows || [])
+      .filter((row: any) => String(row.status || "").toUpperCase() === "POSTED")
+      .map((row: any) => String(row.journalId || "")),
+  );
+  const transactionCurrency = String(creditNote.currency || "PGK").toUpperCase();
   const creditCreated = round2((lines.rows || [])
-    .filter((line: any) => journalIds.has(String(line.journalId || "")) && String(line.accountId || "") === "ACC-2150")
-    .reduce((sum: number, line: any) => sum + Number(line.credit || 0) - Number(line.debit || 0), 0));
+    .filter((line: any) =>
+      journalIds.has(String(line.journalId || ""))
+      && String(line.accountId || "") === defaults.defaultDeferredRevenueAccount,
+    )
+    .reduce((sum: number, line: any) => {
+      const lineCurrency = String(line.transactionCurrency || line.currency || "PGK").toUpperCase();
+      if (lineCurrency === transactionCurrency) {
+        const credit = Number(line.transactionCredit || 0);
+        const debit = Number(line.transactionDebit || 0);
+        if (credit || debit) return sum + credit - debit;
+      }
+      // Legacy PGK journals pre-date explicit transaction-currency fields.
+      if (transactionCurrency === "PGK") {
+        return sum + Number(line.credit || 0) - Number(line.debit || 0);
+      }
+      return sum;
+    }, 0));
   const refunded = round2((payments.rows || [])
     .filter((row: any) => String(row.partyType || "") === "Customer"
       && String(row.paymentType || "").toUpperCase() === "PAY"
       && String(row.status || "").toUpperCase() === "POSTED"
       && Boolean(row.journalId))
     .reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
-  return { creditCreated, refunded, refundable: round2(Math.max(0, creditCreated - refunded)) };
+  return {
+    currency: transactionCurrency,
+    creditCreated,
+    refunded,
+    refundable: round2(Math.max(0, creditCreated - refunded)),
+  };
 }
 
 export async function GET(request: Request) {
@@ -74,9 +94,13 @@ export async function POST(request: Request) {
       throw new Error("Sales Credit Note must be posted before a customer refund can be prepared");
     }
     const balance = await refundableBalance(creditNote);
-    if (input.amount > balance.refundable + 0.001) throw new Error(`Refund exceeds refundable customer credit. Available K${balance.refundable.toFixed(2)}`);
+    if (input.amount > balance.refundable + 0.001) {
+      throw new Error(
+        `Refund exceeds refundable customer credit. Available ${balance.currency} ${balance.refundable.toFixed(2)}`,
+      );
+    }
 
-    const paymentId = `PAY-${year()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const paymentId = documentSeriesId("Payment", Number(year()));
     const paymentNumber = await nextPaymentNumber();
     const row = await appendRecord("Payments", {
       paymentId,
@@ -87,6 +111,8 @@ export async function POST(request: Request) {
       projectId: creditNote.projectId || "",
       paymentDate: input.paymentDate,
       amount: round2(input.amount),
+      currency: String(creditNote.currency || "PGK").toUpperCase(),
+      exchangeRate: input.exchangeRate,
       paymentMethod: input.paymentMethod,
       cashBankAccountId: input.cashBankAccountId,
       reference: `CUSTOMER_REFUND|CN:${creditNote.invoiceId}|${input.reference || `Refund against ${creditNote.invoiceNumber}`}`,

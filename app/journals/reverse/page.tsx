@@ -82,7 +82,7 @@ export default function JournalReversalPage() {
         </div>
         <label>
           Original Journal ID
-          <input name="journalId" required placeholder="e.g. JRN-2026-0001" disabled={busy} />
+          <input name="journalId" required placeholder="e.g. JO-48291-2026" disabled={busy} />
         </label>
         <label>
           Reversal Date

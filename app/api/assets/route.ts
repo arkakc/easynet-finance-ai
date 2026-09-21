@@ -1,10 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { appendRecord, findRecords, listTable, backendConfigStatus } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
+import { requirePermission } from "@/lib/auth";
+import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
+import { postJournal } from "@/lib/accounting/posting";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   assetId: z.string().trim().optional().default(""),
@@ -20,6 +23,13 @@ const schema = z.object({
   sourceDocumentId: z.string().trim().optional().default(""),
 });
 
+const depreciationSchema = z.object({
+  assetId: z.string().trim().min(1),
+  depreciationDate: z.string().trim().min(8),
+  amount: z.coerce.number().finite().positive().optional(),
+  reference: z.string().trim().optional().default(""),
+});
+
 function requireSecret(secret?: string) {
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
@@ -27,7 +37,10 @@ function requireSecret(secret?: string) {
 
 export async function GET() {
   try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    await requirePermission("stock.read");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const assets = await prisma.fixedAsset.findMany({ orderBy: { assetId: "asc" } });
       return NextResponse.json({
@@ -48,22 +61,91 @@ export async function GET() {
           netBookValue: Number(asset.netBookValue),
           status: asset.status,
           sourceDocumentId: asset.sourceDocumentId || "",
+          acquisitionJournalId: asset.acquisitionJournalId || "",
+          depreciationJournalId: asset.depreciationJournalId || "",
+          journalId: asset.depreciationJournalId || asset.acquisitionJournalId || "",
         })),
       });
     }
     const result = await listTable("FixedAssets", 500, 0);
     return NextResponse.json({ ok: true, assets: result.rows });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Asset read failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Asset read failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
+}
+
+async function postAssetDepreciation(raw: unknown) {
+  const record = depreciationSchema.parse(raw || {});
+  // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
+  if (backendConfigured) throw new Error("Fixed asset depreciation posting is currently supported in local Prisma mode only");
+
+  const asset = await prisma.fixedAsset.findFirst({ where: { OR: [{ id: record.assetId }, { assetId: record.assetId }] } });
+  if (!asset) throw new Error("Fixed asset does not exist");
+  if (asset.status !== "ACTIVE") throw new Error("Only active fixed assets can be depreciated");
+
+  const cost = Number(asset.cost || 0);
+  const currentAccumulated = Number(asset.accumulatedDepreciation || 0);
+  const monthlyAmount = Math.round((cost / Math.max(1, asset.usefulLifeMonths)) * 100) / 100;
+  const requestedAmount = record.amount ?? monthlyAmount;
+  const amount = Math.min(requestedAmount, Math.max(0, cost - currentAccumulated));
+  if (!(amount > 0)) throw new Error("Asset is already fully depreciated");
+
+  const postingDate = normalizeAccountingDate(record.depreciationDate);
+  const documentId = `DEP:${asset.id}:${postingDate}`;
+  const defaults = await loadConfiguredPostingAccounts();
+  const journal = await postJournal({
+    postingDate,
+    documentType: "FIXED_ASSET_DEPRECIATION",
+    documentId,
+    documentNumber: documentSeriesId("Depreciation"),
+    reference: record.reference || `Depreciation for ${asset.assetName}`,
+    lines: [
+      { accountId: defaults.depreciationExpenseAccount, debit: amount, supplierId: asset.supplierId || undefined, description: "Fixed asset depreciation expense" },
+      { accountId: defaults.accumulatedDepreciationAccount, credit: amount, supplierId: asset.supplierId || undefined, description: "Accumulated depreciation" },
+    ],
+    createdBy: "asset-depreciation",
+    approvedBy: "Finance Controller",
+  });
+
+  const accumulatedDepreciation = Math.round((currentAccumulated + amount) * 100) / 100;
+  const netBookValue = Math.round(Math.max(0, cost - accumulatedDepreciation) * 100) / 100;
+  const updated = await prisma.fixedAsset.update({
+    where: { id: asset.id },
+    data: {
+      accumulatedDepreciation,
+      netBookValue,
+      depreciationJournalId: journal.journalId,
+      status: netBookValue <= 0 ? "FULLY_DEPRECIATED" : asset.status,
+    },
+  });
+
+  return {
+    asset: {
+      assetId: updated.assetId,
+      accumulatedDepreciation: Number(updated.accumulatedDepreciation),
+      netBookValue: Number(updated.netBookValue),
+      status: updated.status,
+      depreciationJournalId: updated.depreciationJournalId || "",
+      journalId: updated.depreciationJournalId || "",
+    },
+    journalId: journal.journalId,
+    amount,
+  };
 }
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "create" | "depreciate"; record?: unknown };
     requireSecret(body.secret);
+    if (body.action === "depreciate") return NextResponse.json({ ok: true, ...(await postAssetDepreciation(body.record)) });
+
     const record = schema.parse(body.record || {});
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       if (record.supplierId) {
         const supplier = await prisma.supplier.findUnique({ where: { id: record.supplierId } });
@@ -81,7 +163,7 @@ export async function POST(request: Request) {
         const serial = await prisma.fixedAsset.findFirst({ where: { serialNumber: record.serialNumber } });
         if (serial) throw new Error(`Asset serial number already exists: ${record.serialNumber}`);
       }
-      const assetId = record.assetId || `AST-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const assetId = record.assetId || documentSeriesId("Asset");
       const duplicate = await prisma.fixedAsset.findUnique({ where: { assetId } });
       if (duplicate) throw new Error(`Asset ID already exists: ${assetId}`);
       const asset = await prisma.fixedAsset.create({
@@ -98,9 +180,11 @@ export async function POST(request: Request) {
           usefulLifeMonths: record.usefulLifeMonths,
           netBookValue: record.cost,
           sourceDocumentId: source.id,
+          acquisitionJournalId: null,
+          depreciationJournalId: null,
         },
       });
-      return NextResponse.json({ ok: true, source: "prisma", row: { ...record, assetId, status: asset.status, accumulatedDepreciation: 0, netBookValue: record.cost } });
+      return NextResponse.json({ ok: true, source: "prisma", row: { ...record, assetId, status: asset.status, accumulatedDepreciation: 0, netBookValue: record.cost, acquisitionJournalId: "", depreciationJournalId: "", journalId: "" } });
     }
     if (record.supplierId) {
       const supplier = await findRecords("Suppliers", { supplierId: record.supplierId }, 1);
@@ -118,7 +202,7 @@ export async function POST(request: Request) {
       if (serial.rows.length) throw new Error(`Asset serial number already exists: ${record.serialNumber}`);
     }
 
-    const assetId = record.assetId || `AST-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const assetId = record.assetId || documentSeriesId("Asset");
     const duplicate = await findRecords("FixedAssets", { assetId }, 1);
     if (duplicate.rows.length) throw new Error(`Asset ID already exists: ${assetId}`);
     const result = await appendRecord("FixedAssets", {
@@ -128,6 +212,8 @@ export async function POST(request: Request) {
       accumulatedDepreciation: 0,
       netBookValue: record.cost,
       status: "ACTIVE",
+      acquisitionJournalId: "",
+      depreciationJournalId: "",
     }, "asset-ui");
     return NextResponse.json({ ok: true, row: result.row });
   } catch (error) {

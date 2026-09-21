@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       againstDocumentId?: string;
       amount?: number;
       allocationDate?: string;
+      idempotencyKey?: string;
     };
     const paymentId = String(body.paymentId || "").trim();
     if (!paymentId) throw new Error("Advance Payment Entry is required");
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
       againstDocumentId,
       amount: Number(body.amount || 0),
       allocationDate: String(body.allocationDate || ""),
+      idempotencyKey: String(body.idempotencyKey || "").trim() || undefined,
     });
     return NextResponse.json({ ok: true, result });
   } catch (error) {

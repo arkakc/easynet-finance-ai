@@ -25,12 +25,6 @@ export default function LoginPage() {
   const [showGuide, setShowGuide] = useState(false);
   const [shakeKey, setShakeKey] = useState(0);
 
-  function handleQuickFillAdmin() {
-    setEmail("admin@easynet.local");
-    setPassword("Admin123!");
-    setError("");
-  }
-
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!email || !password) {
@@ -117,21 +111,10 @@ export default function LoginPage() {
           {showGuide && (
             <div id="login-instructions" className="login-guide-content">
               <ol className="login-guide-steps">
-                <li>Sign in using your assigned corporate email address (e.g. <code>admin@easynet.local</code>).</li>
+                <li>Sign in using your assigned corporate email address.</li>
                 <li>Enter your role-assigned secure password.</li>
                 <li>Access is strictly governed by ERP security policies and audit trails.</li>
               </ol>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", paddingTop: "4px" }}>
-                <span style={{ fontSize: "11px", color: "#64748b" }}>Testing environment credentials:</span>
-                <button
-                  type="button"
-                  className="login-quickfill-pill"
-                  onClick={handleQuickFillAdmin}
-                  title="Auto-fill default System Admin credentials"
-                >
-                  ⚡ Auto-fill Demo Admin Login
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -143,13 +126,6 @@ export default function LoginPage() {
             <div className="login-error-body">
               <div className="login-error-title">Login Failed</div>
               <div className="login-error-msg">{error}</div>
-              <button
-                type="button"
-                className="login-error-recovery"
-                onClick={handleQuickFillAdmin}
-              >
-                Auto-fill working Admin credentials &rarr;
-              </button>
             </div>
           </div>
         )}
@@ -167,7 +143,7 @@ export default function LoginPage() {
                 name="email"
                 type="email"
                 autoComplete="username"
-                placeholder="admin@easynet.local"
+                placeholder="you@easynet.local"
                 required
                 autoFocus
                 value={email}

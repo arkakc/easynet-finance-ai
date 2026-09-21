@@ -14,7 +14,7 @@ function safeInternalPath(value: string) {
 
 function destination(target: CreateTarget) {
   if (target === "item") return "/stock/new-item";
-  return `/masters?tab=${target}`;
+  return "";
 }
 
 export function notifyFlowDataChanged(kind: string, id = "") {
@@ -52,13 +52,20 @@ export function FlowCreateLink({
   className?: string;
 }) {
   const [href, setHref] = useState(destination(target));
+  const baseDestination = destination(target);
 
   useEffect(() => {
-    const current = `${window.location.pathname}${window.location.search}`;
     const base = destination(target);
+    if (!base) {
+      setHref("");
+      return;
+    }
+    const current = `${window.location.pathname}${window.location.search}`;
     const separator = base.includes("?") ? "&" : "?";
     setHref(`${base}${separator}returnTo=${encodeURIComponent(current)}&returnLabel=${encodeURIComponent(returnLabel || document.title || "Previous Flow")}&fromFlow=1`);
   }, [target, returnLabel]);
+
+  if (!baseDestination || !href) return null;
 
   const defaultLabel = target === "customer" ? "Create New Customer"
     : target === "supplier" ? "Create New Supplier"

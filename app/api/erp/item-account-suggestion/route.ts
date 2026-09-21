@@ -68,9 +68,13 @@ function heuristic(itemName: string, itemType: "STOCK" | "SERVICE" | "NON_STOCK"
     costAccountId = "ACC-5500";
     reason = "Freight / delivery item wording";
   } else if (has("network", "cctv", "camera", "firewall", "router", "switch", "wifi", "wi-fi", "starlink", "nas", "server", "installation", "ict")) {
-    revenueAccountId = "ACC-4100";
+    // Physical ICT equipment is hardware for revenue classification. Only
+    // service/non-stock ICT work belongs in the general services revenue
+    // account. This prevents items such as network switches and routers from
+    // being classified as software revenue when the AI fallback is used.
+    revenueAccountId = itemType === "STOCK" ? "ACC-4200" : "ACC-4100";
     costAccountId = itemType === "STOCK" ? "ACC-5100" : "ACC-5200";
-    reason = "ICT infrastructure item wording";
+    reason = itemType === "STOCK" ? "ICT hardware item wording" : "ICT service item wording";
   } else if (itemType === "STOCK") {
     revenueAccountId = "ACC-4200";
     costAccountId = "ACC-5100";

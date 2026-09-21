@@ -50,7 +50,7 @@ interface GetNextNumberResult {
 
 /**
  * Get the next document number for a given type
- * Uses continuation numbering: PREFIX-YYYY-NNNNN
+ * Uses continuation numbering: XX-NNNNN-YYYY
  */
 export async function getNextDocumentNumber(options: GetNextNumberOptions): Promise<GetNextNumberResult> {
   const { type, year = new Date().getFullYear(), prefix = PREFIXES[type] } = options;
@@ -74,6 +74,7 @@ export async function getNextDocumentNumber(options: GetNextNumberOptions): Prom
  */
 async function getLatestDocumentByTypeAndYear(type: DocumentType, year: number): Promise<{ sequence: number } | null> {
   const prefix = PREFIXES[type];
+  const shortPrefix = prefix.replace(/[^A-Za-z0-9]/g, '').toUpperCase().padEnd(2, 'X').slice(0, 2);
 
   // Search for the latest document number for this type and year
   // We'll search across all document tables
@@ -81,7 +82,7 @@ async function getLatestDocumentByTypeAndYear(type: DocumentType, year: number):
   // Check quotes
   const quote = await prisma.quote.findFirst({
     where: {
-      code: { startsWith: `${prefix}-${year}-` },
+      code: { startsWith: `${shortPrefix}-` },
     },
     orderBy: { code: 'desc' },
     select: { code: true },
@@ -89,7 +90,7 @@ async function getLatestDocumentByTypeAndYear(type: DocumentType, year: number):
 
   if (quote) {
     const parsed = parseDocumentNumber(quote.code);
-    if (parsed && parsed.prefix === prefix && parsed.year === year) {
+    if (parsed && parsed.prefix === shortPrefix && parsed.year === year) {
       return { sequence: parsed.sequence };
     }
   }
@@ -97,7 +98,7 @@ async function getLatestDocumentByTypeAndYear(type: DocumentType, year: number):
   // Check invoices
   const invoice = await prisma.invoice.findFirst({
     where: {
-      code: { startsWith: `${prefix}-${year}-` },
+      code: { startsWith: `${shortPrefix}-` },
     },
     orderBy: { code: 'desc' },
     select: { code: true },
@@ -105,7 +106,7 @@ async function getLatestDocumentByTypeAndYear(type: DocumentType, year: number):
 
   if (invoice) {
     const parsed = parseDocumentNumber(invoice.code);
-    if (parsed && parsed.prefix === prefix && parsed.year === year) {
+    if (parsed && parsed.prefix === shortPrefix && parsed.year === year) {
       return { sequence: parsed.sequence };
     }
   }

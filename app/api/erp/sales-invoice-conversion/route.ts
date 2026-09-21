@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { inventoryState, round2 } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   quoteId: z.string().trim().min(1),
@@ -17,15 +17,7 @@ function year() {
 }
 
 async function nextNumber() {
-  const prefix = `SI-${year()}-`;
-  const rows = await listTable<any>("Invoices", 500, 0);
-  const max = (rows.rows || []).reduce((current: number, row: any) => {
-    const value = String(row.invoiceNumber || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("Sales Invoice", Number(year()));
 }
 
 function itemType(item: any) {
@@ -55,19 +47,39 @@ export async function POST(request: Request) {
     ]);
     const quote = quoteResult.rows[0];
     if (!quote) throw new Error("Sales Quotation not found");
+    const sourceIsSalesOrder = String(quote.quoteNumber || "").toUpperCase().startsWith("SO-");
+    if (!sourceIsSalesOrder) throw new Error("Convert the approved Sales Quotation to a Sales Order first. Sales Invoice conversion must start from the Sales Order / Delivery Note workflow.");
     const quoteStatus = String(quote.status || "").toUpperCase();
-    if (!["APPROVED", "PART_INVOICED"].includes(quoteStatus)) throw new Error(`Sales Quotation is not available for conversion. Current status: ${quoteStatus}`);
+    const allowedStatuses = ["APPROVED", "PART_DELIVERED", "DELIVERED", "PART_INVOICED"];
+    if (!allowedStatuses.includes(quoteStatus)) throw new Error(`${sourceIsSalesOrder ? "Sales Order" : "Sales Quotation"} is not available for Sales Invoice conversion. Current status: ${quoteStatus}`);
     const quoteLines = [...(quoteLinesResult.rows || [])].sort((a, b) => Number(a.lineNo || 0) - Number(b.lineNo || 0));
     if (!quoteLines.length) throw new Error("Sales Quotation has no lines");
     const temporary = quoteLines.filter((line: any) => !String(line.itemId || "").trim());
     if (temporary.length) throw new Error("All quotation TEMP items must be saved permanently in Item Master before Sales Invoice conversion");
 
-    const activeInvoices = (invoiceResult.rows || []).filter((row: any) =>
+    let invoiceRows = [...(invoiceResult.rows || [])];
+    if (!invoiceRows.length && String(quote.sourceDocumentId || "")) {
+      const legacyResult = await findRecords<any>("Invoices", { sourceDocumentId: quote.sourceDocumentId }, 50);
+      const legacyMatches = (legacyResult.rows || []).filter((row: any) =>
+        !["CANCELLED", "REVERSED"].includes(String(row.status || "").toUpperCase())
+        && String(row.customerId || "") === String(quote.customerId || "")
+        && String(row.projectId || "") === String(quote.projectId || "")
+        && Math.abs(Number(row.totalAmount || 0) - Number(quote.totalAmount || 0)) < 0.01,
+      );
+      if (legacyMatches.length === 1 && String(legacyMatches[0].status || "").toUpperCase() === "DRAFT") {
+        const repaired = await updateRecord("Invoices", "invoiceId", legacyMatches[0].invoiceId, { sourceDocumentId: input.quoteId }, "sales-order-invoice-conversion:legacy-link-repair");
+        invoiceRows = [repaired.row || legacyMatches[0]];
+        console.info("sales-invoice-conversion.legacy-link-repaired", { salesOrderId: input.quoteId, invoiceId: legacyMatches[0].invoiceId });
+      }
+    }
+
+    const activeInvoices = invoiceRows.filter((row: any) =>
       !["CANCELLED", "REVERSED"].includes(String(row.status || "").toUpperCase())
       && !String(row.invoiceNumber || "").toUpperCase().startsWith("CN-"),
     );
     const existingDraft = activeInvoices.find((row: any) => String(row.status || "").toUpperCase() === "DRAFT");
     if (existingDraft) {
+      await updateRecord("Quotes", "quoteId", input.quoteId, { status: "INVOICED" }, "sales-order-invoice-conversion:existing-draft");
       return NextResponse.json({ ok: true, createdId: existingDraft.invoiceId, documentNumber: existingDraft.invoiceNumber || existingDraft.invoiceId, status: "existing-draft" });
     }
 
@@ -78,6 +90,14 @@ export async function POST(request: Request) {
       if (!activeInvoiceIds.has(String(line.invoiceId || ""))) continue;
       const itemId = String(line.itemId || "");
       previouslyInvoicedByItem.set(itemId, (previouslyInvoicedByItem.get(itemId) || 0) + Number(line.qty || 0));
+    }
+    const deliveredByItem = new Map<string, number>();
+    if (sourceIsSalesOrder) {
+      for (const movement of movementResult.rows || []) {
+        if (String(movement.sourceDocumentId || "") !== input.quoteId || String(movement.movementType || "") !== "SALES_DELIVERY") continue;
+        const itemId = String(movement.itemId || "");
+        deliveredByItem.set(itemId, (deliveredByItem.get(itemId) || 0) + Number(movement.qtyOut || 0));
+      }
     }
 
     const remainingByLine: Array<{ line: any; remainingQty: number; item: any }> = [];
@@ -101,11 +121,17 @@ export async function POST(request: Request) {
         availableByItem.set(itemId, Number.POSITIVE_INFINITY);
         continue;
       }
-      const state = inventoryState(
-        (movementResult.rows || []).filter((movement: any) => String(movement.itemId || "") === itemId),
-        Number(row.item.defaultRate || 0),
-      );
-      availableByItem.set(itemId, Math.max(0, Number(state.qty || 0)));
+      if (sourceIsSalesOrder) {
+        const delivered = Number(deliveredByItem.get(itemId) || 0);
+        const invoiced = Number(previouslyInvoicedByItem.get(itemId) || 0);
+        availableByItem.set(itemId, Math.max(0, delivered - invoiced));
+      } else {
+        const state = inventoryState(
+          (movementResult.rows || []).filter((movement: any) => String(movement.itemId || "") === itemId),
+          Number(row.item.defaultRate || 0),
+        );
+        availableByItem.set(itemId, Math.max(0, Number(state.qty || 0)));
+      }
     }
 
     if (input.mode === "FULL") {
@@ -120,10 +146,12 @@ export async function POST(request: Request) {
         const available = Number(availableByItem.get(itemId) || 0);
         if (available + 0.0001 < required) {
           const item = itemMap.get(itemId);
-          shortages.push(`${item?.itemCode || itemId}: required ${required}, available ${available}`);
+          shortages.push(`${item?.itemCode || itemId}: required ${required}, ${sourceIsSalesOrder ? "delivered-not-yet-invoiced" : "available"} ${available}`);
         }
       }
-      if (shortages.length) throw new Error(`Full fulfilment is not available. ${shortages.join("; ")}`);
+      if (shortages.length) throw new Error(sourceIsSalesOrder
+        ? `Sales Invoice requires Delivery Note / Stock Out first. ${shortages.join("; ")}`
+        : `Full fulfilment is not available. ${shortages.join("; ")}`);
     }
 
     const invoiceLines: any[] = [];
@@ -160,7 +188,7 @@ export async function POST(request: Request) {
     }
     if (!invoiceLines.length) throw new Error("No remaining quotation quantity is currently available to invoice");
 
-    const invoiceId = `INV-${year()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+    const invoiceId = documentSeriesId("Invoice", Number(year()));
     const invoiceNumber = await nextNumber();
     const netAmount = round2(invoiceLines.reduce((sum, line) => sum + Number(line.netAmount || 0), 0));
     const gstAmount = round2(invoiceLines.reduce((sum, line) => sum + Number(line.gstAmount || 0), 0));
@@ -176,6 +204,9 @@ export async function POST(request: Request) {
       projectId: quote.projectId,
       invoiceDate: input.invoiceDate,
       dueDate,
+      currency: String(quote.currency || "PGK"),
+      // Sales Order FX is planning information. The accounting invoice resolves
+      // its own rate at invoice/posting date unless a controller enters one.
       netAmount,
       gstAmount,
       totalAmount,
@@ -183,8 +214,11 @@ export async function POST(request: Request) {
       outstandingAmount: totalAmount,
       status: "DRAFT",
       sourceDocumentId: input.quoteId,
+      sourceSalesOrderId: sourceIsSalesOrder ? input.quoteId : "",
+      salesOrderId: sourceIsSalesOrder ? input.quoteId : "",
+      sourceQuoteId: sourceIsSalesOrder ? String(quote.sourceDocumentId || "") : input.quoteId,
       journalId: "",
-      updateStock: true,
+      updateStock: !sourceIsSalesOrder,
     }, "sales-fulfilment:quotation-conversion");
     await batchAppend("InvoiceLines", invoiceLines.map((line) => ({
       invoiceLineId: `${invoiceId}-${String(line.lineNo).padStart(3, "0")}`,
@@ -197,8 +231,9 @@ export async function POST(request: Request) {
     const fullyInvoiced = quoteLines.every((line: any) => Number(newInvoicedByItem.get(String(line.itemId || "")) || 0) + 0.0001 >= quoteLines
       .filter((candidate: any) => String(candidate.itemId || "") === String(line.itemId || ""))
       .reduce((sum: number, candidate: any) => sum + Number(candidate.qty || 0), 0));
-    await updateRecord("Quotes", "quoteId", input.quoteId, { status: fullyInvoiced ? "CONVERTED" : "PART_INVOICED" }, "sales-fulfilment:quotation-conversion");
+    await updateRecord("Quotes", "quoteId", input.quoteId, { status: fullyInvoiced ? "INVOICED" : "PART_INVOICED" }, "sales-order-invoice-conversion");
 
+    console.info("sales-invoice-conversion.created", { salesOrderId: input.quoteId, invoiceId, lineCount: invoiceLines.length, fullyInvoiced });
     return NextResponse.json({
       ok: true,
       createdId: invoiceId,
@@ -214,6 +249,7 @@ export async function POST(request: Request) {
     const message = error instanceof z.ZodError
       ? error.errors.map((entry) => `${entry.path.join(".")}: ${entry.message}`).join("; ")
       : error instanceof Error ? error.message : "Sales Invoice conversion failed";
+    console.error("sales-invoice-conversion.failed", { message });
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400 });
   }
 }

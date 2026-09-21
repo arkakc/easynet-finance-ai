@@ -1,239 +1,155 @@
+"use client";
+
 import Link from "next/link";
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
-import { normalizeAccountingDate } from "@/lib/accounting/loan";
-import { prisma } from "@/src/lib/prisma";
+import { useCallback, useEffect, useState } from "react";
+import type { AgingBucket, FinancialStatements, StatementAccountRow } from "@/lib/accounting/financial-statements";
 
-export const dynamic = "force-dynamic";
+const money = (value: number, currency = "PGK") =>
+  new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
+const pngToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const BUCKETS: AgingBucket[] = ["Current", "1-30", "31-60", "61-90", "90+"];
 
-type Account = { accountId: string; accountCode: string; accountName: string; accountType: string };
-type JournalHeader = { journalId: string; status: string };
-type JournalLine = { journalId: string; accountId: string; debit: number | string; credit: number | string; projectId?: string };
-type Invoice = { invoiceId: string; invoiceNumber: string; customerId: string; dueDate: string; totalAmount: number | string; outstandingAmount: number | string; status: string; projectId?: string; journalId?: string };
-type Bill = { billId: string; billNumber: string; supplierId: string; dueDate: string; totalAmount: number | string; outstandingAmount: number | string; status: string; projectId?: string; journalId?: string };
-
-const n = (value: unknown) => Number(value || 0);
-const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
-const normalized = (value: unknown) => String(value || "").trim().toUpperCase();
-const openPostedStatus = (value: unknown) => ["POSTED", "PARTLY_PAID"].includes(normalized(value));
-
-function pngToday() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+function Status({ ok, good = "PASS", bad = "REVIEW" }: { ok: boolean; good?: string; bad?: string }) {
+  return <span className="auto-badge" style={ok ? undefined : { background: "#fee2e2", borderColor: "#fecaca", color: "#991b1b" }}>{ok ? good : bad}</span>;
 }
 
-function daysPastDue(value: string) {
-  if (!value) return 0;
-  try {
-    const due = new Date(`${normalizeAccountingDate(value)}T00:00:00Z`).getTime();
-    const today = new Date(`${pngToday()}T00:00:00Z`).getTime();
-    return Math.max(0, Math.floor((today - due) / 86400000));
-  } catch {
-    return 0;
-  }
+function AccountTable({ title, rows, total, currency }: { title: string; rows: StatementAccountRow[]; total: number; currency: string }) {
+  return (
+    <section className="panel table-wrap">
+      <div className="form-title-row"><h3>{title}</h3><strong>{money(total, currency)}</strong></div>
+      <table className="data-table">
+        <thead><tr><th>Account</th><th>Name</th><th>Amount ({currency})</th></tr></thead>
+        <tbody>
+          {rows.map((row) => <tr key={row.code}><td><strong>{row.code}</strong></td><td>{row.name}</td><td>{money(row.amount, currency)}</td></tr>)}
+          {!rows.length && <tr><td colSpan={3}>No posted activity in this section.</td></tr>}
+          <tr><th colSpan={2}>Total</th><th>{money(total, currency)}</th></tr>
+        </tbody>
+      </table>
+    </section>
+  );
 }
 
-function bucket(days: number) {
-  if (days <= 0) return "Current";
-  if (days <= 30) return "1-30";
-  if (days <= 60) return "31-60";
-  if (days <= 90) return "61-90";
-  return "90+";
-}
+export default function ReportsPage() {
+  const [asOf, setAsOf] = useState(pngToday);
+  const [from, setFrom] = useState("");
+  const [data, setData] = useState<FinancialStatements | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-export default async function ReportsPage() {
-  let accounts: Account[] = [];
-  let headers: JournalHeader[] = [];
-  let lines: JournalLine[] = [];
-  let invoices: Invoice[] = [];
-  let bills: Bill[] = [];
-  let error = "";
-
-  try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
-    if (!backendConfigured) {
-      const [a, h, j, i, b] = await Promise.all([
-        prisma.chartOfAccounts.findMany(),
-        prisma.journalHeader.findMany(),
-        prisma.journalLine.findMany(),
-        prisma.invoice.findMany(),
-        prisma.supplierBill.findMany(),
-      ]);
-      accounts = a.map((row) => ({ accountId: `ACC-${row.code}`, accountCode: row.code, accountName: row.name, accountType: row.type }));
-      headers = h.map((row) => ({ journalId: row.id, status: row.status }));
-      lines = j.map((row) => ({ journalId: row.journalId, accountId: `ACC-${a.find((account) => account.id === row.accountId)?.code || ""}`, debit: Number(row.debit), credit: Number(row.credit), projectId: row.projectId || "" }));
-      invoices = i.map((row) => ({ invoiceId: row.id, invoiceNumber: row.code, customerId: row.customerId, dueDate: row.dueDate?.toISOString() || "", totalAmount: Number(row.total), outstandingAmount: Number(row.outstanding), status: row.status, projectId: row.projectId || "", journalId: row.journalId || "" }));
-      bills = b.map((row) => ({ billId: row.id, billNumber: row.code, supplierId: row.supplierId, dueDate: row.dueDate?.toISOString() || "", totalAmount: Number(row.total), outstandingAmount: Number(row.outstanding), status: row.status, projectId: row.projectId || "", journalId: row.journalId || "" }));
-    } else {
-      const [a, h, j, i, b] = await Promise.all([
-        listTable<Account>("Accounts", 500, 0),
-        listTable<JournalHeader>("JournalHeaders", 500, 0),
-        listTable<JournalLine>("JournalLines", 500, 0),
-        listTable<Invoice>("Invoices", 500, 0),
-        listTable<Bill>("SupplierBills", 500, 0),
-      ]);
-      accounts = a.rows; headers = h.rows; lines = j.rows; invoices = i.rows; bills = b.rows;
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const query = new URLSearchParams({ asOf });
+      if (from) query.set("from", from);
+      const response = await fetch(`/api/reports/financial-statements?${query.toString()}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Financial statements could not be loaded");
+      setData(payload.statements);
+    } catch (reason) {
+      setData(null);
+      setError(reason instanceof Error ? reason.message : "Financial statements could not be loaded");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    error = err instanceof Error ? err.message : "Report load failed";
-  }
+  }, [asOf, from]);
 
-  if (error) {
-    return (
-      <>
-        <h2>Financial Reports</h2>
-        <p className="small">Live finance data is unavailable until the backend connection succeeds.</p>
-        <section className="panel warning-panel"><strong>Financial report data unavailable.</strong> {error}. Do not rely on zero or blank figures while this warning is active.</section>
-      </>
-    );
-  }
+  useEffect(() => { void loadReport(); }, [loadReport]);
 
-  const postedJournalIds = new Set(headers.filter((row) => normalized(row.status) === "POSTED").map((row) => String(row.journalId)));
-  const postedLines = lines.filter((line) => postedJournalIds.has(String(line.journalId)));
-  const accountMap = new Map(accounts.map((a) => [a.accountId, a]));
-  const balances = new Map<string, number>();
-  for (const line of postedLines) {
-    balances.set(line.accountId, (balances.get(line.accountId) || 0) + n(line.debit) - n(line.credit));
-  }
-
-  let revenue = 0;
-  let expenses = 0;
-  let assets = 0;
-  let liabilities = 0;
-  let equity = 0;
-  for (const [accountId, rawBalance] of balances.entries()) {
-    const account = accountMap.get(accountId);
-    if (!account) continue;
-    if (account.accountType === "Income") revenue += -rawBalance;
-    else if (account.accountType === "Expense") expenses += rawBalance;
-    else if (account.accountType === "Asset" || account.accountType === "Contra Asset") assets += rawBalance;
-    else if (account.accountType === "Liability") liabilities += -rawBalance;
-    else if (account.accountType === "Equity") equity += -rawBalance;
-  }
-  const netProfit = revenue - expenses;
-  const accountBalance = (accountId: string) => n(balances.get(accountId));
-  const inventory = accountBalance("ACC-1150");
-  const supplierAdvances = accountBalance("ACC-1160");
-  const accountsReceivable = accountBalance("ACC-1130");
-  const accountsPayable = -accountBalance("ACC-2110");
-  const customerAdvances = -accountBalance("ACC-2150");
-  const grni = -accountBalance("ACC-2190");
-  const inputGst = accountBalance("ACC-1140");
-  const outputGst = -accountBalance("ACC-2120");
-
-  const arRows = invoices
-    .filter((row) => n(row.outstandingAmount) > 0 && openPostedStatus(row.status) && Boolean(String(row.journalId || "").trim()) && !String(row.invoiceNumber || "").toUpperCase().startsWith("CN-"))
-    .map((row) => ({ ...row, overdueDays: daysPastDue(row.dueDate), aging: bucket(daysPastDue(row.dueDate)) }));
-  const apRows = bills
-    .filter((row) => n(row.outstandingAmount) > 0 && openPostedStatus(row.status) && Boolean(String(row.journalId || "").trim()))
-    .map((row) => ({ ...row, overdueDays: daysPastDue(row.dueDate), aging: bucket(daysPastDue(row.dueDate)) }));
-
-  const arAging = ["Current", "1-30", "31-60", "61-90", "90+"].map((label) => [label, arRows.filter((row) => row.aging === label).reduce((sum, row) => sum + n(row.outstandingAmount), 0)] as const);
-  const apAging = ["Current", "1-30", "31-60", "61-90", "90+"].map((label) => [label, apRows.filter((row) => row.aging === label).reduce((sum, row) => sum + n(row.outstandingAmount), 0)] as const);
-  const balanceCheck = assets - liabilities - equity - netProfit;
+  const exportCsv = () => {
+    if (!data) return;
+    const rows: Array<Array<string | number>> = [["Easynet Financial Statements"], ["Period", data.period.from, data.period.asOf], ["Base Currency", data.currency], [], ["Profit & Loss"], ["Account", "Name", `Amount (${data.currency})`]];
+    for (const row of [...data.profitAndLoss.revenue, ...data.profitAndLoss.expenses]) rows.push([row.code, row.name, row.amount]);
+    rows.push(["", "Net profit / (loss)", data.profitAndLoss.totals.netProfit], [], ["Balance Sheet"], ["Account", "Name", `Amount (${data.currency})`]);
+    for (const row of [...data.balanceSheet.assets, ...data.balanceSheet.liabilities, ...data.balanceSheet.equity]) rows.push([row.code, row.name, row.amount]);
+    rows.push(["", "Accounting equation difference", data.balanceSheet.totals.difference]);
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `easynet-financial-statements-${data.period.asOf}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <>
       <div className="page-head">
-        <div>
-          <h2>Financial Reports & General Ledger Summary</h2>
-          <p className="small">
-            Live management accounts derived exclusively from POSTED journals and active AR/AP ledgers.
-          </p>
-        </div>
+        <div><h2>Financial Statements Centre</h2><p className="small">Auditable base-currency statements derived only from posted general-ledger journals.</p></div>
         <div className="page-head-actions">
-          {error && (
-            <details className="system-notice-tab">
-              <summary>
-                <span>ℹ️ System Notice</span>
-                <span className="notice-arrow">▾</span>
-              </summary>
-              <div className="system-notice-dropdown">
-                <strong>Reporting notice:</strong> {error}
-              </div>
-            </details>
-          )}
-          <Link prefetch={false} className="button-link secondary-link" href="/reports/cashflow">
-            Cash Flow Statement
-          </Link>
-          <Link prefetch={false} className="button-link secondary-link" href="/reports/gst">
-            IRC GST Report
-          </Link>
-          <Link prefetch={false} className="button-link secondary-link" href="/controls">
-            Integrity Controls
-          </Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/trial-balance">Trial Balance</Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/cashflow">Cash Flow</Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/gst">IRC GST</Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/controls">Integrity Controls</Link>
         </div>
       </div>
 
-      <div className="grid">
-        <div className="card">
-          <div className="label">Gross Revenue</div>
-          <div className="value">{money(revenue)}</div>
+      <section className="panel">
+        <div className="form-grid">
+          <label>Period From<input type="date" value={from} max={asOf} onChange={(event) => setFrom(event.target.value)} /><span className="small">Blank uses the configured fiscal-year start.</span></label>
+          <label>As At<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} /></label>
         </div>
-        <div className="card">
-          <div className="label">Total Expenses</div>
-          <div className="value">{money(expenses)}</div>
+        <div className="button-row">
+          <button type="button" onClick={() => void loadReport()} disabled={loading}>{loading ? "Running…" : "Run Report"}</button>
+          <button type="button" className="secondary" onClick={exportCsv} disabled={!data}>Export CSV</button>
         </div>
-        <div className="card">
-          <div className="label">Net Profit / (Loss)</div>
-          <div className="value">{money(netProfit)}</div>
-        </div>
-        <div className="card">
-          <div className="label">Balance Check</div>
-          <div className="value" style={{ color: Math.abs(balanceCheck) < 0.01 ? "#10b981" : "#ef4444" }}>
-            {money(balanceCheck)}
+      </section>
+
+      {error && <section className="panel warning-panel"><strong>Report unavailable.</strong> {error}</section>}
+      {data && (
+        <>
+          <div className="grid">
+            <div className="card"><div className="label">Revenue</div><div className="value">{money(data.profitAndLoss.totals.revenue, data.currency)}</div></div>
+            <div className="card"><div className="label">Expenses</div><div className="value">{money(data.profitAndLoss.totals.expenses, data.currency)}</div></div>
+            <div className="card"><div className="label">Net Profit / (Loss)</div><div className="value">{money(data.profitAndLoss.totals.netProfit, data.currency)}</div></div>
+            <div className="card"><div className="label">Balance Sheet Control</div><div className="value">{money(data.balanceSheet.totals.difference, data.currency)}</div><Status ok={data.balanceSheet.totals.balanced} good="BALANCED" bad="OUT OF BALANCE" /></div>
           </div>
-        </div>
-      </div>
 
-      <section className="panel table-wrap">
-        <h3>Profit & Loss</h3>
-        <table className="data-table"><tbody>
-          <tr><th>Revenue</th><td>{money(revenue)}</td></tr>
-          <tr><th>Expenses</th><td>{money(expenses)}</td></tr>
-          <tr><th>Net Profit / (Loss)</th><td><strong>{money(netProfit)}</strong></td></tr>
-        </tbody></table>
-      </section>
+          <section className="panel table-wrap">
+            <div className="form-title-row"><div><h3>Financial Control Summary</h3><p className="small">Period {data.period.from} to {data.period.asOf}</p></div><span className="badge">{data.currency}</span></div>
+            <table className="data-table"><thead><tr><th>Control</th><th>Ledger</th><th>Comparison</th><th>Difference</th><th>Status</th></tr></thead><tbody>
+              <tr><td>Period debit = credit</td><td>{money(data.controls.periodLedger.debit, data.currency)}</td><td>{money(data.controls.periodLedger.credit, data.currency)}</td><td>{money(data.controls.periodLedger.difference, data.currency)}</td><td><Status ok={data.controls.periodLedger.balanced} /></td></tr>
+              <tr><td>Cumulative debit = credit</td><td>{money(data.controls.cumulativeLedger.debit, data.currency)}</td><td>{money(data.controls.cumulativeLedger.credit, data.currency)}</td><td>{money(data.controls.cumulativeLedger.difference, data.currency)}</td><td><Status ok={data.controls.cumulativeLedger.balanced} /></td></tr>
+              <tr><td>AR {data.controls.receivables.accountCode} = customer subledger</td><td>{money(data.controls.receivables.glBalance, data.currency)}</td><td>{money(data.controls.receivables.subledgerBalance, data.currency)}</td><td>{money(data.controls.receivables.difference, data.currency)}</td><td><Status ok={data.controls.receivables.matched} /></td></tr>
+              <tr><td>AP {data.controls.payables.accountCode} = supplier subledger</td><td>{money(data.controls.payables.glBalance, data.currency)}</td><td>{money(data.controls.payables.subledgerBalance, data.currency)}</td><td>{money(data.controls.payables.difference, data.currency)}</td><td><Status ok={data.controls.payables.matched} /></td></tr>
+            </tbody></table>
+          </section>
 
-      <section className="panel table-wrap">
-        <h3>Balance Sheet Summary</h3>
-        <table className="data-table"><tbody>
-          <tr><th>Assets</th><td>{money(assets)}</td></tr>
-          <tr><th>Liabilities</th><td>{money(liabilities)}</td></tr>
-          <tr><th>Equity</th><td>{money(equity)}</td></tr>
-          <tr><th>Current Earnings</th><td>{money(netProfit)}</td></tr>
-          <tr><th>Balance Check</th><td><strong>{money(balanceCheck)}</strong></td></tr>
-        </tbody></table>
-      </section>
+          <div className="two-col">
+            <AccountTable title="Revenue" rows={data.profitAndLoss.revenue} total={data.profitAndLoss.totals.revenue} currency={data.currency} />
+            <AccountTable title="Expenses" rows={data.profitAndLoss.expenses} total={data.profitAndLoss.totals.expenses} currency={data.currency} />
+          </div>
 
-      <section className="panel table-wrap">
-        <h3>Accounting 0.5 Control Balances</h3>
-        <p className="small">These balances expose the perpetual-inventory, advance, GRNI and GST control accounts introduced in Accounting 0.5.</p>
-        <table className="data-table"><tbody>
-          <tr><th>Accounts Receivable</th><td>{money(accountsReceivable)}</td></tr>
-          <tr><th>Accounts Payable</th><td>{money(accountsPayable)}</td></tr>
-          <tr><th>Inventory / Project Materials</th><td>{money(inventory)}</td></tr>
-          <tr><th>Stock Received But Not Billed / GRNI</th><td>{money(grni)}</td></tr>
-          <tr><th>Supplier Advances</th><td>{money(supplierAdvances)}</td></tr>
-          <tr><th>Customer Advances / Unearned Revenue</th><td>{money(customerAdvances)}</td></tr>
-          <tr><th>Input GST</th><td>{money(inputGst)}</td></tr>
-          <tr><th>Output GST</th><td>{money(outputGst)}</td></tr>
-          <tr><th>Net GST Payable / (Receivable)</th><td><strong>{money(outputGst - inputGst)}</strong></td></tr>
-        </tbody></table>
-        <div className="button-row"><Link className="button-link secondary-link" href="/controls">Open Accounting Integrity Controls</Link></div>
-      </section>
+          <section className="panel table-wrap">
+            <div className="form-title-row"><h3>Balance Sheet</h3><Status ok={data.balanceSheet.totals.balanced} good="EQUATION BALANCED" bad="REVIEW DIFFERENCE" /></div>
+            <table className="data-table"><tbody>
+              <tr><th>Assets</th><td>{money(data.balanceSheet.totals.assets, data.currency)}</td></tr>
+              <tr><th>Liabilities</th><td>{money(data.balanceSheet.totals.liabilities, data.currency)}</td></tr>
+              <tr><th>Equity</th><td>{money(data.balanceSheet.totals.equity, data.currency)}</td></tr>
+              <tr><th>Cumulative Current Earnings</th><td>{money(data.balanceSheet.totals.currentEarnings, data.currency)}</td></tr>
+              <tr><th>Accounting Equation Difference</th><td><strong>{money(data.balanceSheet.totals.difference, data.currency)}</strong></td></tr>
+            </tbody></table>
+          </section>
+          <div className="three-col">
+            <AccountTable title="Assets" rows={data.balanceSheet.assets} total={data.balanceSheet.totals.assets} currency={data.currency} />
+            <AccountTable title="Liabilities" rows={data.balanceSheet.liabilities} total={data.balanceSheet.totals.liabilities} currency={data.currency} />
+            <AccountTable title="Equity" rows={data.balanceSheet.equity} total={data.balanceSheet.totals.equity} currency={data.currency} />
+          </div>
 
-      <section className="panel table-wrap">
-        <h3>Accounts Receivable Aging</h3>
-        <table className="data-table"><thead><tr><th>Bucket</th><th>Outstanding</th></tr></thead><tbody>{arAging.map(([label, amount]) => <tr key={label}><td>{label}</td><td>{money(amount)}</td></tr>)}</tbody></table>
-        <h4>Open Invoices</h4>
-        <table className="data-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Project</th><th>Due</th><th>Days</th><th>Outstanding</th></tr></thead><tbody>{arRows.map((row) => <tr key={row.invoiceId}><td><Link href={`/transactions/invoice/${encodeURIComponent(row.invoiceId)}`}><strong>{row.invoiceNumber}</strong></Link></td><td>{row.customerId}</td><td>{row.projectId || "—"}</td><td>{row.dueDate || "—"}</td><td>{row.overdueDays}</td><td>{money(n(row.outstandingAmount))}</td></tr>)}</tbody></table>
-      </section>
-
-      <section className="panel table-wrap">
-        <h3>Accounts Payable Aging</h3>
-        <table className="data-table"><thead><tr><th>Bucket</th><th>Outstanding</th></tr></thead><tbody>{apAging.map(([label, amount]) => <tr key={label}><td>{label}</td><td>{money(amount)}</td></tr>)}</tbody></table>
-        <h4>Open Supplier Invoices</h4>
-        <table className="data-table"><thead><tr><th>Supplier Invoice</th><th>Supplier</th><th>Project</th><th>Due</th><th>Days</th><th>Outstanding</th></tr></thead><tbody>{apRows.map((row) => <tr key={row.billId}><td><Link href={`/transactions/supplierBill/${encodeURIComponent(row.billId)}`}><strong>{row.billNumber}</strong></Link></td><td>{row.supplierId}</td><td>{row.projectId || "—"}</td><td>{row.dueDate || "—"}</td><td>{row.overdueDays}</td><td>{money(n(row.outstandingAmount))}</td></tr>)}</tbody></table>
-      </section>
+          {(["receivables", "payables"] as const).map((kind) => {
+            const aging = data.aging[kind];
+            const receivable = kind === "receivables";
+            return <section className="panel table-wrap" key={kind}>
+              <div className="form-title-row"><h3>{receivable ? "Accounts Receivable" : "Accounts Payable"} Aging</h3><strong>{money(aging.total, data.currency)}</strong></div>
+              <table className="data-table"><thead><tr>{BUCKETS.map((bucket) => <th key={bucket}>{bucket}</th>)}</tr></thead><tbody><tr>{BUCKETS.map((bucket) => <td key={bucket}>{money(aging.buckets[bucket], data.currency)}</td>)}</tr></tbody></table>
+              <table className="data-table"><thead><tr><th>Document</th><th>{receivable ? "Customer" : "Supplier"}</th><th>Due</th><th>Days</th><th>Bucket</th><th>Outstanding</th></tr></thead><tbody>
+                {aging.rows.map((row) => <tr key={row.id}><td><Link href={`/transactions/${receivable ? "invoice" : "supplierBill"}/${encodeURIComponent(row.id)}`}><strong>{row.code}</strong></Link></td><td>{row.partyCode} — {row.partyName}</td><td>{row.dueDate || "—"}</td><td>{row.overdueDays}</td><td>{row.bucket}</td><td>{money(row.outstanding, data.currency)}</td></tr>)}
+                {!aging.rows.length && <tr><td colSpan={6}>No open posted documents.</td></tr>}
+              </tbody></table>
+            </section>;
+          })}
+        </>
+      )}
     </>
   );
 }

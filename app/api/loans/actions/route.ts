@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -10,6 +9,7 @@ import {
 } from "@/lib/accounting/loan";
 import { postJournal } from "@/lib/accounting/posting";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const accrueSchema = z.object({
   loanId: z.string().trim().min(1),
@@ -169,7 +169,7 @@ async function repay(raw: unknown) {
   if (input.interestAmount > outstanding.interestOutstanding + 0.001) throw new Error("Interest repayment exceeds accrued interest outstanding");
 
   const total = round2(input.principalAmount + input.interestAmount);
-  const paymentId = `LPAY-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const paymentId = documentSeriesId("Loan Payment");
   const lines: Array<{ accountId: string; debit?: number; credit?: number; description: string }> = [];
   if (input.principalAmount > 0) lines.push({ accountId: INITIAL_ACCOUNT_IDS.loanPayable, debit: input.principalAmount, description: "Loan principal repayment" });
   if (input.interestAmount > 0) lines.push({ accountId: INITIAL_ACCOUNT_IDS.accruedInterestPayable, debit: input.interestAmount, description: "Accrued interest repayment" });

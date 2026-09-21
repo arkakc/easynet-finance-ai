@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
-import { postJournal, type PostingLine } from "@/lib/accounting/posting";
-import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { appendRecord, batchAppend, findRecords, listTable } from "@/lib/backend/apps-script";
+import { postSalesCreditNoteAtomic } from "@/lib/accounting/atomic-sales-return";
 import { round2 } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 export type SalesReturnLineInput = { itemId: string; qty: number };
 
@@ -11,15 +10,7 @@ function year() {
 }
 
 async function nextCreditNoteNumber() {
-  const prefix = `CN-${year()}-`;
-  const rows = await listTable<any>("Invoices", 500, 0);
-  const max = (rows.rows || []).reduce((current: number, row: any) => {
-    const value = String(row.invoiceNumber || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("CN", Number(year()));
 }
 
 function itemType(item: any) {
@@ -105,7 +96,7 @@ export async function createSalesCreditNote(input: {
   }
   if (!creditLines.length) throw new Error("Return quantity must be greater than zero");
 
-  const invoiceId = `CRN-${year()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const invoiceId = documentSeriesId("CN", Number(year()));
   const invoiceNumber = await nextCreditNoteNumber();
   const netAmount = round2(creditLines.reduce((sum, line) => sum + Number(line.netAmount || 0), 0));
   const gstAmount = round2(creditLines.reduce((sum, line) => sum + Number(line.gstAmount || 0), 0));
@@ -133,7 +124,7 @@ export async function createSalesCreditNote(input: {
     ...line,
   })), "sales-return:credit-note-create");
   await appendRecord("PaymentSchedules", {
-    scheduleId: `RETREASON-${randomUUID().slice(0, 12).toUpperCase()}`,
+    scheduleId: documentSeriesId("Return Reason"),
     sourceType: "SALES_RETURN_REASON",
     sourceId: invoiceId,
     projectId: original.projectId || "",
@@ -148,125 +139,16 @@ export async function createSalesCreditNote(input: {
   return { invoiceId, invoiceNumber, totalAmount, status: "DRAFT", originalInvoiceId: input.invoiceId };
 }
 
-export async function postSalesCreditNote(creditNote: any) {
-  if (!isCreditNote(creditNote)) throw new Error("Document is not a Sales Credit Note");
-  if (String(creditNote.status || "").toUpperCase() === "POSTED" && String(creditNote.journalId || "")) {
-    return { recordType: "invoice", recordId: creditNote.invoiceId, status: "already-posted", journalId: creditNote.journalId };
-  }
-  const originalInvoiceId = String(creditNote.sourceDocumentId || "").trim();
-  if (!originalInvoiceId) throw new Error("Credit Note has no original Sales Invoice reference");
-  const original = (await findRecords<any>("Invoices", { invoiceId: originalInvoiceId }, 1)).rows[0];
-  if (!original || isCreditNote(original)) throw new Error("Original Sales Invoice not found");
-  if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(original.status || "").toUpperCase())) throw new Error("Original Sales Invoice is not posted");
-
-  const [creditLinesResult, itemResult, movementsResult, reasonResult] = await Promise.all([
-    findRecords<any>("InvoiceLines", { invoiceId: creditNote.invoiceId }, 500),
-    listTable<any>("Items", 500, 0),
-    listTable<any>("StockMovements", 500, 0),
-    findRecords<any>("PaymentSchedules", { sourceId: creditNote.invoiceId, sourceType: "SALES_RETURN_REASON" }, 20),
-  ]);
-  const lines = creditLinesResult.rows || [];
-  if (!lines.length) throw new Error("Credit Note has no lines");
-  const reason = (reasonResult.rows || []).find((row: any) => String(row.status || "").toUpperCase() !== "CANCELLED");
-  if (!reason) throw new Error("Credit Note reason is missing");
-  const items = new Map((itemResult.rows || []).map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
-
-  const postingLines: PostingLine[] = [];
-  const revenue = new Map<string, number>();
-  for (const line of lines) {
-    const item = items.get(String(line.itemId || ""));
-    const accountId = String(line.revenueAccountId || item?.revenueAccount || "ACC-4100");
-    revenue.set(accountId, round2((revenue.get(accountId) || 0) + Number(line.netAmount || 0)));
-  }
-  for (const [accountId, amount] of revenue.entries()) {
-    if (amount > 0) postingLines.push({ accountId, debit: amount, customerId: original.customerId, projectId: original.projectId, description: "Sales return / revenue reversal" });
-  }
-  if (Number(creditNote.gstAmount || 0) > 0) {
-    postingLines.push({ accountId: INITIAL_ACCOUNT_IDS.gstPayable, debit: Number(creditNote.gstAmount || 0), customerId: original.customerId, projectId: original.projectId, taxCode: "GST", description: "Reverse Output GST" });
-  }
-
-  const originalOutstanding = Number(original.outstandingAmount || 0);
-  const creditTotal = Number(creditNote.totalAmount || 0);
-  const arCredit = round2(Math.min(originalOutstanding, creditTotal));
-  const customerCredit = round2(Math.max(0, creditTotal - arCredit));
-  if (arCredit > 0) postingLines.push({ accountId: INITIAL_ACCOUNT_IDS.accountsReceivable, credit: arCredit, customerId: original.customerId, projectId: original.projectId, description: "Reduce Accounts Receivable" });
-  if (customerCredit > 0) postingLines.push({ accountId: INITIAL_ACCOUNT_IDS.customerAdvances, credit: customerCredit, customerId: original.customerId, projectId: original.projectId, description: "Customer credit / refundable balance" });
-
-  const stockReturnRows: any[] = [];
-  const cogsCredits = new Map<string, number>();
-  let inventoryDebit = 0;
-  for (const line of lines) {
-    const itemId = String(line.itemId || "");
-    const item = items.get(itemId);
-    if (itemType(item) !== "STOCK") continue;
-    const originalIssues = (movementsResult.rows || []).filter((movement: any) =>
-      String(movement.sourceDocumentId || "") === originalInvoiceId
-      && String(movement.itemId || "") === itemId
-      && String(movement.movementType || "") === "SALES_ISSUE",
-    );
-    const issuedQty = originalIssues.reduce((sum: number, movement: any) => sum + Number(movement.qtyOut || 0), 0);
-    if (issuedQty <= 0.0001) throw new Error(`Original stock issue not found for ${item?.itemCode || itemId}`);
-    const issuedValue = originalIssues.reduce((sum: number, movement: any) => sum + Number(movement.value || Number(movement.qtyOut || 0) * Number(movement.unitCost || 0)), 0);
-    const originalCostRate = issuedValue / issuedQty;
-    const value = round2(Number(line.qty || 0) * originalCostRate);
-    inventoryDebit = round2(inventoryDebit + value);
-    const costAccount = String(item?.costAccount || "ACC-5100");
-    cogsCredits.set(costAccount, round2((cogsCredits.get(costAccount) || 0) + value));
-    stockReturnRows.push({
-      movementId: `RET-STK-${creditNote.invoiceId}-${String(stockReturnRows.length + 1).padStart(3, "0")}`,
-      movementDate: String(creditNote.invoiceDate),
-      itemId,
-      projectId: creditNote.projectId || "",
-      movementType: "SALES_RETURN",
-      qtyIn: Number(line.qty || 0),
-      qtyOut: 0,
-      unitCost: round2(originalCostRate),
-      value,
-      sourceDocumentId: creditNote.invoiceId,
-    });
-  }
-  if (inventoryDebit > 0) postingLines.push({ accountId: INITIAL_ACCOUNT_IDS.inventory, debit: inventoryDebit, customerId: original.customerId, projectId: original.projectId, description: "Inventory returned by customer" });
-  for (const [accountId, amount] of cogsCredits.entries()) postingLines.push({ accountId, credit: amount, customerId: original.customerId, projectId: original.projectId, description: "Reverse cost of goods sold" });
-
-  let stockCreated = false;
-  try {
-    const existingReturns = (movementsResult.rows || []).filter((movement: any) => String(movement.sourceDocumentId || "") === String(creditNote.invoiceId) && String(movement.movementType || "") === "SALES_RETURN");
-    if (!existingReturns.length && stockReturnRows.length) {
-      await batchAppend("StockMovements", stockReturnRows, "sales-return:stock");
-      stockCreated = true;
-    }
-    const journal = await postJournal({
-      postingDate: String(creditNote.invoiceDate),
-      documentType: "SALES_CREDIT_NOTE",
-      documentId: creditNote.invoiceId,
-      documentNumber: String(creditNote.invoiceNumber || creditNote.invoiceId),
-      reference: String(reason.milestone || `Credit Note ${creditNote.invoiceNumber}`),
-      projectId: original.projectId,
-      lines: postingLines,
-    });
-    const newOutstanding = round2(Math.max(0, originalOutstanding - arCredit));
-    const originalStatus = newOutstanding <= 0.001 ? "PAID" : Number(original.paidAmount || 0) > 0.001 ? "PARTLY_PAID" : "POSTED";
-    await updateRecord("Invoices", "invoiceId", originalInvoiceId, { outstandingAmount: newOutstanding, status: originalStatus }, "sales-return:receivable-adjustment");
-    await updateRecord("Invoices", "invoiceId", creditNote.invoiceId, { status: "POSTED", journalId: journal.journalId }, "sales-return:post");
-    await updateRecord("PaymentSchedules", "scheduleId", reason.scheduleId, { status: "POSTED" }, "sales-return:reason-posted");
-    return { recordType: "invoice", recordId: creditNote.invoiceId, status: "POSTED", journalId: journal.journalId, originalInvoiceId, arCredit, customerCredit, stockReturned: stockReturnRows.length };
-  } catch (error) {
-    if (stockCreated && stockReturnRows.length) {
-      try {
-        await batchAppend("StockMovements", stockReturnRows.map((row: any, index: number) => ({
-          movementId: `RB-${row.movementId}-${String(index + 1).padStart(2, "0")}`,
-          movementDate: row.movementDate,
-          itemId: row.itemId,
-          projectId: row.projectId,
-          movementType: "SALES_RETURN_ROLLBACK",
-          qtyIn: 0,
-          qtyOut: row.qtyIn,
-          unitCost: row.unitCost,
-          value: row.value,
-          sourceDocumentId: creditNote.invoiceId,
-        })), "sales-return:stock-rollback");
-      } catch { /* best effort; immutable movement trail remains auditable */ }
-    }
-    throw error;
-  }
+export async function postSalesCreditNote(
+  creditNote: any,
+  options: { approveIfDraft?: boolean } = {},
+) {
+  const creditNoteId = String(creditNote?.invoiceId || creditNote?.id || creditNote?.invoiceNumber || "").trim();
+  if (!creditNoteId) throw new Error("Sales Credit Note is required");
+  return postSalesCreditNoteAtomic({
+    creditNoteId,
+    approveIfDraft: options.approveIfDraft === true,
+    createdBy: "sales-return:post",
+    approvedBy: "Finance Controller",
+  });
 }

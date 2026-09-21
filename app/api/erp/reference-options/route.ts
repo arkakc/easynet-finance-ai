@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
 
 const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
 
@@ -11,10 +12,31 @@ function active(value: unknown) {
 export async function GET() {
   try {
     await requirePermission("dashboard.read");
-    const [accounts, lines] = await Promise.all([
+    const [accounts, lines, linkedBankAccounts, settings] = await Promise.all([
       listTable<any>("Accounts", 500, 0),
       listTable<any>("JournalLines", 500, 0),
+      prisma.bankAccount.findMany({
+        where: { isActive: true, chartOfAccountsId: { not: null } },
+        include: { chartOfAccounts: { select: { code: true } } },
+      }).catch(() => []),
+      prisma.globalSettings.findMany({
+        where: { key: { in: ["default_cash_account", "default_bank_account", "currency", "base_currency"] } },
+        select: { key: true, value: true },
+      }).catch(() => []),
     ]);
+    const dynamicCashBankIds = new Set(CASH_BANK_IDS);
+    linkedBankAccounts.forEach((row) => {
+      if (row.chartOfAccounts?.code) dynamicCashBankIds.add(`ACC-${row.chartOfAccounts.code}`);
+    });
+    settings.filter((row) => ["default_cash_account", "default_bank_account"].includes(row.key)).forEach((row) => {
+      const code = String(row.value || "").trim().replace(/^ACC-/i, "");
+      if (code) dynamicCashBankIds.add(`ACC-${code}`);
+    });
+    const baseCurrency = String(
+      settings.find((row) => row.key === "currency")?.value
+      || settings.find((row) => row.key === "base_currency")?.value
+      || "PGK",
+    ).trim().toUpperCase();
 
     const balanceByAccount = new Map<string, number>();
     for (const line of lines.rows || []) {
@@ -33,13 +55,15 @@ export async function GET() {
         accountType: String(row.accountType || ""),
         parentAccount: String(row.parentAccount || ""),
         balance: Number(balanceByAccount.get(String(row.accountId || "")) || 0),
+        isCashBank: dynamicCashBankIds.has(String(row.accountId || "")),
+        accountRole: dynamicCashBankIds.has(String(row.accountId || "")) ? "cash-bank" : "",
       }));
 
     const cashBankAccounts = allAccounts
-      .filter((row) => CASH_BANK_IDS.has(row.accountId))
+      .filter((row) => row.isCashBank)
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
 
-    return NextResponse.json({ ok: true, accounts: allAccounts, cashBankAccounts });
+    return NextResponse.json({ ok: true, accounts: allAccounts, cashBankAccounts, baseCurrency });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Reference option load failed";
     return NextResponse.json(

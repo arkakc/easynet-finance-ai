@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import bcrypt from "bcryptjs";
-import { getCurrentUser, getRequestUser, authenticate, verifyPassword } from "@/lib/auth";
+import {
+  authenticateDetailed,
+  requireValidatedRequestPermission,
+} from "@/lib/auth";
+import {
+  appendAuditEvent,
+  requestAuditContext,
+} from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 import {
   getCompanyTransactionsSummary,
@@ -9,135 +15,91 @@ import {
 } from "@/lib/company/delete-transactions";
 
 const deleteRequestSchema = z.object({
-  password: z.string().min(1, "Administrator password is required"),
+  password: z.string().min(1, "Administrator password is required").max(200),
   companyNameConfirmation: z.string().min(1, "Company name confirmation is required"),
   resetStockQuantities: z.boolean().optional().default(true),
 });
 
-async function resolveUser(request?: Request) {
-  if (request) {
-    const fromReq = getRequestUser(request);
-    if (fromReq) return fromReq;
-  }
-  try {
-    return await getCurrentUser();
-  } catch {
-    return null;
-  }
+function responseStatus(error: unknown) {
+  const message = error instanceof Error ? error.message : "Failed to execute transaction wipe";
+  return {
+    message,
+    status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500,
+  };
 }
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   try {
-    const user = await resolveUser(request);
-    if (!user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    const isSystemManager = user.roles.includes("System Manager");
-    const hasSettingsPerm = user.permissions.includes("settings.manage");
-    if (!isSystemManager && !hasSettingsPerm) {
-      return NextResponse.json(
-        { ok: false, error: "Forbidden: Only System Administrators can access company transaction settings" },
-        { status: 403 },
-      );
-    }
-
+    await requireValidatedRequestPermission(request, "security.manage");
     const [summary, companySetting] = await Promise.all([
       getCompanyTransactionsSummary(),
       prisma.globalSettings.findUnique({ where: { key: "company_name" } }),
     ]);
-
-    const companyName = companySetting?.value || "Easynet IT Solutions Limited";
-
     return NextResponse.json({
       ok: true,
-      companyName,
+      companyName: companySetting?.value || "Easynet IT Solutions Limited",
       summary,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load transaction summary";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const result = responseStatus(error);
+    return NextResponse.json({ ok: false, error: result.message }, { status: result.status });
   }
 }
 
 export async function POST(request: Request) {
   try {
-    const user = await resolveUser(request);
-    if (!user) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-
-    // ERPNext Rule: Strictly System Manager / Administrator
-    const isSystemManager = user.roles.includes("System Manager");
-    const hasSettingsPerm = user.permissions.includes("settings.manage");
-    if (!isSystemManager && !hasSettingsPerm) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Forbidden: Only System Administrators (System Manager) can delete company transactions.",
-        },
-        { status: 403 },
-      );
-    }
-
+    const user = await requireValidatedRequestPermission(request, "security.manage");
     const body = await request.json();
     const parsed = deleteRequestSchema.safeParse(body);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => i.message).join("; ");
-      return NextResponse.json({ ok: false, error: issues }, { status: 400 });
-    }
-
-    const { password, companyNameConfirmation, resetStockQuantities } = parsed.data;
-
-    // 1. Re-authenticate Password (ERPNext security architecture)
-    let passwordValid = false;
-
-    // Check memory auth
-    const authResult = authenticate(user.email, password);
-    if (authResult) {
-      passwordValid = true;
-    }
-
-    // Check database user password hash (bcrypt)
-    if (!passwordValid) {
-      const dbUser = await prisma.user.findUnique({
-        where: { email: user.email },
-      });
-      if (dbUser?.password) {
-        passwordValid = await bcrypt.compare(password, dbUser.password);
-      }
-    }
-
-    // Fallback: check admin default test password if testing with admin@easynet.local
-    if (!passwordValid && user.email.toLowerCase() === "admin@easynet.local") {
-      const testHash =
-        "scrypt$easynet-test-admin$a6521ceeca240ac8c9400995b10de09b04d3a8fbad9191cbe7cd89a845418e2e88885d732a93060036f6f42921299f5eecbc22dbaa3106bf540bd3e73d83258a";
-      passwordValid = verifyPassword(password, testHash);
-    }
-
-    if (!passwordValid) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Re-authentication failed: Invalid administrator password.",
-        },
-        { status: 401 },
+        { ok: false, error: parsed.error.issues.map((issue) => issue.message).join("; ") },
+        { status: 400 },
       );
     }
 
-    // 2. Validate Company Name confirmation string
-    const companySetting = await prisma.globalSettings.findUnique({
-      where: { key: "company_name" },
-    });
+    const { password, companyNameConfirmation, resetStockQuantities } = parsed.data;
+    const context = requestAuditContext(request);
+    const reauth = await authenticateDetailed(user.email, password);
+    if (!reauth.ok) {
+      try {
+        await appendAuditEvent({
+          action: "DELETE_COMPANY_TRANSACTIONS_REAUTH",
+          entityType: "Company",
+          entityCode: "ALL_TRANSACTIONS",
+          description: "Transaction wipe re-authentication failed",
+          outcome: reauth.reason === "LOCKED" ? "LOCKED" : "DENIED",
+          actorEmail: user.email,
+          userId: user.userId || null,
+          metadata: { retryAfterSeconds: reauth.retryAfterSeconds },
+          ...context,
+        });
+      } catch (auditError) {
+        console.error("[transaction-wipe-reauth-audit-failed]", auditError);
+      }
+      const response = NextResponse.json(
+        {
+          ok: false,
+          error: reauth.reason === "LOCKED"
+            ? "Administrator account is temporarily locked after repeated failed re-authentication."
+            : "Re-authentication failed: Invalid administrator password.",
+        },
+        { status: reauth.reason === "LOCKED" ? 429 : 401 },
+      );
+      if (reauth.retryAfterSeconds > 0) {
+        response.headers.set("retry-after", String(reauth.retryAfterSeconds));
+      }
+      return response;
+    }
+
+    const companySetting = await prisma.globalSettings.findUnique({ where: { key: "company_name" } });
     const expectedCompanyName = (companySetting?.value || "Easynet IT Solutions Limited").trim();
-
     const normalizedConfirmation = companyNameConfirmation.trim();
-    const isCompanyMatch =
-      normalizedConfirmation.toLowerCase() === expectedCompanyName.toLowerCase();
-    const isSafetyPhraseMatch =
-      normalizedConfirmation.toUpperCase() === "DELETE ALL TRANSACTIONS";
+    const confirmed =
+      normalizedConfirmation.toLowerCase() === expectedCompanyName.toLowerCase()
+      || normalizedConfirmation.toUpperCase() === "DELETE ALL TRANSACTIONS";
 
-    if (!isCompanyMatch && !isSafetyPhraseMatch) {
+    if (!confirmed) {
       return NextResponse.json(
         {
           ok: false,
@@ -147,20 +109,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Capture caller network details for audit
-    const ipAddress =
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip") ||
-      "127.0.0.1";
-    const userAgent = request.headers.get("user-agent") || undefined;
-
-    // 4. Execute atomic wipe
     const result = await deleteCompanyTransactions({
+      adminUserId: user.userId,
       adminEmail: user.email,
       adminName: user.name,
       resetStockQuantities,
-      ipAddress,
-      userAgent,
+      ipAddress: context.ipAddress || undefined,
+      userAgent: context.userAgent || undefined,
+      requestId: context.requestId,
     });
 
     return NextResponse.json({
@@ -170,8 +126,7 @@ export async function POST(request: Request) {
       auditId: result.auditId,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to execute transaction wipe";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const result = responseStatus(error);
+    return NextResponse.json({ ok: false, error: result.message }, { status: result.status });
   }
 }

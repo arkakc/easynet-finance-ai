@@ -1168,7 +1168,7 @@ export default function AccountsClient() {
         <div>
           <h2>Chart of Accounts & General Ledger</h2>
           <p className="small">
-            Easynet IT Solutions Limited (PNG) — ERPNext-style hierarchical general ledger, live rolled-up values & voucher audit trail.
+            Easynet IT Solutions Limited (PNG) — Easynet-style hierarchical general ledger, live rolled-up values & voucher audit trail.
           </p>
         </div>
         <div className="page-head-actions">
@@ -1611,7 +1611,7 @@ export default function AccountsClient() {
         </div>
       )}
 
-      {/* General Ledger Interactive View (ERPNext Voucher Posting Drawer) */}
+      {/* General Ledger Interactive View (Voucher Posting Drawer) */}
       {ledgerModalOpen && ledgerAccount && (
         <div className="coa-modal-backdrop" onClick={() => setLedgerModalOpen(false)}>
           <div className="coa-ledger-modal" onClick={(e) => e.stopPropagation()}>
@@ -1818,7 +1818,7 @@ export default function AccountsClient() {
       )}
 
       {/* =========================================================================
-          Chart of Accounts Import Modal (ERPNext Architecture)
+          Chart of Accounts Import Modal (Easynet Finance Architecture)
           ========================================================================= */}
       {importModalOpen && (
         <div className="coa-import-modal-overlay" onClick={() => !importing && setImportModalOpen(false)}>
@@ -1829,7 +1829,7 @@ export default function AccountsClient() {
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <h3 className="coa-modal-title">📤 Import Chart of Accounts</h3>
                   <span className="coa-badge-tag" style={{ background: "#e0e7ff", color: "#3730a3" }}>
-                    ERPNext Architecture
+                    Easynet Finance Architecture
                   </span>
                 </div>
                 <p className="coa-modal-subtitle">

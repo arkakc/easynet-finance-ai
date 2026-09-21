@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 function pngDate() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -13,15 +13,13 @@ function pngYear() {
   return new Intl.DateTimeFormat("en", { timeZone: "Pacific/Port_Moresby", year: "numeric" }).format(new Date());
 }
 async function nextNumber(table: string, field: string, prefix: string) {
-  const fullPrefix = `${prefix}-${pngYear()}-`;
-  const rows = await listTable<any>(table, 500, 0);
-  const max = rows.rows.reduce((current, row) => {
-    const value = String(row[field] || "");
-    if (!value.startsWith(fullPrefix)) return current;
-    const sequence = Number(value.slice(fullPrefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${fullPrefix}${String(max + 1).padStart(5, "0")}`;
+  void table;
+  void field;
+  return documentSeriesId(prefix, Number(pngYear()));
+}
+
+function isApprovedPurchaseLifecycle(value: unknown) {
+  return ["APPROVED", "SENT"].includes(String(value || "").trim().toUpperCase());
 }
 
 async function supplierQuoteToPurchaseOrder(supplierQuoteId: string) {
@@ -43,7 +41,7 @@ async function supplierQuoteToPurchaseOrder(supplierQuoteId: string) {
   }
 
   const sourceStatus = String(source.status || "DRAFT").toUpperCase();
-  if (sourceStatus !== "APPROVED") throw new Error("Supplier quotation must be APPROVED before conversion");
+  if (!isApprovedPurchaseLifecycle(sourceStatus)) throw new Error("Supplier quotation must be APPROVED before conversion");
 
   const sourceLines = await findRecords<any>("POLines", { poId: supplierQuoteId }, 500);
   if (!sourceLines.rows.length) throw new Error("Supplier quotation has no lines");
@@ -61,7 +59,7 @@ async function supplierQuoteToPurchaseOrder(supplierQuoteId: string) {
     defaultNewItemType: "STOCK",
   });
 
-  const poId = `PO-${pngYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const poId = documentSeriesId("PO", Number(pngYear()));
   const poNumber = await nextNumber("PurchaseOrders", "poNumber", "PO");
   await appendRecord("PurchaseOrders", {
     poId,
@@ -69,11 +67,15 @@ async function supplierQuoteToPurchaseOrder(supplierQuoteId: string) {
     supplierId: source.supplierId,
     projectId: source.projectId || "",
     poDate: pngDate(),
+    currency: String(source.currency || "PGK"),
+    exchangeRate: Number(source.exchangeRate || 0) || undefined,
     netAmount: source.netAmount,
     gstAmount: source.gstAmount,
     totalAmount: source.totalAmount,
     status: "DRAFT",
     sourceDocumentId: supplierQuoteId,
+    sourceSupplierQuoteId: supplierQuoteId,
+    supplierQuoteId,
   }, "supplier-quote-conversion");
 
   await batchAppend("POLines", resolved.lines.map((line: any, index: number) => ({
@@ -118,7 +120,7 @@ async function purchaseOrderToSupplierInvoice(purchaseOrderId: string) {
     actor: "po-to-supplier-invoice:item-linking",
     defaultNewItemType: "STOCK",
   });
-  const billId = `BILL-${pngYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+  const billId = documentSeriesId("Bill", Number(pngYear()));
   const billNumber = await nextNumber("SupplierBills", "billNumber", "PB");
   await appendRecord("SupplierBills", {
     billId,
@@ -128,6 +130,9 @@ async function purchaseOrderToSupplierInvoice(purchaseOrderId: string) {
     billDate: pngDate(),
     dueDate: "",
     poId: purchaseOrderId,
+    currency: String(source.currency || "PGK"),
+    // Purchase Order FX is planning information. Supplier Invoice resolves
+    // its accounting rate independently at bill/posting date.
     netAmount: source.netAmount,
     gstAmount: source.gstAmount,
     totalAmount: source.totalAmount,
@@ -135,6 +140,7 @@ async function purchaseOrderToSupplierInvoice(purchaseOrderId: string) {
     outstandingAmount: source.totalAmount,
     status: "DRAFT",
     sourceDocumentId: purchaseOrderId,
+    sourcePurchaseOrderId: purchaseOrderId,
     journalId: "",
   }, "supplier-invoice-conversion");
   await batchAppend("SupplierBillLines", resolved.lines.map((line: any, index: number) => ({

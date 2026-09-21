@@ -15,6 +15,9 @@ type Asset = {
   usefulLifeMonths: number | string;
   status: string;
   sourceDocumentId: string;
+  acquisitionJournalId?: string;
+  depreciationJournalId?: string;
+  journalId?: string;
 };
 
 type Supplier = {
@@ -202,6 +205,7 @@ export default function AssetsPage() {
               <th>Useful Life</th>
               <th>Est. Accum. Dep.</th>
               <th>Est. NBV</th>
+              <th>Linked Journal</th>
               <th>Location</th>
               <th>Status</th>
             </tr>
@@ -228,6 +232,9 @@ export default function AssetsPage() {
                   <td>
                     <strong>{money(nbv)}</strong>
                   </td>
+                  <td>
+                    <span className="small">{asset.depreciationJournalId || asset.acquisitionJournalId || asset.journalId || "—"}</span>
+                  </td>
                   <td>{asset.location || "—"}</td>
                   <td>
                     <span className="auto-badge">{asset.status}</span>
@@ -237,7 +244,7 @@ export default function AssetsPage() {
             })}
             {!assets.length && (
               <tr>
-                <td colSpan={9}>No fixed assets found.</td>
+                <td colSpan={10}>No fixed assets found.</td>
               </tr>
             )}
           </tbody>

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -6,6 +5,7 @@ import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from 
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
 import { round2, weightedRate } from "@/lib/accounting/inventory";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const quoteSchema = z.object({
   quoteId: z.string().trim().min(1),
@@ -27,7 +27,7 @@ function requireSecret(secret?: string) {
   if (!env.APP_SECRET) throw new Error("APP_SECRET is not configured");
   if (!secret || secret !== env.APP_SECRET) throw new Error("Unauthorized");
 }
-function id(prefix: string) { return `${prefix}-${new Date().getUTCFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`; }
+function id(prefix: string) { return documentSeriesId(prefix); }
 async function assertAccount(accountId: string) {
   const result = await findRecords<any>("Accounts", { accountId }, 1);
   const account = result.rows[0];
@@ -57,6 +57,7 @@ async function quoteToInvoice(input: z.infer<typeof quoteSchema>) {
       projectId: quote.projectId,
       invoiceDate: normalizeAccountingDate(input.invoiceDate),
       dueDate: input.dueDate ? normalizeAccountingDate(input.dueDate) : "",
+      currency: String(quote.currency || "PGK"),
       netAmount: quote.netAmount,
       gstAmount: quote.gstAmount,
       totalAmount: quote.totalAmount,
@@ -64,6 +65,7 @@ async function quoteToInvoice(input: z.infer<typeof quoteSchema>) {
       outstandingAmount: quote.totalAmount,
       status: "DRAFT",
       sourceDocumentId: input.quoteId,
+      sourceQuoteId: input.quoteId,
       journalId: "",
       updateStock: input.updateStock,
     }, "conversion-ui");
@@ -188,6 +190,7 @@ async function poToPartialBill(input: z.infer<typeof poSchema>) {
     billDate: normalizeAccountingDate(input.billDate),
     dueDate: input.dueDate ? normalizeAccountingDate(input.dueDate) : "",
     poId: input.poId,
+    currency: String(po.currency || "PGK"),
     netAmount,
     gstAmount,
     totalAmount,
@@ -195,6 +198,7 @@ async function poToPartialBill(input: z.infer<typeof poSchema>) {
     outstandingAmount: totalAmount,
     status: "DRAFT",
     sourceDocumentId: input.poId,
+    sourcePurchaseOrderId: input.poId,
     journalId: "",
   }, "conversion-ui");
   await batchAppend("SupplierBillLines", billLines.map((line) => ({

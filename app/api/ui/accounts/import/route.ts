@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission, getRequestUser, hasPermission } from "@/lib/auth";
+import { requireValidatedRequestPermission } from "@/lib/auth";
+import { appendAuditEvent, requestAuditContext } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 import { AccountTypeGL, NormalBalance } from "@prisma/client";
 import * as XLSX from "xlsx";
 import { inferParentCode } from "@/app/api/ui/accounts/rebuild-tree/route";
 
 async function checkAuth(req: Request, permission: "accounts.read" | "accounts.write") {
-  try {
-    const user = getRequestUser(req);
-    if (user && hasPermission(user, permission)) {
-      return user;
-    }
-  } catch {}
-  try {
-    return await requirePermission(permission);
-  } catch (err) {
-    throw err;
-  }
+  return requireValidatedRequestPermission(req, permission);
 }
 
 /**
@@ -314,7 +305,8 @@ export function normalizeHeaderKey(key: string): string {
  */
 export async function POST(req: NextRequest) {
   try {
-    await checkAuth(req, "accounts.write");
+    const actor = await checkAuth(req, "accounts.write");
+    const context = requestAuditContext(req);
 
     let rawRows: any[] = [];
     const contentType = req.headers.get("content-type") || "";
@@ -402,6 +394,18 @@ export async function POST(req: NextRequest) {
 
       const rawHeaders: string[] = rawRows[headerRowIndex];
       const headerKeys = rawHeaders.map((h) => normalizeHeaderKey(String(h || "")));
+      const requiredTemplateKeys = ["code", "name", "type", "parent", "normalBalance", "currency", "description", "status"];
+      const missingTemplateKeys = requiredTemplateKeys.filter((key) => !headerKeys.includes(key));
+      if (missingTemplateKeys.length) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Template format mismatch. Download the official COA template and keep these required columns: ${CSV_HEADERS.join(", ")}.`,
+            missingColumns: missingTemplateKeys,
+          },
+          { status: 400 }
+        );
+      }
 
       for (let i = headerRowIndex + 1; i < rawRows.length; i++) {
         const row: any[] = rawRows[i];
@@ -560,14 +564,21 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+    const duplicateCodes = [...accountRows.reduce((counts, row) => counts.set(row.code, (counts.get(row.code) || 0) + 1), new Map<string, number>())]
+      .filter(([, count]) => count > 1)
+      .map(([code]) => code);
+    if (duplicateCodes.length) {
+      return NextResponse.json({ ok: false, error: `Duplicate account code(s) in import: ${duplicateCodes.join(", ")}` }, { status: 400 });
+    }
 
     // =========================================================================
-    // Two-pass Upsert Strategy (ERPNext Architecture):
+    // Two-pass Upsert Strategy (Easynet Finance Architecture):
     // Pass 1: Upsert all accounts (creates or updates accounts without parent links)
     // Pass 2: Connect parent-child relationships using multi-way resolution & code inference
     // =========================================================================
-    let createdCount = 0;
-    let updatedCount = 0;
+    const importResult = await prisma.$transaction(async (tx) => {
+      let createdCount = 0;
+      let updatedCount = 0;
 
     const codeToIdMap = new Map<string, string>();
     const nameToIdMap = new Map<string, string>();
@@ -575,7 +586,7 @@ export async function POST(req: NextRequest) {
     const allKnownCodes = new Set<string>();
 
     // Load existing accounts into lookup maps
-    const existingAccounts = await prisma.chartOfAccounts.findMany({
+    const existingAccounts = await tx.chartOfAccounts.findMany({
       select: { id: true, code: true, name: true },
     });
     existingAccounts.forEach((acc) => {
@@ -595,7 +606,7 @@ export async function POST(req: NextRequest) {
       const existingId = codeToIdMap.get(row.code);
 
       if (existingId) {
-        const updated = await prisma.chartOfAccounts.update({
+        const updated = await tx.chartOfAccounts.update({
           where: { id: existingId },
           data: {
             name: row.name,
@@ -611,7 +622,7 @@ export async function POST(req: NextRequest) {
         cleanNameToIdMap.set(updated.name.toLowerCase().replace(/[^a-z0-9]/g, ""), updated.id);
         updatedCount++;
       } else {
-        const created = await prisma.chartOfAccounts.create({
+        const created = await tx.chartOfAccounts.create({
           data: {
             code: row.code,
             name: row.name,
@@ -700,13 +711,13 @@ export async function POST(req: NextRequest) {
 
       // Update parent link
       if (resolvedParentId) {
-        await prisma.chartOfAccounts.update({
+        await tx.chartOfAccounts.update({
           where: { id: accountId },
           data: { parentId: resolvedParentId },
         });
         parentLinksUpdated++;
       } else {
-        await prisma.chartOfAccounts.update({
+        await tx.chartOfAccounts.update({
           where: { id: accountId },
           data: { parentId: null },
         });
@@ -714,14 +725,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
+      // Verify the persisted graph before committing so a malformed import can
+      // never leave a circular account hierarchy behind.
+      const persistedAccounts = await tx.chartOfAccounts.findMany({ select: { id: true, code: true, parentId: true } });
+      const byId = new Map(persistedAccounts.map((account) => [account.id, account]));
+      for (const account of persistedAccounts) {
+        const seen = new Set<string>();
+        let current: typeof account | undefined = account;
+        while (current?.parentId) {
+          if (seen.has(current.id)) throw new Error(`Import would create a circular account hierarchy at ${account.code}`);
+          seen.add(current.id);
+          current = byId.get(current.parentId);
+        }
+      }
+
+      const dbUser = await tx.user.findUnique({ where: { email: actor.email.toLowerCase() }, select: { id: true } });
+      if (!dbUser) throw new Error("Authenticated user record not found for import audit");
+      const audit = await appendAuditEvent({
+        action: "COA_IMPORT",
+        entityType: "ChartOfAccounts",
+        entityCode: "COA_IMPORT",
+        description: `Chart of Accounts import by ${actor.email}: ${accountRows.length} rows processed.`,
+        changes: { accountRows: accountRows.length, createdCount, updatedCount, parentLinksUpdated, rootAccountsCount, warnings },
+        actorEmail: actor.email,
+        userId: dbUser.id,
+        outcome: "SUCCESS",
+        ...context,
+      }, tx);
+      return { createdCount, updatedCount, parentLinksUpdated, rootAccountsCount, auditId: audit.id };
+    });
     return NextResponse.json({
       ok: true,
-      message: `Successfully imported ${accountRows.length} accounts: ${createdCount} created, ${updatedCount} updated, ${parentLinksUpdated} hierarchy links resolved (${rootAccountsCount} root groups).`,
+      message: `Successfully imported ${accountRows.length} accounts: ${importResult.createdCount} created, ${importResult.updatedCount} updated, ${importResult.parentLinksUpdated} hierarchy links resolved (${importResult.rootAccountsCount} root groups).`,
       totalProcessed: accountRows.length,
-      createdCount,
-      updatedCount,
-      parentLinksUpdated,
-      rootAccountsCount,
+      ...importResult,
       warnings,
     });
   } catch (error) {

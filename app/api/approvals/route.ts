@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requirePermission } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { POST as legacyTransactionPost } from "@/app/api/transactions/route";
 import { assertCustomerCreditPolicy } from "@/lib/accounting/customer-credit-control";
 import { isCreditNote, postSalesCreditNote } from "@/lib/accounting/sales-return";
+import { prisma } from "@/src/lib/prisma";
 
 const actionSchema = z.object({
   recordType: z.enum(["quote", "invoice", "purchaseOrder", "supplierBill", "payment", "expense"]),
@@ -49,9 +51,17 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
 
 export async function GET() {
   try {
-    const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses] = await Promise.all([
+    await requirePermission("post.approve");
+    const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, manualJournals] = await Promise.all([
       listTable<any>("Quotes", 500, 0), listTable<any>("Invoices", 500, 0), listTable<any>("PurchaseOrders", 500, 0),
       listTable<any>("SupplierBills", 500, 0), listTable<any>("Payments", 500, 0), listTable<any>("Expenses", 500, 0),
+      prisma.journalHeader.findMany({
+        where: {
+          status: "PENDING",
+          sourceDocType: { startsWith: "MANUAL_" },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
     const pending = [
       ...quotes.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Sales", documentType: "Sales Quotation", documentNo: r.quoteNumber || r.quoteId, recordId: r.quoteId, status: "DRAFT", party: r.customerId || "", project: r.projectId || "", date: r.quoteDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/quote/${r.quoteId}`, approvalRecordType: "quote" })),
@@ -60,10 +70,28 @@ export async function GET() {
       ...supplierBills.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Supplier Invoice", documentNo: r.billNumber || r.billId, recordId: r.billId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.billDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || 0, href: `/transactions/supplierBill/${r.billId}`, approvalRecordType: "supplierBill" })),
       ...payments.rows.filter((r) => isDraft(r.status) && ["Customer", "Supplier"].includes(String(r.partyType || ""))).map((r) => ({ module: String(r.partyType) === "Customer" ? "Sales" : "Purchase", documentType: String(r.partyType) === "Customer" ? "Sales Payment Entry / Receipt" : "Purchase Payment Entry / Receipt", documentNo: r.paymentNumber || r.paymentId, recordId: r.paymentId, status: "DRAFT", party: r.partyId || "", project: r.projectId || "", date: r.paymentDate || "", createdAt: r.createdAt || "", amount: r.amount || 0, href: `/transactions/payment/${r.paymentId}`, approvalRecordType: "payment" })),
       ...expenses.rows.filter((r) => isDraft(r.status)).map((r) => ({ module: "Purchase", documentType: "Expense", documentNo: r.expenseNumber || r.expenseId, recordId: r.expenseId, status: "DRAFT", party: r.supplierId || "", project: r.projectId || "", date: r.expenseDate || "", createdAt: r.createdAt || "", amount: r.totalAmount || r.netAmount || 0, href: `/transactions/expense/${r.expenseId}`, approvalRecordType: "expense" })),
+      ...manualJournals.map((r) => ({
+        module: "Accounts",
+        documentType: "Manual Journal",
+        documentNo: r.code,
+        recordId: r.id,
+        status: "PENDING",
+        party: "",
+        project: "",
+        date: r.date.toISOString().slice(0, 10),
+        createdAt: r.createdAt.toISOString(),
+        amount: Number(r.totalDebit || 0),
+        href: `/journals/${r.code}`,
+        approvalRecordType: "manualJournal",
+      })),
     ].sort((a, b) => createdValue(b.createdAt || b.date) - createdValue(a.createdAt || a.date));
     return NextResponse.json({ ok: true, pending });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Approval queue load failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Approval queue load failed";
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 },
+    );
   }
 }
 
@@ -90,28 +118,40 @@ export async function POST(request: Request) {
       await assertSalesInvoiceStockPolicy(row);
     }
 
-    await updateRecord(config.table, config.idField, input.recordId, { status: "APPROVED" }, `finance-controller:${input.note || "approve"}`);
-
     if (creditNote) {
-      try {
-        const approvedCredit = (await findRecords<any>("Invoices", { invoiceId: input.recordId }, 1)).rows[0];
-        await postSalesCreditNote(approvedCredit);
-      } catch (error) {
-        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:credit-note-posting-rollback");
-        throw error;
-      }
+      // Credit Note approval, AR settlement, stock return, reason status and
+      // GL posting share one Prisma transaction. No compensating DRAFT reset.
+      await postSalesCreditNote(row, { approveIfDraft: true });
     } else if (ACCOUNTING_TYPES.has(input.recordType)) {
+      // Approval + document/subledger mutation + GL posting are one Prisma
+      // transaction. Do not pre-approve here and do not use compensating
+      // status rollbacks: a posting failure rolls the approval back itself.
       const internalRequest = new Request(request.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "post", payload: { recordType: input.recordType, recordId: input.recordId }, secret: body.secret }),
+        body: JSON.stringify({
+          action: "post",
+          payload: {
+            recordType: input.recordType,
+            recordId: input.recordId,
+            approveAtomically: true,
+          },
+          secret: body.secret,
+        }),
       });
       const postingResponse = await legacyTransactionPost(internalRequest);
       const postingBody = await postingResponse.json();
       if (!postingResponse.ok || !postingBody.ok) {
-        await updateRecord(config.table, config.idField, input.recordId, { status: "DRAFT" }, "finance-controller:approval-posting-rollback");
-        throw new Error(postingBody.error || "Accounting posting failed during approval");
+        throw new Error(postingBody.error || "Accounting posting failed during atomic approval");
       }
+    } else {
+      await updateRecord(
+        config.table,
+        config.idField,
+        input.recordId,
+        { status: "APPROVED" },
+        `finance-controller:${input.note || "approve"}`,
+      );
     }
 
     const finalRow = (await findRecords<any>(config.table, { [config.idField]: input.recordId }, 1)).rows[0];

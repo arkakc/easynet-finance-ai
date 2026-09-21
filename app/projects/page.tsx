@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +21,9 @@ export default async function ProjectsPage() {
   let error = "";
 
   try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const [p, a, j, po, b] = await Promise.all([
         prisma.project.findMany(),
@@ -96,9 +97,6 @@ export default async function ProjectsPage() {
               </div>
             </details>
           )}
-          <Link prefetch={false} className="button-link secondary-link" href="/masters?tab=project">
-            Manage Projects
-          </Link>
           <span className="badge">PGK (K)</span>
         </div>
       </div>

@@ -1,11 +1,17 @@
-import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
+import { appendRecord, findRecords, isBackendConfigured, listTable } from "@/lib/backend/apps-script";
+import { prisma } from "@/src/lib/prisma";
+import { INITIAL_CHART_OF_ACCOUNTS } from "@/lib/accounting/chart-of-accounts";
 
 const REQUIRED_ACCOUNTS = [
   { accountId: "ACC-2190", accountCode: "2190", accountName: "Stock Received But Not Billed / GRNI", accountType: "Liability", parentAccount: "ACC-2100", active: true },
   { accountId: "ACC-2191", accountCode: "2191", accountName: "Landed Cost Clearing", accountType: "Liability", parentAccount: "ACC-2100", active: true },
   { accountId: "ACC-4910", accountCode: "4910", accountName: "Inventory Adjustment / Revaluation Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4920", accountCode: "4920", accountName: "Realized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4930", accountCode: "4930", accountName: "Unrealized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
   { accountId: "ACC-5110", accountCode: "5110", accountName: "Purchase Price Variance", accountType: "Expense", parentAccount: "ACC-5000", active: true },
   { accountId: "ACC-5120", accountCode: "5120", accountName: "Inventory Adjustment / NRV Write-down", accountType: "Expense", parentAccount: "ACC-5000", active: true },
+  { accountId: "ACC-6995", accountCode: "6995", accountName: "Realized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6996", accountCode: "6996", accountName: "Unrealized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
 ] as const;
 
 const REQUIRED_SETTINGS = [
@@ -14,11 +20,79 @@ const REQUIRED_SETTINGS = [
   { key: "deferred_revenue_policy_json", value: JSON.stringify({ "ACC-4700": 12, "ACC-4400": 12 }), notes: "Revenue account to monthly recognition-period mapping. Item Master deferred months can override its revenue-account policy." },
   { key: "inventory_valuation_method", value: "MOVING_AVERAGE", notes: "Inventory valuation method used for perpetual inventory and COGS." },
   { key: "inventory_nrv_policy", value: "LOWER_OF_COST_AND_NRV", notes: "IAS 2 style lower-of-cost-and-NRV control." },
+  { key: "currency", value: "PGK", notes: "Company base currency. General Ledger amounts are stored in this currency." },
+  { key: "exchange_gain_account", value: "ACC-4920", notes: "Realized foreign exchange gain account." },
+  { key: "exchange_loss_account", value: "ACC-6995", notes: "Realized foreign exchange loss account." },
+  { key: "exchange_unrealized_gain_account", value: "ACC-4930", notes: "Period-end unrealized foreign exchange gain account." },
+  { key: "exchange_unrealized_loss_account", value: "ACC-6996", notes: "Period-end unrealized foreign exchange loss account." },
 ] as const;
 
 let ensurePromise: Promise<void> | null = null;
 
+function prismaAccountType(accountType: string) {
+  const types: Record<string, string> = {
+    Asset: "ASSET",
+    Liability: "LIABILITY",
+    Equity: "EQUITY",
+    Income: "REVENUE",
+    Expense: "EXPENSE",
+    "Contra Asset": "CONTRA_ASSET",
+    "Contra Liability": "CONTRA_LIABILITY",
+  };
+  return types[accountType] || "ASSET";
+}
+
+function normalBalance(accountType: string) {
+  return ["Liability", "Equity", "Income", "Contra Asset"].includes(accountType) ? "CREDIT" : "DEBIT";
+}
+
+async function reconcileLocalChartOfAccounts() {
+  if (isBackendConfigured("core")) return;
+
+  const canonicalCodes = new Set(INITIAL_CHART_OF_ACCOUNTS.map((account) => account.accountCode));
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    const parentCode = account.parentAccount.replace(/^ACC-/, "") || null;
+    await prisma.chartOfAccounts.upsert({
+      where: { code: account.accountCode },
+      update: {
+        name: account.accountName,
+        type: prismaAccountType(account.accountType) as any,
+        normalBalance: normalBalance(account.accountType) as any,
+        isActive: account.active,
+        parent: parentCode ? { connect: { code: parentCode } } : { disconnect: true },
+      },
+      create: {
+        code: account.accountCode,
+        name: account.accountName,
+        type: prismaAccountType(account.accountType) as any,
+        normalBalance: normalBalance(account.accountType) as any,
+        isActive: account.active,
+        isSystem: true,
+        currency: "PGK",
+        ...(parentCode ? { parent: { connect: { code: parentCode } } } : {}),
+      },
+    });
+  }
+
+  const accounts = await prisma.chartOfAccounts.findMany({ select: { id: true, code: true } });
+  const idByCode = new Map(accounts.map((account) => [account.code, account.id]));
+  const parentCodes = new Set(
+    INITIAL_CHART_OF_ACCOUNTS.map((account) => account.parentAccount.replace(/^ACC-/, "")).filter(Boolean),
+  );
+  for (const account of INITIAL_CHART_OF_ACCOUNTS) {
+    if (parentCodes.has(account.accountCode)) continue;
+    const leafId = idByCode.get(account.accountCode);
+    const replacementParentId = idByCode.get(account.parentAccount.replace(/^ACC-/, ""));
+    if (!leafId || !replacementParentId) continue;
+    await prisma.chartOfAccounts.updateMany({
+      where: { parentId: leafId, code: { notIn: [...canonicalCodes] } },
+      data: { parentId: replacementParentId },
+    });
+  }
+}
+
 async function ensureOnce() {
+  await reconcileLocalChartOfAccounts();
   for (const account of REQUIRED_ACCOUNTS) {
     const found = await findRecords("Accounts", { accountId: account.accountId }, 1);
     if (!found.rows.length) await appendRecord("Accounts", account, "accounting-0.5-bootstrap");

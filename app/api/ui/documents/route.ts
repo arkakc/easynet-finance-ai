@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
-import { backendConfigStatus, findRecords, listTable } from "@/lib/backend/apps-script";
+import { findRecords, listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 function localDocument(document: {
@@ -39,7 +39,9 @@ export async function GET(request: NextRequest) {
   try {
     await requirePermission("accounts.read");
     const documentId = String(request.nextUrl.searchParams.get("documentId") || "").trim();
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       if (documentId) {
         const document = await prisma.document.findFirst({

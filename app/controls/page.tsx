@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { backendConfigStatus, listTable } from "@/lib/backend/apps-script";
+import { listTable } from "@/lib/backend/apps-script";
 import { round2, signedMovementValue } from "@/lib/accounting/inventory";
+import { buildFinancialReconciliationSnapshot } from "@/lib/system/financial-reconciliation";
 import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,12 @@ type MatchCheck = { bill: Bill; po?: PO; lineSummary: string[]; problems: string
 
 const n = (value: unknown) => Number(value || 0);
 const money = (value: unknown) => `K${n(value).toFixed(2)}`;
+const currencyMoney = (value: unknown, currency: string) =>
+  new Intl.NumberFormat("en-PG", {
+    style: "currency",
+    currency: currency || "PGK",
+    minimumFractionDigits: 2,
+  }).format(n(value));
 const normalized = (value: unknown) => String(value || "").trim().toUpperCase();
 const isDraft = (value: unknown) => normalized(value) === "DRAFT";
 const isExcluded = (value: unknown) => ["CANCELLED", "REVERSED"].includes(normalized(value));
@@ -43,55 +50,138 @@ function aggregateQty(rows: Array<{ itemId: string; qty: number | string }>) {
 }
 
 export default async function ControlsPage() {
-  const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+  // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
 
   if (!backendConfigured) {
-    const [invoices, bills, purchaseOrders, expenses, journals, journalLines] = await Promise.all([
-      prisma.invoice.findMany({ where: { status: { notIn: ["CANCELLED", "VOID"] } } }),
-      prisma.supplierBill.findMany({ where: { status: { not: "CANCELLED" } } }),
-      prisma.purchaseOrder.findMany({ where: { status: { notIn: ["BILLED", "CLOSED", "Cancelled"] } } }),
-      prisma.expense.findMany(),
-      prisma.journalHeader.findMany(),
-      prisma.journalLine.findMany({ include: { journal: true } }),
+    const asOf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Pacific/Port_Moresby",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
+    const [snapshot, purchaseOrders, expenses] = await Promise.all([
+      buildFinancialReconciliationSnapshot({
+        asOf,
+        generatedBy: "finance-control-centre",
+        source: "local-sqlite",
+      }),
+      prisma.purchaseOrder.findMany({
+        where: { status: { notIn: ["BILLED", "CLOSED", "Cancelled"] } },
+        select: { total: true },
+      }),
+      prisma.expense.findMany({ select: { total: true } }),
     ]);
-    const total = (rows: Array<{ total?: unknown; outstanding?: unknown; taxTotal?: unknown }>, field: "total" | "outstanding" | "taxTotal") =>
-      rows.reduce((sum, row) => sum + n(row[field]), 0);
-    const postedJournals = journals.filter((journal) => journal.status === "POSTED").length;
-    const unbalancedJournals = journals.filter((journal) => Math.abs(n(journal.totalDebit) - n(journal.totalCredit)) > tolerance).length;
-    const postedLines = journalLines.filter((line) => line.journal.status === "POSTED").length;
+
+    const poCommitments = purchaseOrders.reduce((sum, row) => sum + n(row.total), 0);
+    const expenseTotal = expenses.reduce((sum, row) => sum + n(row.total), 0);
+    const reconciliationRows = [
+      {
+        label: `Accounts Receivable (${snapshot.receivables.controlAccount})`,
+        gl: snapshot.receivables.glBalance,
+        comparison: snapshot.receivables.outstanding,
+        difference: snapshot.receivables.difference,
+        matched: snapshot.receivables.matched,
+      },
+      {
+        label: `Accounts Payable (${snapshot.payables.controlAccount})`,
+        gl: snapshot.payables.glBalance,
+        comparison: snapshot.payables.outstanding,
+        difference: snapshot.payables.difference,
+        matched: snapshot.payables.matched,
+      },
+      {
+        label: `Inventory (${snapshot.inventory.controlAccount})`,
+        gl: snapshot.inventory.glBalance,
+        comparison: snapshot.inventory.estimatedValue,
+        difference: snapshot.inventory.difference,
+        matched: snapshot.inventory.matched,
+      },
+    ];
+    const reconciliationExceptions = reconciliationRows.filter((row) => !row.matched).length
+      + (snapshot.banking.reconciliationsMatched ? 0 : 1);
 
     return <>
       <div className="page-head">
         <div>
           <h2>Finance Control Centre</h2>
-          <p className="small">Papua New Guinea financial reconciliation and double-entry balance validation.</p>
+          <p className="small">Posted-ledger reconciliation and reporting integrity as at {snapshot.asOf}.</p>
         </div>
         <div className="page-head-actions">
-          <details className="system-notice-tab">
-            <summary>
-              <span>ℹ️ System Notice</span>
-              <span className="notice-arrow">▾</span>
-            </summary>
-            <div className="system-notice-dropdown">
-              <strong>Database connected:</strong> The persistent Prisma database is the active source for local finance controls.
-            </div>
-          </details>
+          <Link className="button-link secondary-link" href="/reports">Financial Statements</Link>
+          <Link className="button-link secondary-link" href="/banking">Bank Reconciliation</Link>
+          <span className="badge">{snapshot.currency}</span>
         </div>
       </div>
+
       <div className="grid">
-        <div className="card"><div className="label">GST Status</div><div className="value small-value">LOCAL</div></div>
-        <div className="card"><div className="label">Invoices</div><div className="value">{invoices.length}</div><div className="small">Outstanding: {money(total(invoices, "outstanding"))}</div></div>
-        <div className="card"><div className="label">Supplier Bills</div><div className="value">{bills.length}</div><div className="small">Outstanding: {money(total(bills, "outstanding"))}</div></div>
-        <div className="card"><div className="label">PO Commitments</div><div className="value">{money(total(purchaseOrders, "total"))}</div></div>
-        <div className="card"><div className="label">Expenses</div><div className="value">{money(total(expenses, "total"))}</div></div>
-        <div className="card"><div className="label">Posted Journals</div><div className="value">{postedJournals}</div><div className="small">Lines: {postedLines}</div></div>
-        <div className="card"><div className="label">Journal Exceptions</div><div className="value">{unbalancedJournals}</div></div>
-        <div className="card"><div className="label">GST on Invoices</div><div className="value">{money(total(invoices, "taxTotal"))}</div></div>
+        <div className="card"><div className="label">Ledger Status</div><div className="value small-value">{snapshot.controls.ledgerBalanced ? "BALANCED" : "REVIEW"}</div><div className="small">{snapshot.ledger.postedJournals} journals · {snapshot.ledger.journalLines} lines</div></div>
+        <div className="card"><div className="label">AR Outstanding</div><div className="value">{currencyMoney(snapshot.receivables.outstanding, snapshot.currency)}</div><div className="small">{snapshot.receivables.documents} documents</div></div>
+        <div className="card"><div className="label">AP Outstanding</div><div className="value">{currencyMoney(snapshot.payables.outstanding, snapshot.currency)}</div><div className="small">{snapshot.payables.documents} documents</div></div>
+        <div className="card"><div className="label">Inventory Value</div><div className="value">{currencyMoney(snapshot.inventory.estimatedValue, snapshot.currency)}</div><div className="small">{snapshot.inventory.stockLines} warehouse/item positions</div></div>
+        <div className="card"><div className="label">Bank GL</div><div className="value">{currencyMoney(snapshot.banking.glBookBalance, snapshot.currency)}</div><div className="small">{snapshot.banking.mappedAccounts}/{snapshot.banking.activeAccounts} accounts mapped</div></div>
+        <div className="card"><div className="label">Reconciliation Exceptions</div><div className="value">{reconciliationExceptions}</div></div>
+        <div className="card"><div className="label">Unreconciled Bank Rows</div><div className="value">{snapshot.banking.unreconciledTransactions}</div></div>
+        <div className="card"><div className="label">PO Commitments</div><div className="value">{currencyMoney(poCommitments, snapshot.currency)}</div></div>
+        <div className="card"><div className="label">Expenses</div><div className="value">{currencyMoney(expenseTotal, snapshot.currency)}</div></div>
       </div>
+
+      <section className="panel table-wrap">
+        <div className="form-title-row">
+          <div>
+            <h3>Subledger ↔ General Ledger Controls</h3>
+            <p className="small">These controls are reconstructed at the selected snapshot date from posted journals and dated operational events.</p>
+          </div>
+          <span className="auto-badge">{snapshot.controls.migrationReady ? "ALL CLEAR" : "REVIEW REQUIRED"}</span>
+        </div>
+        <table className="data-table">
+          <thead><tr><th>Control</th><th>GL Balance</th><th>Operational Value</th><th>Difference</th><th>Result</th></tr></thead>
+          <tbody>
+            {reconciliationRows.map((row) => <tr key={row.label}>
+              <td><strong>{row.label}</strong></td>
+              <td>{currencyMoney(row.gl, snapshot.currency)}</td>
+              <td>{currencyMoney(row.comparison, snapshot.currency)}</td>
+              <td>{currencyMoney(row.difference, snapshot.currency)}</td>
+              <td>{row.matched ? <strong>PASS</strong> : <span className="warning-text">REVIEW</span>}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="panel table-wrap">
+        <div className="form-title-row">
+          <div><h3>Bank Reconciliation Integrity</h3><p className="small">A completed reconciliation is rechecked against the ledger at its original period end. Backdated postings create drift and are flagged.</p></div>
+          <span className="auto-badge">{snapshot.banking.reconciliationsMatched ? "PASS" : "REVIEW"}</span>
+        </div>
+        <table className="data-table">
+          <thead><tr><th>Bank</th><th>Currency</th><th>GL Account</th><th>Last Reconciled</th><th>Stored Book</th><th>Recomputed Book</th><th>Drift</th><th>Result</th></tr></thead>
+          <tbody>
+            {snapshot.banking.accounts.map((row) => <tr key={row.bankAccountId}>
+              <td><strong>{row.bankCode}</strong></td>
+              <td>{row.currency}</td>
+              <td>{row.mappedAccountCode || "—"}</td>
+              <td>{row.latestPeriodEnd || "—"}</td>
+              <td>{row.storedBookBalance === null ? "—" : currencyMoney(row.storedBookBalance, row.currency)}</td>
+              <td>{row.recomputedBookBalance === null ? "—" : currencyMoney(row.recomputedBookBalance, row.currency)}</td>
+              <td>{currencyMoney(row.drift, row.currency)}</td>
+              <td>{row.matched ? <strong>PASS</strong> : <span className="warning-text">REVIEW</span>}</td>
+            </tr>)}
+            {!snapshot.banking.accounts.length && <tr><td colSpan={8}>No active bank accounts configured.</td></tr>}
+          </tbody>
+        </table>
+      </section>
+
       <section className="panel">
-        <h3>Control status</h3>
-        <p>Persistent database records are available for review. The control centre uses the Prisma database as its local source of truth.</p>
-        <div className="button-row"><Link className="link-button" href="/dashboard">Back to Dashboard</Link><Link className="link-button secondary-link" href="/journals">Open Journals</Link></div>
+        <h3>Control Exceptions</h3>
+        {snapshot.controls.exceptions.length
+          ? <ul>{snapshot.controls.exceptions.map((message) => <li key={message}>{message}</li>)}</ul>
+          : <p>No reconciliation exceptions detected.</p>}
+        <div className="button-row">
+          <Link className="link-button" href="/dashboard">Back to Dashboard</Link>
+          <Link className="link-button secondary-link" href="/journals">Open Journals</Link>
+        </div>
       </section>
     </>;
   }

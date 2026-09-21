@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 const closeSchema = z.object({
   poId: z.string().trim().min(1),
@@ -29,15 +29,7 @@ function pngYear() {
 }
 
 async function nextPoNumber() {
-  const rows = await listTable<any>("PurchaseOrders", 500, 0);
-  const prefix = `PO-${pngYear()}-`;
-  const max = rows.rows.reduce((current, row) => {
-    const value = String(row.poNumber || "");
-    if (!value.startsWith(prefix) || value.startsWith(`SUPQ-${pngYear()}-`)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return documentSeriesId("PO", Number(pngYear()));
 }
 
 async function buildState(poId: string) {
@@ -156,7 +148,7 @@ export async function POST(request: Request) {
 
     let replacement = state.replacement;
     if (!replacement) {
-      const newPoId = `PO-${pngYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+      const newPoId = documentSeriesId("PO", Number(pngYear()));
       const newPoNumber = await nextPoNumber();
       const netAmount = round2(state.remainingLines.reduce((sum: number, row: any) => sum + Number(row.netAmount || 0), 0));
       const gstAmount = round2(state.remainingLines.reduce((sum: number, row: any) => sum + Number(row.gstAmount || 0), 0));
@@ -192,7 +184,7 @@ export async function POST(request: Request) {
 
     if (!state.closure) {
       await appendRecord("Exceptions", {
-        exceptionId: `PO-CLOSE-${randomUUID().slice(0, 12).toUpperCase()}`,
+        exceptionId: documentSeriesId("PC", Number(pngYear())),
         severity: "INFO",
         module: "PURCHASE",
         recordType: "PurchaseOrderClosure",

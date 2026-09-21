@@ -203,18 +203,19 @@ export function generateDocumentNumber(
 ): string {
   const yearStr = year.toString();
   const seqStr = String(sequence).padStart(5, '0');
-  return `${prefix}-${yearStr}-${seqStr}`;
+  const prefixStr = String(prefix || 'DO').replace(/[^A-Za-z0-9]/g, '').toUpperCase().padEnd(2, 'X').slice(0, 2);
+  return `${prefixStr}-${seqStr}-${yearStr}`;
 }
 
 // Parse document number to extract components
 export function parseDocumentNumber(docNumber: string): { prefix: string; year: number; sequence: number } | null {
-  const match = docNumber.match(/^(.+)-(\d{4})-(\d+)$/);
+  const match = docNumber.match(/^([A-Z0-9]{2})-(\d{5})-(\d{4})$/i);
   if (!match) return null;
 
   return {
-    prefix: match[1],
-    year: parseInt(match[2], 10),
-    sequence: parseInt(match[3], 10),
+    prefix: match[1].toUpperCase(),
+    sequence: parseInt(match[2], 10),
+    year: parseInt(match[3], 10),
   };
 }
 

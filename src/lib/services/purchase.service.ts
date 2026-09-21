@@ -7,6 +7,7 @@
 import { prisma } from '@/lib/prisma';
 import { getNextDocumentNumber } from './document.service';
 import { calculateTotals, calculateLineTotals } from '@/lib/utils';
+import { documentSeriesId } from '@/lib/accounting/document-numbering';
 import { z } from 'zod';
 import { POStatus, BillStatus } from '@prisma/client';
 
@@ -122,7 +123,7 @@ export async function allocateLandedCost(data: z.infer<typeof createLandedCostSc
   const totalValue = data.items.reduce((sum, item) => sum + item.quantity * item.baseCost, 0);
   const totalQty = data.items.reduce((sum, item) => sum + item.quantity, 0);
 
-  const voucherCode = `LCV-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
+  const voucherCode = documentSeriesId('Landed Cost Voucher');
 
   // Distribute landed cost to each item
   const allocatedItems = data.items.map((item) => {
@@ -219,7 +220,7 @@ export async function recordSupplierPayment(
 
   const payment = await prisma.payment.create({
     data: {
-      code: `PAY-SUP-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`,
+      code: documentSeriesId('Supplier Payment'),
       type: 'SUPPLIER_PAYMENT',
       date: paymentData.paymentDate,
       amount: payAmount,

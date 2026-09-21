@@ -22,6 +22,11 @@ model User {
   role              Role        @default(USER)
   status            UserStatus  @default(ACTIVE)
   lastLoginAt       DateTime?
+  lastFailedLoginAt DateTime?
+  failedLoginCount  Int         @default(0)
+  lockedUntil       DateTime?
+  sessionVersion    Int         @default(1)
+  passwordChangedAt DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   accounts          Account[]
@@ -86,6 +91,18 @@ model VerificationToken {
   @@unique([token, identifier])
 }
 
+model AuthThrottle {
+  id              String   @id @default(cuid())
+  keyHash         String   @unique
+  attempts        Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  blockedUntil    DateTime?
+  updatedAt       DateTime @updatedAt
+
+  @@index([blockedUntil])
+  @@index([updatedAt])
+}
+
 // ============================================
 // BUSINESS ENTITIES - MASTERS
 // ============================================
@@ -148,70 +165,74 @@ model Supplier {
 }
 
 model FixedAsset {
-  id                   String   @id @default(cuid())
-  assetId              String   @unique
-  assetName            String
-  assetCategory        String
-  purchaseDate         DateTime
-  supplierId           String?
-  cost                 Decimal
-  serialNumber         String?
-  location             String?
-  assignedTo           String?
-  usefulLifeMonths     Int      @default(36)
-  accumulatedDepreciation Decimal @default(0)
-  netBookValue         Decimal
-  status               String   @default("ACTIVE")
-  sourceDocumentId     String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  supplier             Supplier? @relation(fields: [supplierId], references: [id])
+  id                      String    @id @default(cuid())
+  assetId                 String    @unique
+  assetName               String
+  assetCategory           String
+  purchaseDate            DateTime
+  supplierId              String?
+  cost                    Decimal
+  serialNumber            String?
+  location                String?
+  assignedTo              String?
+  usefulLifeMonths        Int       @default(36)
+  accumulatedDepreciation Decimal   @default(0)
+  netBookValue            Decimal
+  status                  String    @default("ACTIVE")
+  sourceDocumentId        String?
+  acquisitionJournalId    String?
+  depreciationJournalId   String?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  supplier                Supplier? @relation(fields: [supplierId], references: [id])
 
   @@index([supplierId])
   @@index([status])
+  @@index([acquisitionJournalId])
+  @@index([depreciationJournalId])
 }
 
 model Loan {
-   id                   String   @id @default(cuid())
-   code                 String   @unique
-   lenderName           String
-   loanDate             DateTime
-   principal            Decimal
-   interestRate         Decimal  @default(0)
-   contractInterest     Decimal  @default(0)
-   principalRepaid      Decimal  @default(0)
-   interestPaid         Decimal  @default(0)
-   principalOutstanding Decimal
-   interestOutstanding  Decimal  @default(0)
-   expectedSettlement   Decimal
-   lastAccruedThrough   DateTime?
-   firstAccrualDate     DateTime?
-   status               String   @default("ACTIVE")
-   repaymentCondition   String?
-   interestMethod       String   @default("COMPOUND")
-   interestFrequency    String   @default("MONTHLY_ANNIVERSARY")
-   createdAt            DateTime @default(now())
-   updatedAt            DateTime @updatedAt
-   events               LoanEvent[]
+  id                   String      @id @default(cuid())
+  code                 String      @unique
+  lenderName           String
+  loanDate             DateTime
+  principal            Decimal
+  interestRate         Decimal     @default(0)
+  contractInterest     Decimal     @default(0)
+  principalRepaid      Decimal     @default(0)
+  interestPaid         Decimal     @default(0)
+  principalOutstanding Decimal
+  interestOutstanding  Decimal     @default(0)
+  expectedSettlement   Decimal
+  lastAccruedThrough   DateTime?
+  firstAccrualDate     DateTime?
+  status               String      @default("ACTIVE")
+  repaymentCondition   String?
+  interestMethod       String      @default("COMPOUND")
+  interestFrequency    String      @default("MONTHLY_ANNIVERSARY")
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  events               LoanEvent[]
 
-   @@index([status])
-   @@index([loanDate])
+  @@index([status])
+  @@index([loanDate])
 }
 
 model LoanEvent {
-   id              String   @id @default(cuid())
-   loanId          String
-   eventType       String
-   eventDate       DateTime
-   principalAmount Decimal  @default(0)
-   interestAmount  Decimal  @default(0)
-   cashAmount      Decimal  @default(0)
-   journalId       String?
-   reference       String?
-   createdAt       DateTime @default(now())
-   loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  id              String   @id @default(cuid())
+  loanId          String
+  eventType       String
+  eventDate       DateTime
+  principalAmount Decimal  @default(0)
+  interestAmount  Decimal  @default(0)
+  cashAmount      Decimal  @default(0)
+  journalId       String?
+  reference       String?
+  createdAt       DateTime @default(now())
+  loan            Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
 
-   @@index([loanId, eventDate])
+  @@index([loanId, eventDate])
 }
 
 model Contact {
@@ -275,31 +296,32 @@ enum ProjectStatus {
 // INVENTORY - ITEMS & STOCK
 // ============================================
 model Item {
-  id                 String          @id @default(cuid())
-  code               String          @unique // ITM-00001
+  id                 String           @id @default(cuid())
+  code               String           @unique // ITM-00001
   name               String
   description        String?
   category           String?
-  sku                String?         @unique
-  barcode            String?         @unique
-  unit               String          @default("PCS") // PCS, KG, L, M, HR, etc.
-  type               ItemType        @default(GOOD)
+  sku                String?          @unique
+  barcode            String?          @unique
+  unit               String           @default("PCS") // PCS, KG, L, M, HR, etc.
+  type               ItemType         @default(GOOD)
   purchasePrice      Decimal?
   sellPrice          Decimal?
   costAccount        String? // GL account for cost
   revenueAccount     String? // GL account for revenue
   taxCode            String? // Tax classification
-  isActive           Boolean         @default(true)
-  trackQty           Boolean         @default(false)
+  isActive           Boolean          @default(true)
+  trackQty           Boolean          @default(false)
   minStock           Decimal?
   maxStock           Decimal?
   inventoryAsset     String? // GL asset account
   tags               String?
   imageUrl           String?
   notes              String?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   stock              StockLevel[]
+  warehouseBalances  WarehouseStockBalance[]
   purchaseOrderLines POLine[]
   quoteLines         QuoteLine[]
   invoiceLines       InvoiceLine[]
@@ -321,12 +343,47 @@ model StockLevel {
   itemId      String    @unique
   quantity    Decimal   @default(0)
   reserved    Decimal   @default(0)
-  available   Decimal   @default(0) // computed: quantity - reserved
+  available   Decimal   @default(0) // Legacy company-wide snapshot; warehouse stock uses WarehouseStockBalance
   lastCounted DateTime?
   lastUpdated DateTime  @default(now())
   item        Item      @relation(fields: [itemId], references: [id])
 
   @@map("stock_levels")
+}
+
+model Warehouse {
+  id          String                  @id @default(cuid())
+  code        String                  @unique
+  name        String
+  location    String?
+  isDefault   Boolean                 @default(false)
+  isActive    Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  balances    WarehouseStockBalance[]
+  movements   StockMovement[]
+
+  @@index([isActive])
+  @@index([isDefault])
+}
+
+model WarehouseStockBalance {
+  id            String    @id @default(cuid())
+  itemId        String
+  warehouseId   String
+  quantity      Decimal   @default(0)
+  reserved      Decimal   @default(0)
+  available     Decimal   @default(0)
+  valuationRate Decimal   @default(0)
+  stockValue    Decimal   @default(0)
+  lastCounted   DateTime?
+  lastUpdated   DateTime  @updatedAt
+  item          Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+
+  @@unique([itemId, warehouseId])
+  @@index([warehouseId])
+  @@index([itemId])
 }
 
 model StockMovement {
@@ -338,27 +395,42 @@ model StockMovement {
   totalCost     Decimal?
   referenceType String? // PO, SO, ADJUSTMENT, SALE, PURCHASE, TRANSFER
   referenceId   String?
+  transferId    String?
+  journalId     String?
   projectId     String?
   warehouseId   String?
   note          String?
   createdAt     DateTime     @default(now())
   createdBy     String // User ID
   item          Item         @relation(fields: [itemId], references: [id])
+  warehouse     Warehouse?   @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
   @@index([itemId])
+  @@index([itemId, warehouseId])
+  @@index([warehouseId])
+  @@index([transferId])
   @@index([referenceType, referenceId])
+  @@index([journalId])
   @@index([createdAt])
 }
 
 enum MovementType {
   PURCHASE_IN
+  PURCHASE_RECEIPT
+  SALES_DELIVERY
+  SALES_ISSUE
+  SALES_ISSUE_ROLLBACK
   SALE_OUT
+  PROJECT_ISSUE
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
   TRANSFER_IN
   TRANSFER_OUT
   RETURN_IN
   RETURN_OUT
+  LANDED_COST
+  REVALUATION
+  NRV_WRITEDOWN
   COUNTED
 }
 
@@ -375,6 +447,10 @@ model Quote {
   status               QuoteStatus @default(DRAFT)
   currency             String      @default("PGK")
   exchangeRate         Decimal?
+  baseSubtotal         Decimal     @default(0)
+  baseTaxTotal         Decimal     @default(0)
+  baseDiscountTotal    Decimal     @default(0)
+  baseTotal            Decimal     @default(0)
   subtotal             Decimal     @default(0)
   taxTotal             Decimal     @default(0)
   discountTotal        Decimal     @default(0)
@@ -385,6 +461,7 @@ model Quote {
   expiresAt            DateTime? // for status transitions
   convertedToInvoiceId String?
   convertedAt          DateTime?
+  sourceDocId          String? // Source Sales Quotation when this row represents a Sales Order
   createdBy            String
   updatedBy            String?
   createdAt            DateTime    @default(now())
@@ -397,12 +474,17 @@ model Quote {
   @@index([customerId])
   @@index([status])
   @@index([code])
+  @@index([sourceDocId])
 }
 
 enum QuoteStatus {
   DRAFT
   SENT
   ACCEPTED
+  PART_DELIVERED
+  DELIVERED
+  PART_INVOICED
+  INVOICED
   REJECTED
   EXPIRED
   CONVERTED
@@ -444,6 +526,12 @@ model Invoice {
   status              InvoiceStatus @default(DRAFT)
   currency            String        @default("PGK")
   exchangeRate        Decimal?
+  baseSubtotal        Decimal       @default(0)
+  baseTaxTotal        Decimal       @default(0)
+  baseDiscountTotal   Decimal       @default(0)
+  baseTotal           Decimal       @default(0)
+  baseAmountPaid      Decimal       @default(0)
+  baseOutstanding     Decimal       @default(0)
   subtotal            Decimal       @default(0)
   taxTotal            Decimal       @default(0)
   discountTotal       Decimal       @default(0)
@@ -473,6 +561,7 @@ model Invoice {
   project             Project?      @relation(fields: [projectId], references: [id])
   lines               InvoiceLine[]
   payments            Payment[]
+  paymentAllocations  PaymentAllocation[]
   originalCreditNotes CreditNote[]  @relation("OriginalInvoice")
   quotes              Quote[]
 
@@ -533,6 +622,11 @@ model PurchaseOrder {
   status          POStatus      @default(DRAFT)
   currency        String        @default("PGK")
   exchangeRate    Decimal?
+  baseSubtotal    Decimal       @default(0)
+  baseTaxTotal    Decimal       @default(0)
+  baseFreight     Decimal       @default(0)
+  baseDiscountTotal Decimal     @default(0)
+  baseTotal       Decimal       @default(0)
   subtotal        Decimal       @default(0)
   taxTotal        Decimal       @default(0)
   freight         Decimal       @default(0)
@@ -622,43 +716,51 @@ enum GRStatus {
 }
 
 model SupplierBill {
-  id              String         @id @default(cuid())
-  code            String         @unique // BILL-2024-00001
-  supplierId      String
-  projectId       String?
-  billDate        DateTime       @default(now())
-  dueDate         DateTime?
-  status          BillStatus     @default(DRAFT)
-  currency        String         @default("PGK")
-  exchangeRate    Decimal?
-  subtotal        Decimal        @default(0)
-  taxTotal        Decimal        @default(0)
-  discountTotal   Decimal        @default(0)
-  freight         Decimal        @default(0)
-  total           Decimal        @default(0)
-  amountPaid      Decimal        @default(0)
-  outstanding     Decimal        @default(0)
-  notes           String?
-  poReference     String? // PO reference
-  orderId         String?        @unique // PO ID
-  shippingAddress String?
-  billingAddress  String?
-  sourceDocId     String?        @unique // Original PO or supplier quote
-  journalId       String? // Accounting journal reference
-  glPosted        Boolean        @default(false)
-  taxReportRef    String?
-  createdBy       String
-  approvedBy      String?
-  approvedAt      DateTime?
-  updatedBy       String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  supplier        Supplier       @relation(fields: [supplierId], references: [id])
-  project         Project?       @relation(fields: [projectId], references: [id])
-  order           PurchaseOrder? @relation("SupplierBillToPO", fields: [orderId], references: [id])
-  lines           BillLine[]
-  payments        Payment[]      @relation("SupplierBillPayments")
-  refunds         Refund[]
+  id                 String              @id @default(cuid())
+  code               String              @unique // BILL-2024-00001
+  supplierId         String
+  projectId          String?
+  billDate           DateTime            @default(now())
+  dueDate            DateTime?
+  status             BillStatus          @default(DRAFT)
+  currency           String              @default("PGK")
+  exchangeRate       Decimal?
+  baseSubtotal       Decimal             @default(0)
+  baseTaxTotal       Decimal             @default(0)
+  baseDiscountTotal  Decimal             @default(0)
+  baseFreight        Decimal             @default(0)
+  baseTotal          Decimal             @default(0)
+  baseAmountPaid     Decimal             @default(0)
+  baseOutstanding    Decimal             @default(0)
+  subtotal           Decimal             @default(0)
+  taxTotal           Decimal             @default(0)
+  discountTotal      Decimal             @default(0)
+  freight            Decimal             @default(0)
+  total              Decimal             @default(0)
+  amountPaid         Decimal             @default(0)
+  outstanding        Decimal             @default(0)
+  notes              String?
+  poReference        String? // PO reference
+  orderId            String?             @unique // PO ID
+  shippingAddress    String?
+  billingAddress     String?
+  sourceDocId        String?             @unique // Original PO or supplier quote
+  journalId          String? // Accounting journal reference
+  glPosted           Boolean             @default(false)
+  taxReportRef       String?
+  createdBy          String
+  approvedBy         String?
+  approvedAt         DateTime?
+  updatedBy          String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  supplier           Supplier            @relation(fields: [supplierId], references: [id])
+  project            Project?            @relation(fields: [projectId], references: [id])
+  order              PurchaseOrder?      @relation("SupplierBillToPO", fields: [orderId], references: [id])
+  lines              BillLine[]
+  payments           Payment[]           @relation("SupplierBillPayments")
+  paymentAllocations PaymentAllocation[]
+  refunds            Refund[]
   landedCostVouchers LandedCostVoucher[]
 
   @@index([supplierId])
@@ -711,6 +813,7 @@ model Payment {
   type             PaymentType
   date             DateTime      @default(now())
   amount           Decimal
+  baseAmount       Decimal       @default(0)
   currency         String        @default("PGK")
   exchangeRate     Decimal?
   paymentMethod    String // CASH, BANK, CHECK, TRANSFER, CARD, etc.
@@ -720,13 +823,15 @@ model Payment {
   notes            String?
   customerId       String?
   supplierId       String?
-  invoiceId        String? // Against invoice
-  billId           String?       @unique // Against bill
+  invoiceId        String? // Legacy draft intent only; posted settlement authority is PaymentAllocation
+  billId           String? // Legacy draft intent only; posted settlement authority is PaymentAllocation
   creditNoteId     String?
   projectId        String?
   depositAccount   String? // Bank account
   checkNumber      String?
   clearanceDate    DateTime?
+  sourceDocId      String? // Quotation/PO source for an advance or audit chain
+  journalId        String? // Posted accounting journal
   s65aDeduction    Decimal       @default(0) // Section 65A GST withheld by customer
   bptDeduction     Decimal       @default(0) // 3% Business Payments Tax withheld from subcontractor
   withholdingTax   Decimal       @default(0)
@@ -742,11 +847,14 @@ model Payment {
   creditNote       CreditNote?   @relation("CreditNoteUsedInPayment", fields: [creditNoteId], references: [id])
   bill             SupplierBill? @relation("SupplierBillPayments", fields: [billId], references: [id])
   project          Project?      @relation(fields: [projectId], references: [id])
+  allocations      PaymentAllocation[]
 
   @@index([customerId])
   @@index([supplierId])
   @@index([invoiceId])
   @@index([billId])
+  @@index([sourceDocId])
+  @@index([journalId])
   @@index([date])
 }
 
@@ -770,6 +878,51 @@ enum PaymentStatus {
   REVERSED
   FAILED
   CANCELLED
+}
+
+enum PaymentAllocationType {
+  DIRECT
+  ADVANCE
+  MIGRATED
+}
+
+enum PaymentAllocationStatus {
+  POSTED
+  REVERSED
+}
+
+model PaymentAllocation {
+  id                String                  @id @default(cuid())
+  code              String                  @unique
+  paymentId         String
+  invoiceId         String?
+  billId            String?
+  allocationDate    DateTime
+  amount            Decimal
+  baseAmount        Decimal                 @default(0)
+  currency          String                  @default("PGK")
+  exchangeRate      Decimal?
+  realizedFx        Decimal                 @default(0)
+  allocationType    PaymentAllocationType
+  status            PaymentAllocationStatus @default(POSTED)
+  journalId         String?
+  reversalJournalId String?
+  idempotencyKey    String?                 @unique
+  createdBy         String
+  reversedBy        String?
+  reversalDate      DateTime?
+  reversedAt        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  payment           Payment                 @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoice           Invoice?                @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  bill              SupplierBill?           @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId, status])
+  @@index([invoiceId, status])
+  @@index([billId, status])
+  @@index([allocationDate])
+  @@index([journalId])
 }
 
 model CreditNote {
@@ -953,11 +1106,19 @@ model BankTransaction {
   type             BankTransactionType
   description      String
   amount           Decimal
+  fingerprint      String?             @unique // Stable bank-account + statement-row identity
+  statementBalance Decimal? // Running balance supplied by the bank
+  sourceFile       String? // Original CSV/XLS/XLSX file name
   currency         String              @default("PGK")
   memo             String?
   referenceNumber  String? // Check #, transaction reference
   category         String?
   isReconciled     Boolean             @default(false)
+  matchStatus      BankMatchStatus     @default(UNMATCHED)
+  matchedJournalId String?
+  matchNotes       String?
+  matchedBy        String?
+  matchedAt        DateTime?
   reconciliationId String?
   matchedPaymentId String?
   matchedInvoiceId String?
@@ -975,6 +1136,13 @@ model BankTransaction {
   @@index([matchedPaymentId])
   @@index([matchedInvoiceId])
   @@index([matchedBillId])
+  @@index([fingerprint])
+}
+
+enum BankMatchStatus {
+  UNMATCHED
+  MATCHED
+  REVIEWED
 }
 
 enum BankTransactionType {
@@ -1063,30 +1231,32 @@ enum NormalBalance {
 }
 
 model JournalHeader {
-  id                String           @id @default(cuid())
-  code              String           @unique // JRN-2024-00001
-  date              DateTime
-  description       String
-  reference         String?
-  sourceDocType     String? // INVOICE, BILL, PAYMENT, EXPENSE, ADJUSTMENT, etc.
-  sourceDocId       String?          @unique // Original document ID
+  id                  String           @id @default(cuid())
+  code                String           @unique // JRN-2024-00001
+  date                DateTime
+  description         String
+  reference           String?
+  sourceDocType       String? // INVOICE, BILL, PAYMENT, EXPENSE, ADJUSTMENT, etc.
+  sourceDocId         String?          @unique // Original document ID
   reversalOfJournalId String?
-  status            JournalStatus    @default(PENDING)
-  currency          String           @default("PGK")
-  exchangeRate      Decimal?
-  totalDebit        Decimal          @default(0)
-  totalCredit       Decimal          @default(0)
-  isBalanced        Boolean          @default(false)
-  createdBy         String
-  approvedBy        String?
-  approvedAt        DateTime?
-  postedAt          DateTime?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  lines             JournalLine[]
-  sourceDoc         Document?        @relation(fields: [sourceDocId], references: [id])
-  chartOfAccounts   ChartOfAccounts? @relation(fields: [chartOfAccountsId], references: [id])
-  chartOfAccountsId String?
+  status              JournalStatus    @default(PENDING)
+  currency            String           @default("PGK") // source transaction currency
+  baseCurrency        String           @default("PGK")
+  exchangeRate        Decimal? // base currency units per 1 source-currency unit
+  totalDebit          Decimal          @default(0) // base currency
+  totalCredit         Decimal          @default(0) // base currency
+  transactionTotalDebit Decimal        @default(0)
+  transactionTotalCredit Decimal       @default(0)
+  isBalanced          Boolean          @default(false)
+  createdBy           String
+  approvedBy          String?
+  approvedAt          DateTime?
+  postedAt            DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  lines               JournalLine[]
+  chartOfAccounts     ChartOfAccounts? @relation(fields: [chartOfAccountsId], references: [id])
+  chartOfAccountsId   String?
 
   @@index([date])
   @@index([status])
@@ -1108,10 +1278,15 @@ model JournalLine {
   lineNo      Int
   accountId   String
   description String
-  debit       Decimal         @default(0)
-  credit      Decimal         @default(0)
-  amount      Decimal         @default(0) // abs value
-  currency    String          @default("PGK")
+  debit       Decimal         @default(0) // base currency
+  credit      Decimal         @default(0) // base currency
+  amount      Decimal         @default(0) // base abs value
+  currency    String          @default("PGK") // base currency
+  transactionCurrency String  @default("PGK")
+  exchangeRate Decimal?
+  transactionDebit Decimal    @default(0)
+  transactionCredit Decimal   @default(0)
+  transactionAmount Decimal   @default(0)
   projectId   String?
   customerId  String?
   supplierId  String?
@@ -1129,6 +1304,25 @@ model JournalLine {
   @@index([projectId])
   @@index([customerId])
   @@index([supplierId])
+}
+
+model CostCenter {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  name        String
+  parentId    String?
+  isGroup     Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  company     String?
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  parent      CostCenter?  @relation("CostCenterHierarchy", fields: [parentId], references: [id])
+  children    CostCenter[] @relation("CostCenterHierarchy")
+
+  @@index([parentId])
+  @@index([code])
+  @@index([isActive])
 }
 
 // ============================================
@@ -1157,7 +1351,6 @@ model Document {
   updatedAt        DateTime          @updatedAt
   creator          User              @relation("DocumentCreatedBy", fields: [createdBy], references: [id])
   approver         User?             @relation("DocumentApprovedBy", fields: [approvedBy], references: [id])
-  journal          JournalHeader?
   approvalRequests ApprovalRequest[]
 
   @@index([documentId, documentType])
@@ -1205,25 +1398,42 @@ model Favorite {
 // AUDIT & LOGGING
 // ============================================
 model AuditLog {
-  id          String   @id @default(cuid())
-  action      String // CREATE, UPDATE, DELETE, POST, APPROVE, REJECT, LOGIN, etc.
-  entityType  String // User, Invoice, Payment, Journal, etc.
-  entityId    String?
-  entityCode  String?
-  description String?
-  changes     String? // before/after for updates
-  userId      String
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
-  user        User?    @relation(fields: [userId], references: [id])
+  id            String   @id @default(cuid())
+  action        String // CREATE, UPDATE, DELETE, POST, APPROVE, REJECT, LOGIN, etc.
+  entityType    String // User, Invoice, Payment, Journal, Security, etc.
+  entityId      String?
+  entityCode    String?
+  description   String?
+  changes       String? // before/after for updates
+  metadata      String? // structured security/audit context
+  outcome       String   @default("SUCCESS")
+  requestId     String?
+  actorEmail    String?
+  userId        String?
+  ipAddress     String?
+  userAgent     String?
+  previousHash  String?
+  integrityHash String?  @unique
+  sequence      Int?     @unique
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
   @@index([action])
+  @@index([outcome])
   @@index([userId])
+  @@index([requestId])
   @@index([createdAt])
   @@index([entityType, entityCode])
 }
+model AuditChainState {
+  id            String   @id
+  nextSequence  Int      @default(0)
+  headHash      String?
+  integrityHash String?
+  updatedAt     DateTime @updatedAt
+}
+
 
 // ============================================
 // TIME & BILLING (for service businesses)
@@ -1314,6 +1524,93 @@ model GlobalSettings {
   updatedAt    DateTime @default(now())
 
   @@index([key])
+}
+
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  rateDate     DateTime
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal
+  source       String   @default("MANUAL")
+  isManual     Boolean  @default(true)
+  notes        String?
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([rateDate, fromCurrency, toCurrency])
+  @@index([fromCurrency, toCurrency, rateDate])
+}
+
+model FxRevaluation {
+  id                String              @id @default(cuid())
+  code              String              @unique
+  revaluationDate   DateTime
+  reversalDate      DateTime
+  baseCurrency      String
+  status            String              @default("POSTED")
+  totalGain         Decimal             @default(0)
+  totalLoss         Decimal             @default(0)
+  journalId         String              @unique
+  reversalJournalId String              @unique
+  createdBy         String
+  createdAt         DateTime            @default(now())
+  lines             FxRevaluationLine[]
+
+  @@unique([revaluationDate, baseCurrency])
+  @@index([revaluationDate])
+  @@index([status])
+}
+
+model FxRevaluationLine {
+  id                 String        @id @default(cuid())
+  revaluationId      String
+  documentType       String
+  documentId         String
+  documentNumber     String
+  partyType          String
+  partyId            String
+  projectId          String?
+  currency           String
+  outstandingAmount  Decimal
+  historicalBase     Decimal
+  closingRate        Decimal
+  closingBase        Decimal
+  baseDifference     Decimal
+  gainAmount         Decimal       @default(0)
+  lossAmount         Decimal       @default(0)
+  revaluation        FxRevaluation @relation(fields: [revaluationId], references: [id], onDelete: Cascade)
+
+  @@index([revaluationId])
+  @@index([documentType, documentId])
+  @@index([currency])
+}
+
+model AccountingPeriod {
+  id               String                 @id @default(cuid())
+  code             String                 @unique // YYYY-MM
+  name             String
+  startDate        DateTime
+  endDate          DateTime
+  status           AccountingPeriodStatus @default(OPEN)
+  closeReport      String?
+  previousLockDate String?
+  closedBy         String?
+  closedAt         DateTime?
+  reopenedBy       String?
+  reopenedAt       DateTime?
+  reopenReason     String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@unique([startDate, endDate])
+  @@index([status, endDate])
+}
+
+enum AccountingPeriodStatus {
+  OPEN
+  CLOSED
 }
 
 model UserPreferences {
@@ -1434,20 +1731,6 @@ model Currency {
   @@index([code])
 }
 
-model ExchangeRate {
-  id           String   @id @default(cuid())
-  fromCurrency String
-  toCurrency   String
-  rate         Decimal
-  rateDate     DateTime
-  source       String? // ECB, FIXER, MANUAL, etc.
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@unique([fromCurrency, toCurrency, rateDate])
-  @@index([rateDate])
-  @@index([fromCurrency, toCurrency])
-}
 
 // ============================================
 // TAXES
@@ -1641,4 +1924,3 @@ model PosSession {
   @@index([cashierId])
   @@index([status])
 }
-

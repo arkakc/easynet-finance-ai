@@ -1,6 +1,5 @@
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { listTable } from "@/lib/backend/apps-script";
-import { backendConfigStatus } from "@/lib/backend/apps-script";
 import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
 
@@ -40,7 +39,9 @@ export default async function LoansPage() {
   let loans: Loan[] = [];
   let error = "";
   try {
-    const backendConfigured = Object.values(backendConfigStatus()).some((service) => service.source !== "unconfigured");
+    // Core operational data is Prisma-only. Optional Apps Script integrations
+    // must never switch this route away from the authoritative database.
+    const backendConfigured = false;
     if (!backendConfigured) {
       const result = await prisma.loan.findMany({ orderBy: { createdAt: "desc" } });
       loans = result.map((loan) => ({
