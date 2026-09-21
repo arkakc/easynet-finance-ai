@@ -194,17 +194,38 @@ async function main() {
     }
 
     const firstSealed = await client.auditLog.findFirst({
-      where: { integrityHash: { not: null } },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      where: { integrityHash: { not: null }, sequence: { not: null } },
+      orderBy: { sequence: "asc" },
     });
     if (!firstSealed) throw new Error("Sealed audit event not found for tamper test");
+    const originalDescription = firstSealed.description;
     await client.auditLog.update({
       where: { id: firstSealed.id },
       data: { description: "TAMPERED AFTER SEAL" },
     });
     const tamperedIntegrity = await verifyAuditIntegrity(client);
     if (tamperedIntegrity.valid || tamperedIntegrity.brokenAtId !== firstSealed.id) {
-      throw new Error("Audit tampering was not detected");
+      throw new Error("Audit row modification was not detected");
+    }
+
+    await client.auditLog.update({
+      where: { id: firstSealed.id },
+      data: { description: originalDescription },
+    });
+    const restoredIntegrity = await verifyAuditIntegrity(client);
+    if (!restoredIntegrity.valid) {
+      throw new Error("Audit integrity did not recover after restoring the original sealed payload");
+    }
+
+    const latestSealed = await client.auditLog.findFirst({
+      where: { integrityHash: { not: null }, sequence: { not: null } },
+      orderBy: { sequence: "desc" },
+    });
+    if (!latestSealed) throw new Error("Latest sealed audit event not found for deletion test");
+    await client.auditLog.delete({ where: { id: latestSealed.id } });
+    const deletionIntegrity = await verifyAuditIntegrity(client);
+    if (deletionIntegrity.valid) {
+      throw new Error("Deletion of the latest sealed audit event was not detected");
     }
 
     const publicRequest = new NextRequest("https://erp.example.test/login");
@@ -277,6 +298,9 @@ async function main() {
         survivesFactoryReset: cleanIntegrity.valid,
         tamperDetected: !tamperedIntegrity.valid,
         brokenAtId: tamperedIntegrity.brokenAtId,
+        latestDeletionDetected: !deletionIntegrity.valid,
+        chainSequence: restoredIntegrity.chainSequence,
+        unsequencedSealedEntries: restoredIntegrity.unsequencedSealedEntries,
       },
       gateway: {
         antiFraming: publicResponse.headers.get("x-frame-options"),
