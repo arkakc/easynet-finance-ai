@@ -1524,6 +1524,7 @@ model FxRevaluation {
   createdAt         DateTime            @default(now())
   lines             FxRevaluationLine[]
 
+  @@unique([revaluationDate, baseCurrency])
   @@index([revaluationDate])
   @@index([status])
 }
