@@ -17,6 +17,7 @@ import {
   ReconciliationStatus,
 } from "@prisma/client";
 import { buildCashFlowStatement } from "../lib/accounting/cash-flow";
+import { buildFinancialStatements } from "../lib/accounting/financial-statements";
 import { buildTrialBalance } from "../lib/accounting/trial-balance";
 import { buildFinancialReconciliationSnapshot } from "../lib/system/financial-reconciliation";
 
@@ -458,6 +459,23 @@ async function main() {
       throw new Error(`Clean reconciliation fixture is not ready: ${clean.controls.exceptions.join("; ")}`);
     }
 
+    const financialStatements = await buildFinancialStatements({
+      from: "2026-01-01",
+      asOf: "2026-01-31",
+    }, client);
+    if (
+      !financialStatements.controls.periodLedger.balanced
+      || !financialStatements.controls.cumulativeLedger.balanced
+      || !financialStatements.controls.receivables.matched
+      || !financialStatements.controls.payables.matched
+      || financialStatements.controls.receivables.accountCode !== arGroup.code
+      || financialStatements.controls.payables.accountCode !== apGroup.code
+    ) {
+      throw new Error(
+        `Financial-statements controls failed: AR ${financialStatements.controls.receivables.accountCode}/${financialStatements.controls.receivables.difference}; AP ${financialStatements.controls.payables.accountCode}/${financialStatements.controls.payables.difference}`,
+      );
+    }
+
     const trialBalance = await buildTrialBalance({
       startDate: "2026-01-01",
       asOf: "2026-01-31",
@@ -538,6 +556,14 @@ async function main() {
         reconciliationDriftBefore: clean.banking.reconciliationDrift,
         reconciliationDriftAfterBackdatedEntry: drifted.banking.reconciliationDrift,
         backdatedEntryDetected: !drifted.controls.bankReconciliationsMatched,
+      },
+      financialStatements: {
+        currency: financialStatements.currency,
+        arAccount: financialStatements.controls.receivables.accountCode,
+        arDifference: financialStatements.controls.receivables.difference,
+        apAccount: financialStatements.controls.payables.accountCode,
+        apDifference: financialStatements.controls.payables.difference,
+        balanceSheetDifference: financialStatements.balanceSheet.totals.difference,
       },
       trialBalance: {
         currency: trialBalance.currency,
