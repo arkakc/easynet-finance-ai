@@ -305,11 +305,18 @@ export async function POST(request: Request) {
     if (requestedBaseCurrency && !backendConfigured) {
       const normalizedRequested = requestedBaseCurrency.value.trim().toUpperCase();
       if (!/^[A-Z]{3}$/.test(normalizedRequested)) throw new Error("Base currency must be a 3-letter ISO currency code");
-      const [currentCurrency, postedJournalCount] = await Promise.all([
-        prisma.globalSettings.findFirst({ where: { key: { in: ["currency", "base_currency"] } } }),
+      const [currencySettings, postedJournalCount] = await Promise.all([
+        prisma.globalSettings.findMany({
+          where: { key: { in: ["currency", "base_currency"] } },
+          select: { key: true, value: true },
+        }),
         prisma.journalHeader.count({ where: { status: "POSTED" } }),
       ]);
-      const current = String(currentCurrency?.value || "").trim().toUpperCase();
+      const current = String(
+        currencySettings.find((row) => row.key === "currency")?.value
+        || currencySettings.find((row) => row.key === "base_currency")?.value
+        || "",
+      ).trim().toUpperCase();
       if (postedJournalCount > 0 && current && normalizedRequested !== current) {
         throw new Error(
           `Base currency cannot be changed from ${current} to ${normalizedRequested} after posted accounting entries exist. Create a new company/database or perform a controlled currency migration instead.`,
