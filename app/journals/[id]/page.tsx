@@ -4,8 +4,8 @@ import { requirePermission } from "@/lib/auth";
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { prisma } from "@/src/lib/prisma";
 
-const money = (value: unknown) =>
-  new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(Number(value || 0));
+const money = (value: unknown, currency: string) =>
+  new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
 
 export default async function JournalDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requirePermission("accounts.read");
@@ -33,8 +33,18 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
       ? supplierMap.get(line.supplierId) || line.supplierId
       : "—";
 
+  const baseCurrency = String(header.baseCurrency || "PGK").toUpperCase();
+  const sourceCurrency = String(header.currency || baseCurrency).toUpperCase();
   const debit = header.lines.reduce((sum, row) => sum + Number(row.debit), 0);
   const credit = header.lines.reduce((sum, row) => sum + Number(row.credit), 0);
+  const transactionDebit = header.lines.reduce((sum, row) => {
+    const value = Number(row.transactionDebit || 0);
+    return sum + (value || (String(row.transactionCurrency || row.currency || baseCurrency).toUpperCase() === baseCurrency ? Number(row.debit || 0) : 0));
+  }, 0);
+  const transactionCredit = header.lines.reduce((sum, row) => {
+    const value = Number(row.transactionCredit || 0);
+    return sum + (value || (String(row.transactionCurrency || row.currency || baseCurrency).toUpperCase() === baseCurrency ? Number(row.credit || 0) : 0));
+  }, 0);
 
   return (
     <div className="document-page">
@@ -56,6 +66,9 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           <div><span>Posting Date</span><strong>{formatAccountingDate(header.date.toISOString())}</strong></div>
           <div><span>Document Type</span><strong>{header.sourceDocType || "JOURNAL"}</strong></div>
           <div><span>Document Number</span><strong>{header.sourceDocId || "—"}</strong></div>
+          <div><span>Source Currency</span><strong>{sourceCurrency}</strong></div>
+          <div><span>Base Currency</span><strong>{baseCurrency}</strong></div>
+          <div><span>Exchange Rate</span><strong>{sourceCurrency === baseCurrency ? "1.00000000" : `1 ${sourceCurrency} = ${Number(header.exchangeRate || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} ${baseCurrency}`}</strong></div>
           <div><span>Maker / Created By</span><strong>{header.createdBy || "—"}</strong></div>
           <div><span>Checker / Approved By</span><strong>{header.approvedBy || "Pending checker"}</strong></div>
           <div><span>Submitted At</span><strong>{header.createdAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}</strong></div>
@@ -72,8 +85,11 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
                 <th>Party</th>
                 <th>Project</th>
                 <th>Description</th>
-                <th>Debit</th>
-                <th>Credit</th>
+                <th>Txn Currency</th>
+                <th>Txn Debit</th>
+                <th>Txn Credit</th>
+                <th>Base Debit ({baseCurrency})</th>
+                <th>Base Credit ({baseCurrency})</th>
               </tr>
             </thead>
             <tbody>
@@ -84,16 +100,21 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
                   <td>{party(line)}</td>
                   <td>{line.projectId ? projectMap.get(line.projectId) || line.projectId : "—"}</td>
                   <td>{line.description || "—"}</td>
-                  <td>{Number(line.debit) ? money(line.debit) : "—"}</td>
-                  <td>{Number(line.credit) ? money(line.credit) : "—"}</td>
+                  <td>{String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase()}</td>
+                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionDebit || 0)||(currency===baseCurrency?Number(line.debit||0):0);return value?money(value,currency):"—";})()}</td>
+                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionCredit || 0)||(currency===baseCurrency?Number(line.credit||0):0);return value?money(value,currency):"—";})()}</td>
+                  <td>{Number(line.debit) ? money(line.debit, baseCurrency) : "—"}</td>
+                  <td>{Number(line.credit) ? money(line.credit, baseCurrency) : "—"}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
                 <th colSpan={5}>Total</th>
-                <th>{money(debit)}</th>
-                <th>{money(credit)}</th>
+                <th>{sourceCurrency === baseCurrency ? money(transactionDebit, baseCurrency) : sourceCurrency}</th>
+                <th>{sourceCurrency === baseCurrency ? money(transactionCredit, baseCurrency) : "Per-line currencies"}</th>
+                <th>{money(debit, baseCurrency)}</th>
+                <th>{money(credit, baseCurrency)}</th>
               </tr>
             </tfoot>
           </table>
