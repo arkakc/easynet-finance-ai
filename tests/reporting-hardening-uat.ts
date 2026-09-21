@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   AccountTypeGL,
   InvoiceStatus,
+  ItemType,
   JournalStatus,
   NormalBalance,
   PrismaClient,
@@ -45,7 +46,7 @@ async function main() {
     });
 
     const [cash, equity, revenue, ar, fixedAsset, loan, unrealizedFx] = await Promise.all([
-      makeAccount(`1128-${suffix}`, "UAT Reporting Cash", AccountTypeGL.ASSET, NormalBalance.DEBIT),
+      makeAccount(`CASH-${suffix}`, "UAT Reporting Cash", AccountTypeGL.ASSET, NormalBalance.DEBIT),
       makeAccount(`3108-${suffix}`, "UAT Reporting Equity", AccountTypeGL.EQUITY, NormalBalance.CREDIT),
       makeAccount(`4108-${suffix}`, "UAT Reporting Revenue", AccountTypeGL.REVENUE, NormalBalance.CREDIT),
       makeAccount(`1138-${suffix}`, "UAT Reporting Receivable", AccountTypeGL.ASSET, NormalBalance.DEBIT),
@@ -55,6 +56,11 @@ async function main() {
     ]);
 
     await Promise.all([
+      client.globalSettings.upsert({
+        where: { key: "default_cash_account" },
+        create: { key: "default_cash_account", value: `ACC-${cash.code}` },
+        update: { value: `ACC-${cash.code}` },
+      }),
       client.globalSettings.upsert({
         where: { key: "default_receivable_account" },
         create: { key: "default_receivable_account", value: `ACC-${ar.code}` },
@@ -270,6 +276,44 @@ async function main() {
       throw new Error("AR control did not reconcile after reversal");
     }
 
+    const stockItem = await client.item.create({
+      data: {
+        code: `UAT-RPT-STOCK-${suffix}`,
+        name: "UAT Historical Stock",
+        type: ItemType.GOOD,
+        unit: "EA",
+        trackQty: true,
+        purchasePrice: 10,
+        isActive: true,
+      },
+    });
+    await client.stockMovement.create({
+      data: {
+        id: `UAT-RPT-STOCK-IN-${suffix}`,
+        itemId: stockItem.id,
+        type: "PURCHASE_RECEIPT",
+        quantity: 10,
+        unitCost: 10,
+        totalCost: 100,
+        referenceType: "UAT",
+        createdAt: new Date("2098-01-12T00:00:00+10:00"),
+        createdBy: "reporting-hardening-uat",
+      },
+    });
+    await client.stockMovement.create({
+      data: {
+        id: `UAT-RPT-STOCK-OUT-${suffix}`,
+        itemId: stockItem.id,
+        type: "SALES_ISSUE",
+        quantity: 4,
+        unitCost: 10,
+        totalCost: 40,
+        referenceType: "UAT",
+        createdAt: new Date("2098-02-03T00:00:00+10:00"),
+        createdBy: "reporting-hardening-uat",
+      },
+    });
+
     const snapshot = await buildFinancialReconciliationSnapshot({
       client,
       asOf: "2098-01-31",
@@ -279,6 +323,14 @@ async function main() {
     if (snapshot.currency !== "USD") throw new Error("Reconciliation snapshot did not use configured base currency");
     if (snapshot.receivables.outstanding !== 100 || !snapshot.receivables.matched) {
       throw new Error("Reconciliation snapshot did not use historical AR subledger");
+    }
+    if (snapshot.inventory.quantityOnHand !== 10 || snapshot.inventory.estimatedValue !== 100) {
+      throw new Error(
+        `Historical inventory cutoff failed: qty ${snapshot.inventory.quantityOnHand}, value ${snapshot.inventory.estimatedValue}`,
+      );
+    }
+    if (!cashFlow.cashAccounts.some((account) => account.code === cash.code)) {
+      throw new Error("Configured non-legacy cash account was omitted from cash flow");
     }
 
     console.log(JSON.stringify({
@@ -294,6 +346,9 @@ async function main() {
       pngDueDatePreserved: beforeRow.dueDate,
       reconciliationCurrency: snapshot.currency,
       reconciliationHistoricalAr: snapshot.receivables.outstanding,
+      configuredCashAccountIncluded: cashFlow.cashAccounts.some((account) => account.code === cash.code),
+      historicalInventoryQuantity: snapshot.inventory.quantityOnHand,
+      historicalInventoryValue: snapshot.inventory.estimatedValue,
     }, null, 2));
   } finally {
     await client.$disconnect();
