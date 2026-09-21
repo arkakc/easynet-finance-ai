@@ -45,12 +45,12 @@ async function main() {
   if (reverseDenied.status !== 403) throw new Error(`Sales User reversal expected 403, got ${reverseDenied.status}`);
   checks.reversalDenied = reverseDenied.status;
 
-  const backupDenied = await fetch(`${baseUrl}/api/system/backups`, { headers: headers("Sales User") });
-  if (backupDenied.status !== 403) throw new Error(`Sales User backup GET expected 403, got ${backupDenied.status}`);
-  checks.backupDenied = backupDenied.status;
-  const backupRead = await fetch(`${baseUrl}/api/system/backups`, { headers: headers("System Manager") });
-  if (!backupRead.ok) throw new Error(`System Manager backup GET failed with ${backupRead.status}`);
-  checks.backupRead = backupRead.status;
+  const systemDenied = await fetch(`${baseUrl}/api/system/go-live-readiness`, { headers: headers("Sales User") });
+  if (systemDenied.status !== 403) throw new Error(`Sales User go-live readiness GET expected 403, got ${systemDenied.status}`);
+  checks.systemReadinessDenied = systemDenied.status;
+  const systemRead = await fetch(`${baseUrl}/api/system/go-live-readiness`, { headers: headers("System Manager") });
+  if (!systemRead.ok) throw new Error(`System Manager go-live readiness GET failed with ${systemRead.status}`);
+  checks.systemReadinessRead = systemRead.status;
 
   console.log(JSON.stringify({ database: "local SQLite", liveDatabaseChanged: false, baseUrl, routeChecks: checks }, null, 2));
 }
