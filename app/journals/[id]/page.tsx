@@ -4,6 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { prisma } from "@/src/lib/prisma";
 import JournalApprovalButton from "@/app/components/journal-approval-button";
+import JournalPreApprovalActions from "@/app/components/journal-preapproval-actions";
 
 const money = (value: unknown, currency: string) =>
   new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
@@ -34,6 +35,8 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
       ? supplierMap.get(line.supplierId) || line.supplierId
       : "—";
 
+  const canEditDelete = ["DRAFT", "PENDING"].includes(header.status) && header.sourceDocType.startsWith("MANUAL_") && user.permissions.includes("accounts.write");
+
   const canApprove = header.status === "PENDING"
     && header.sourceDocType.startsWith("MANUAL_")
     && user.permissions.includes("post.approve")
@@ -56,6 +59,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
     <div className="document-page">
       <div className="document-toolbar no-print">
         <Link href="/journals">← Back to Journals</Link>
+        {canEditDelete ? <JournalPreApprovalActions journalId={header.id} /> : null}
         {canApprove ? <JournalApprovalButton journalId={header.id} /> : null}
       </div>
 
