@@ -1,12 +1,10 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 
 const todayPNG = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby" }).format(new Date());
 
 export default function JournalReversalButton({ journalId }: { journalId: string }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reversalDate, setReversalDate] = useState(todayPNG);
@@ -35,8 +33,7 @@ export default function JournalReversalButton({ journalId }: { journalId: string
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Journal reversal failed");
       setOpen(false);
-      router.push(`/journals/${body.reversalJournalId}`);
-      router.refresh();
+      window.location.assign(`/journals/${body.reversalJournalId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Journal reversal failed");
     } finally {
