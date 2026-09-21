@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
-import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
-
-function active(value: unknown) {
-  return !["false", "0", "no", "inactive"].includes(String(value ?? "true").trim().toLowerCase());
-}
 
 export async function GET() {
   try {
