@@ -133,14 +133,10 @@ export default function TrialBalancePage() {
               <span className="auto-badge">{data.accounts.length} Accounts</span>
             </div>
             <table className="data-table" style={{ minWidth: 900 }}>
-              <thead>
-                <tr><th>Account</th><th>Name</th><th>Type</th><th>Debit</th><th>Credit</th><th>Net Dr/(Cr)</th></tr>
-              </thead>
+              <thead>\n                <tr><th>Account</th><th>Type</th><th>Current Balance</th><th>Debit</th><th>Credit</th><th>Net Dr/(Cr)</th></tr>\n              </thead>
               <tbody>
                 {data.accounts.map((row) => <tr key={row.accountId}>
-                  <td><strong>{row.accountCode}</strong></td>
-                  <td>{row.accountName}</td>
-                  <td>{row.accountType}</td>
+                  <td><strong>{row.accountCode} | {row.accountName}</strong></td>\n                  <td>{String(row.accountType).replaceAll("_", " ")}</td>\n                  <td>{money(Math.abs(row.balance), data.currency)} {row.balance < 0 ? "Cr" : "Dr"}</td>
                   <td>{money(row.debit, data.currency)}</td>
                   <td>{money(row.credit, data.currency)}</td>
                   <td>{money(row.balance, data.currency)}</td>
