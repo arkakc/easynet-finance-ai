@@ -387,7 +387,7 @@ function mapExpense(exp: any) {
 
 function mapStockMovement(movement: any) {
   if (!movement) return null;
-  const movementType = movement.referenceType || movement.type || "";
+  const movementType = movement.type || movement.referenceType || "";
   const type = String(movement.type || movementType || "").toUpperCase();
   const incoming = ["PURCHASE_IN", "PURCHASE_RECEIPT", "SALES_ISSUE_ROLLBACK", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(type);
   const outgoing = ["SALES_DELIVERY", "SALES_ISSUE", "SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(type);
@@ -401,6 +401,7 @@ function mapStockMovement(movement: any) {
     warehouseName: movement.warehouse?.name || "",
     transferId: movement.transferId || "",
     movementType,
+    referenceType: movement.referenceType || "",
     qtyIn: incoming ? Number(movement.quantity || 0) : 0,
     qtyOut: outgoing ? Number(movement.quantity || 0) : 0,
     unitCost: Number(movement.unitCost || 0),
