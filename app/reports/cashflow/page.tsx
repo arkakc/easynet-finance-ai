@@ -4,7 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { CashFlowStatement } from "@/lib/accounting/cash-flow";
 
-const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
+const money = (value: number, currency: string) => new Intl.NumberFormat("en-PG", {
+  style: "currency",
+  currency,
+  minimumFractionDigits: 2,
+}).format(value);
 const pngToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 export default function CashFlowPage() {
@@ -55,18 +59,20 @@ export default function CashFlowPage() {
       {error && <section className="panel warning-panel"><strong>Cash-flow unavailable.</strong> {error}</section>}
       {statement && <>
         <div className="grid dashboard-grid">
-          <div className="card"><div className="label">Opening Cash</div><div className="value">{money(statement.totals.openingCash)}</div></div>
-          <div className="card"><div className="label">Operating Cash Flow</div><div className="value">{money(statement.totals.operating)}</div></div>
-          <div className="card"><div className="label">Investing Cash Flow</div><div className="value">{money(statement.totals.investing)}</div></div>
-          <div className="card"><div className="label">Financing Cash Flow</div><div className="value">{money(statement.totals.financing)}</div></div>
-          <div className="card"><div className="label">Net Cash Change</div><div className="value">{money(statement.totals.netChange)}</div></div>
-          <div className="card"><div className="label">Closing Cash</div><div className="value">{money(statement.totals.closingCash)}</div></div>
-          <div className="card"><div className="label">GL Closing Cash</div><div className="value">{money(statement.control.ledgerClosingCash)}</div></div>
-          <div className="card"><div className="label">Control Difference</div><div className="value">{money(statement.control.difference)}</div><span className="auto-badge">{statement.control.balanced ? "BALANCED" : "REVIEW"}</span></div>
+          <div className="card"><div className="label">Opening Cash</div><div className="value">{money(statement.totals.openingCash, statement.currency)}</div></div>
+          <div className="card"><div className="label">Operating Cash Flow</div><div className="value">{money(statement.totals.operating, statement.currency)}</div></div>
+          <div className="card"><div className="label">Investing Cash Flow</div><div className="value">{money(statement.totals.investing, statement.currency)}</div></div>
+          <div className="card"><div className="label">Financing Cash Flow</div><div className="value">{money(statement.totals.financing, statement.currency)}</div></div>
+          <div className="card"><div className="label">Net Cash Flow</div><div className="value">{money(statement.totals.netCashFlow, statement.currency)}</div></div>
+          <div className="card"><div className="label">FX Translation Effect</div><div className="value">{money(statement.totals.exchangeRateEffect, statement.currency)}</div></div>
+          <div className="card"><div className="label">Net Cash Change</div><div className="value">{money(statement.totals.netChange, statement.currency)}</div></div>
+          <div className="card"><div className="label">Closing Cash</div><div className="value">{money(statement.totals.closingCash, statement.currency)}</div></div>
+          <div className="card"><div className="label">GL Closing Cash</div><div className="value">{money(statement.control.ledgerClosingCash, statement.currency)}</div></div>
+          <div className="card"><div className="label">Control Difference</div><div className="value">{money(statement.control.difference, statement.currency)}</div><span className="auto-badge">{statement.control.balanced ? "BALANCED" : "REVIEW"}</span></div>
         </div>
 
         <section className="panel table-wrap">
-          <div className="form-title-row"><div><h3>Cash & Bank Movements</h3><p className="small">Period {statement.period.from} to {statement.period.asOf}. Opening journals are carried into opening cash, not reported as operating inflow.</p></div><span className="auto-badge">{statement.rows.length} entries</span></div>
+          <div className="form-title-row"><div><h3>Cash & Bank Movements</h3><p className="small">Period {statement.period.from} to {statement.period.asOf}. Opening journals are carried into opening cash. FX revaluation is shown separately from operating, investing and financing cash flow.</p></div><span className="auto-badge">{statement.currency} · {statement.rows.length} entries</span></div>
           <table className="data-table">
             <thead><tr><th>Date</th><th>Journal</th><th>Category</th><th>Source</th><th>Reference / Description</th><th>Inflow</th><th>Outflow</th></tr></thead>
             <tbody>
@@ -76,8 +82,8 @@ export default function CashFlowPage() {
                 <td><span className="auto-badge">{row.category}</span></td>
                 <td>{row.documentType}</td>
                 <td>{row.reference || "—"}<br /><span className="small">{row.description}</span></td>
-                <td>{row.movement > 0 ? money(row.movement) : "—"}</td>
-                <td>{row.movement < 0 ? money(Math.abs(row.movement)) : "—"}</td>
+                <td>{row.movement > 0 ? money(row.movement, statement.currency) : "—"}</td>
+                <td>{row.movement < 0 ? money(Math.abs(row.movement), statement.currency) : "—"}</td>
               </tr>)}
               {!statement.rows.length && <tr><td colSpan={7}>No posted cash movements in this period.</td></tr>}
             </tbody>
