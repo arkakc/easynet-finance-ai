@@ -13,7 +13,6 @@ const LEGACY_WRITE_PATHS = [
   "/api/stock",
   "/api/payment-schedules",
   "/api/loans/actions",
-  "/api/journals/reverse",
   "/api/setup/finance",
   "/api/documents/extract",
 ];
