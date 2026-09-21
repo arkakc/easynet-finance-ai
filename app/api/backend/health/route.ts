@@ -1,23 +1,26 @@
 import { NextResponse } from "next/server";
-import { backendHealth } from "@/lib/backend/apps-script";
+import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
 
 export async function GET() {
+  const runtime = databaseRuntimeInfo();
   try {
-    const result = await backendHealth();
-
+    await prisma.$queryRawUnsafe("SELECT 1");
     return NextResponse.json({
       ok: true,
-      frontend: "easynet-finance-ai",
-      backend: result,
-    });
-  } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        frontend: "easynet-finance-ai",
-        error: error instanceof Error ? error.message : "Unknown backend health error",
+      authority: "prisma",
+      database: {
+        provider: runtime.provider,
+        reachable: true,
       },
-      { status: 503 },
-    );
+    });
+  } catch {
+    return NextResponse.json({
+      ok: false,
+      authority: "prisma",
+      database: {
+        provider: runtime.provider,
+        reachable: false,
+      },
+    }, { status: 503 });
   }
 }
