@@ -158,9 +158,11 @@ export async function postPurchaseReceiptAtomic(input:{
     });
     if(!po) throw new Error("Purchase Receipt source must be a valid Purchase Order");
     if(!["SENT","PARTIAL_RECEIVED","RECEIVED","BILLED"].includes(po.status)) throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
+    // Purchase Order is a commitment, not the inventory-recognition event.
+    // Inventory/GRNI therefore use the approved spot rate at receipt date rather
+    // than freezing the non-accounting PO quotation/order rate.
     const fx=await resolveDocumentExchangeRate(tx,{
       currency:po.currency,
-      exchangeRate:Number(po.exchangeRate||0)||undefined,
       postingDate:input.postingDate,
     });
     const warehouse=await resolveWarehouse(tx,input.warehouseRef);
