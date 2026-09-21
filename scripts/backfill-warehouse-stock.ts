@@ -5,7 +5,7 @@ async function main() {
   const apply = process.argv.includes("--apply");
   const result = await backfillWarehouseStock({ apply });
   console.log(JSON.stringify(result, null, 2));
-  if (!apply && result.unassignedMovements > 0) {
+  if (result.mode === "PREVIEW" && result.unassignedMovements > 0) {
     console.log("\nPreview only. Re-run with --apply after reviewing the migration plan.");
   }
 }
