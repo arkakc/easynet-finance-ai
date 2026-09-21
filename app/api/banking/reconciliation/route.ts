@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { parseBankStatementRows } from "@/lib/banking/statement-parser";
+import { companyBaseCurrency } from "@/lib/accounting/currency";
 import { prisma } from "@/src/lib/prisma";
 
 export const runtime = "nodejs";
@@ -22,13 +23,38 @@ function directionMatches(amount: number, type: string) {
   return amount > 0 ? incoming : outgoing;
 }
 
-async function ledgerBalance(chartOfAccountsId: string | null, throughDate: Date) {
+async function ledgerBalances(
+  chartOfAccountsId: string | null,
+  bankCurrency: string,
+  baseCurrency: string,
+  throughDate: Date,
+) {
   if (!chartOfAccountsId) return null;
-  const result = await prisma.journalLine.aggregate({
+  const lines = await prisma.journalLine.findMany({
     where: { accountId: chartOfAccountsId, journal: { status: "POSTED", date: { lte: throughDate } } },
-    _sum: { debit: true, credit: true },
+    select: {
+      debit: true,
+      credit: true,
+      transactionCurrency: true,
+      transactionDebit: true,
+      transactionCredit: true,
+    },
   });
-  return round2(Number(result._sum.debit || 0) - Number(result._sum.credit || 0));
+  const normalizedBankCurrency = String(bankCurrency || baseCurrency).trim().toUpperCase();
+  const normalizedBaseCurrency = String(baseCurrency).trim().toUpperCase();
+  const baseBalance = round2(lines.reduce(
+    (sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0),
+    0,
+  ));
+  const transactionBalance = normalizedBankCurrency === normalizedBaseCurrency
+    ? baseBalance
+    : round2(lines
+        .filter((line) => String(line.transactionCurrency || "").toUpperCase() === normalizedBankCurrency)
+        .reduce(
+          (sum, line) => sum + Number(line.transactionDebit || 0) - Number(line.transactionCredit || 0),
+          0,
+        ));
+  return { baseBalance, transactionBalance };
 }
 
 export async function GET(request: NextRequest) {
@@ -48,30 +74,45 @@ export async function GET(request: NextRequest) {
     });
     if (!selected) return NextResponse.json({ ok: true, accounts: [], ledgerAccounts, transactions: [], reconciliations: [], payments: [] });
 
-    const [transactions, reconciliations, payments] = await Promise.all([
+    const [transactions, reconciliations, payments, baseCurrency] = await Promise.all([
       prisma.bankTransaction.findMany({ where: { bankAccountId: selected.id }, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 500 }),
       prisma.reconciliation.findMany({ where: { bankAccountId: selected.id }, orderBy: { periodEnd: "desc" }, take: 20 }),
       prisma.payment.findMany({
-        where: { status: { notIn: ["FAILED", "CANCELLED", "REVERSED"] } },
+        where: {
+          status: { notIn: ["FAILED", "CANCELLED", "REVERSED"] },
+          currency: String(selected.currency || "").toUpperCase(),
+        },
         orderBy: { date: "desc" },
         take: 500,
         include: { customer: { select: { name: true } }, supplier: { select: { name: true } } },
       }),
+      prisma.$transaction((tx) => companyBaseCurrency(tx)),
     ]);
     const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
     const usedPayments = new Set(transactions.map((row) => row.matchedPaymentId).filter(Boolean));
     const availablePayments = payments.filter((payment) => !usedPayments.has(payment.id));
     const lastStatementBalance = transactions.find((row) => row.statementBalance !== null)?.statementBalance;
     const throughDate = transactions[0]?.date || new Date();
-    const bookBalance = await ledgerBalance(selected.chartOfAccountsId, throughDate);
+    const bookBalance = await ledgerBalances(
+      selected.chartOfAccountsId,
+      selected.currency,
+      baseCurrency,
+      throughDate,
+    );
 
     return NextResponse.json({
       ok: true,
       accounts: accounts.map((row) => ({ ...row, openingBalance: Number(row.openingBalance), accountNumber: row.accountNumber ? `••••${row.accountNumber.slice(-4)}` : "" })),
       selectedAccountId: selected.id,
       ledgerAccounts,
-      balances: { statement: lastStatementBalance === undefined ? null : Number(lastStatementBalance), book: bookBalance },
-      payments: availablePayments.map((row) => ({ id: row.id, code: row.code, date: row.date.toISOString().slice(0, 10), amount: Number(row.amount), type: row.type, party: row.customer?.name || row.supplier?.name || "", reference: row.referenceNumber || "" })),
+      balances: {
+        currency: String(selected.currency || baseCurrency).toUpperCase(),
+        baseCurrency,
+        statement: lastStatementBalance === undefined ? null : Number(lastStatementBalance),
+        book: bookBalance?.transactionBalance ?? null,
+        baseBook: bookBalance?.baseBalance ?? null,
+      },
+      payments: availablePayments.map((row) => ({ id: row.id, code: row.code, date: row.date.toISOString().slice(0, 10), amount: Number(row.amount), currency: row.currency, type: row.type, party: row.customer?.name || row.supplier?.name || "", reference: row.referenceNumber || "" })),
       transactions: transactions.map((row) => {
         const matched = row.matchedPaymentId ? paymentById.get(row.matchedPaymentId) : null;
         const suggestions = row.matchStatus === "UNMATCHED"
@@ -129,7 +170,7 @@ export async function POST(request: NextRequest) {
     ]);
     const existing = new Set(existingRows.map((row) => row.fingerprint));
     for (const row of rows) {
-      const transactionDate = row.date ? new Date(`${row.date}T12:00:00Z`) : null;
+      const transactionDate = row.date ? new Date(`${row.date}T12:00:00+10:00`) : null;
       if (transactionDate && closedPeriods.some((period) => transactionDate >= period.periodStart && transactionDate <= period.periodEnd)) {
         row.errors.push("Transaction date belongs to a completed reconciliation period");
       }
@@ -157,7 +198,7 @@ export async function POST(request: NextRequest) {
           create: {
             code: `BST-${row.fingerprint.slice(0, 20).toUpperCase()}`,
             bankAccountId: bankAccount.id,
-            date: new Date(`${row.date}T00:00:00Z`),
+            date: new Date(`${row.date}T00:00:00+10:00`),
             type: row.type,
             description: row.description,
             amount: row.amount,
@@ -202,13 +243,22 @@ export async function PATCH(request: NextRequest) {
     const user = await requirePermission(body.action === "reconcile" ? "post.approve" : "accounts.write");
     if (body.action === "match") {
       const [transaction, payment, alreadyUsed] = await Promise.all([
-        prisma.bankTransaction.findUnique({ where: { id: body.transactionId } }),
+        prisma.bankTransaction.findUnique({
+          where: { id: body.transactionId },
+          include: { bankAccount: { select: { currency: true } } },
+        }),
         prisma.payment.findUnique({ where: { id: body.paymentId } }),
         prisma.bankTransaction.findFirst({ where: { matchedPaymentId: body.paymentId, id: { not: body.transactionId } } }),
       ]);
       if (!transaction || !payment) throw new Error("Bank transaction or payment was not found");
       if (transaction.isReconciled) throw new Error("A reconciled transaction cannot be changed");
       if (alreadyUsed) throw new Error("That payment is already matched to another bank transaction");
+      const bankCurrency = String(transaction.bankAccount.currency || transaction.currency || "").toUpperCase();
+      const paymentCurrency = String(payment.currency || "").toUpperCase();
+      const transactionCurrency = String(transaction.currency || bankCurrency).toUpperCase();
+      if (paymentCurrency !== bankCurrency || transactionCurrency !== bankCurrency) {
+        throw new Error(`Currency mismatch: bank statement is ${bankCurrency}, payment is ${paymentCurrency || "unknown"}`);
+      }
       if (Math.abs(Math.abs(Number(transaction.amount)) - Number(payment.amount)) > 0.01) throw new Error("Bank transaction and payment amounts do not match");
       if (!directionMatches(Number(transaction.amount), payment.type)) throw new Error("Payment direction does not match the bank transaction");
       const updated = await prisma.bankTransaction.update({ where: { id: transaction.id }, data: { matchStatus: "MATCHED", matchedPaymentId: payment.id, matchedInvoiceId: payment.invoiceId, matchedBillId: payment.billId, matchedBy: user.email, matchedAt: new Date(), matchNotes: `Matched to ${payment.code}` } });
@@ -229,8 +279,8 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, transactionId: updated.id, message: "Match removed" });
     }
 
-    const periodStart = new Date(`${body.periodStart}T00:00:00Z`);
-    const periodEnd = new Date(`${body.periodEnd}T23:59:59.999Z`);
+    const periodStart = new Date(`${body.periodStart}T00:00:00+10:00`);
+    const periodEnd = new Date(`${body.periodEnd}T23:59:59.999+10:00`);
     if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime()) || periodStart > periodEnd) throw new Error("Enter a valid reconciliation period");
     const bankAccount = await prisma.bankAccount.findUnique({ where: { id: body.bankAccountId } });
     if (!bankAccount?.chartOfAccountsId) throw new Error("Link this bank account to its General Ledger account first");
@@ -240,16 +290,27 @@ export async function PATCH(request: NextRequest) {
     if (!transactions.length) throw new Error("No unreconciled statement transactions exist in this period");
     const unmatched = transactions.filter((row) => !["MATCHED", "REVIEWED"].includes(row.matchStatus));
     if (unmatched.length) throw new Error(`${unmatched.length} statement transaction(s) still need matching or manual review`);
-    const bookBalance = await ledgerBalance(bankAccount.chartOfAccountsId, periodEnd);
+    const baseCurrency = await prisma.$transaction((tx) => companyBaseCurrency(tx));
+    const bookBalance = await ledgerBalances(
+      bankAccount.chartOfAccountsId,
+      bankAccount.currency,
+      baseCurrency,
+      periodEnd,
+    );
     if (bookBalance === null) throw new Error("General Ledger balance is unavailable");
-    const difference = round2(body.statementBalance - bookBalance);
-    if (Math.abs(difference) > 0.01) throw new Error(`Reconciliation difference is K${difference.toFixed(2)}. Complete missing book entries before closing.`);
+    const reconciliationCurrency = String(bankAccount.currency || baseCurrency).toUpperCase();
+    const difference = round2(body.statementBalance - bookBalance.transactionBalance);
+    if (Math.abs(difference) > 0.01) {
+      throw new Error(
+        `Reconciliation difference is ${reconciliationCurrency} ${difference.toFixed(2)}. Complete missing book entries before closing.`,
+      );
+    }
 
     const reconciliation = await prisma.$transaction(async (tx) => {
-      const created = await tx.reconciliation.create({ data: { bankAccountId: bankAccount.id, periodStart, periodEnd, statementBalance: body.statementBalance, bookBalance, difference, status: "COMPLETED", notes: body.notes || null, preparedBy: user.email, reviewedBy: user.email, reviewedAt: new Date() } });
+      const created = await tx.reconciliation.create({ data: { bankAccountId: bankAccount.id, periodStart, periodEnd, statementBalance: body.statementBalance, bookBalance: bookBalance.transactionBalance, difference, status: "COMPLETED", notes: body.notes || null, preparedBy: user.email, reviewedBy: user.email, reviewedAt: new Date() } });
       await tx.bankTransaction.updateMany({ where: { id: { in: transactions.map((row) => row.id) } }, data: { isReconciled: true, reconciliationId: created.id } });
       const dbUser = await tx.user.findUnique({ where: { email: user.email } });
-      if (dbUser) await tx.auditLog.create({ data: { action: "RECONCILE", entityType: "BankAccount", entityId: bankAccount.id, entityCode: bankAccount.code, description: `Completed bank reconciliation ${body.periodStart} to ${body.periodEnd}`, changes: JSON.stringify({ statementBalance: body.statementBalance, bookBalance, difference, transactionCount: transactions.length }), userId: dbUser.id } });
+      if (dbUser) await tx.auditLog.create({ data: { action: "RECONCILE", entityType: "BankAccount", entityId: bankAccount.id, entityCode: bankAccount.code, description: `Completed bank reconciliation ${body.periodStart} to ${body.periodEnd}`, changes: JSON.stringify({ statementBalance: body.statementBalance, bookBalance: bookBalance.transactionBalance, baseBookBalance: bookBalance.baseBalance, currency: reconciliationCurrency, baseCurrency, difference, transactionCount: transactions.length }), userId: dbUser.id } });
       return created;
     });
     return NextResponse.json({ ok: true, reconciliationId: reconciliation.id, message: "Bank reconciliation completed", difference });
