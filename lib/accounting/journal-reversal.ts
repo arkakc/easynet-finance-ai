@@ -25,6 +25,7 @@ const DIRECT_REVERSAL_TYPES = new Set([
   "SUPPLIER_BILL",
   "BILL",
   "CUSTOMER_RECEIPT",
+  "CUSTOMER_REFUND",
   "SUPPLIER_PAYMENT",
   "CUSTOMER_ADVANCE",
   "SUPPLIER_ADVANCE",
@@ -223,7 +224,7 @@ async function synchronizeSourceAfterReversal(
     return;
   }
 
-  if (["CUSTOMER_RECEIPT", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
+  if (["CUSTOMER_RECEIPT", "CUSTOMER_REFUND", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
     const payment = await findPayment(tx, reference);
     if (!payment) {
       throw new Error("Linked Payment Entry was not found; reversal aborted to protect party reconciliation");
@@ -367,7 +368,7 @@ export async function reversePostedJournal(
       }
     }
 
-    if (["CUSTOMER_RECEIPT", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
+    if (["CUSTOMER_RECEIPT", "CUSTOMER_REFUND", "SUPPLIER_PAYMENT", "CUSTOMER_ADVANCE", "SUPPLIER_ADVANCE"].includes(type)) {
       const paymentRef = sourceReference(original);
       const payment = await findPayment(tx, paymentRef);
       if (payment) {
