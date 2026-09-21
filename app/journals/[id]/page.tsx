@@ -44,12 +44,16 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
 
   const canEditDelete = ["DRAFT", "PENDING"].includes(header.status) && header.sourceDocType.startsWith("MANUAL_") && user.permissions.includes("accounts.write");
 
-  const canReverse = header.status === "POSTED" && header.sourceDocType !== "JOURNAL_REVERSAL" && user.permissions.includes("post.approve");
 
   const canApprove = header.status === "PENDING"
     && header.sourceDocType.startsWith("MANUAL_")
     && user.permissions.includes("post.approve")
     && (user.roles.includes("System Manager") || String(header.createdBy || "").toLowerCase() !== String(user.email || "").toLowerCase());
+
+  const canReverse = header.status === "POSTED"
+    && header.sourceDocType !== "JOURNAL_REVERSAL"
+    && !reversalJournal
+    && user.permissions.includes("post.approve");
 
   const baseCurrency = String(header.baseCurrency || "PGK").toUpperCase();
   const sourceCurrency = String(header.currency || baseCurrency).toUpperCase();
