@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PrismaClient } from "@prisma/client";
+import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
 import { prisma } from "@/src/lib/prisma";
 
 const snapshotDirectory = path.join(process.cwd(), "backups", "reconciliation");
@@ -24,7 +25,7 @@ export type FinancialReconciliationSnapshot = {
   generatedAt: string;
   generatedBy: string;
   asOf: string;
-  currency: "PGK";
+  currency: string;
   source: "local-sqlite" | "postgresql-target";
   ledger: {
     postedJournals: number;
@@ -97,7 +98,7 @@ export async function buildFinancialReconciliationSnapshot(options?: {
   const stamp = generatedAt.replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   const fileName = options?.fileName || `reconciliation-${stamp}-${randomUUID().slice(0, 8)}.json`;
 
-  const [journals, invoices, bills, stock, bankAccounts, customers, suppliers, items, activeUsers] = await Promise.all([
+  const [journals, invoices, bills, stock, bankAccounts, customers, suppliers, items, activeUsers, statements] = await Promise.all([
     client.journalHeader.findMany({
       where: { status: "POSTED", date: { lte: periodEnd } },
       include: { lines: { include: { account: true } } },
@@ -123,7 +124,9 @@ export async function buildFinancialReconciliationSnapshot(options?: {
     client.supplier.count(),
     client.item.count(),
     client.user.count({ where: { status: "ACTIVE" } }),
+    buildFinancialStatements({ from: "1900-01-01", asOf }, client),
   ]);
+  const baseCurrency = statements.currency;
 
   const balanceMap = new Map<string, AccountBalance>();
   let totalDebit = 0;
@@ -162,27 +165,23 @@ export async function buildFinancialReconciliationSnapshot(options?: {
   const accountBalanceByCode = new Map(accounts.map((account) => [account.code, account.balance]));
 
   const receivables = {
-    documents: invoices.length,
-    outstanding: money(invoices.reduce((sum, invoice) => sum + numberValue(invoice.outstanding), 0)),
+    documents: statements.aging.receivables.rows.length,
+    outstanding: money(statements.aging.receivables.total),
     unpostedDocuments: invoices.filter((invoice) => !invoice.glPosted).length,
     outputGst: money(invoices.reduce((sum, invoice) => sum + numberValue(invoice.taxTotal), 0)),
-    glBalance: money(accountBalanceByCode.get("1131") || 0),
-    difference: 0,
-    matched: false,
+    glBalance: money(statements.controls.receivables.glBalance),
+    difference: money(statements.controls.receivables.difference),
+    matched: statements.controls.receivables.matched,
   };
   const payables = {
-    documents: bills.length,
-    outstanding: money(bills.reduce((sum, bill) => sum + numberValue(bill.outstanding), 0)),
+    documents: statements.aging.payables.rows.length,
+    outstanding: money(statements.aging.payables.total),
     unpostedDocuments: bills.filter((bill) => !bill.glPosted).length,
     inputGst: money(bills.reduce((sum, bill) => sum + numberValue(bill.taxTotal), 0)),
-    glBalance: money(accountBalanceByCode.get("2111") || 0),
-    difference: 0,
-    matched: false,
+    glBalance: money(statements.controls.payables.glBalance),
+    difference: money(statements.controls.payables.difference),
+    matched: statements.controls.payables.matched,
   };
-  receivables.difference = money(receivables.glBalance - receivables.outstanding);
-  receivables.matched = Math.abs(receivables.difference) < 0.01;
-  payables.difference = money(payables.glBalance - payables.outstanding);
-  payables.matched = Math.abs(payables.difference) < 0.01;
   const inventory = {
     stockLines: stock.length,
     quantityOnHand: money(stock.reduce((sum, row) => sum + numberValue(row.quantity), 0)),
@@ -199,12 +198,12 @@ export async function buildFinancialReconciliationSnapshot(options?: {
 
   const ledgerDifference = money(totalDebit - totalCredit);
   const exceptions: string[] = [];
-  if (ledgerDifference !== 0) exceptions.push(`Posted ledger is out of balance by K${Math.abs(ledgerDifference).toFixed(2)}`);
+  if (ledgerDifference !== 0) exceptions.push(`Posted ledger is out of balance by ${baseCurrency} ${Math.abs(ledgerDifference).toFixed(2)}`);
   if (unbalancedJournals) exceptions.push(`${unbalancedJournals} posted journal(s) are individually unbalanced`);
   if (receivables.unpostedDocuments) exceptions.push(`${receivables.unpostedDocuments} active sales invoice(s) are not GL-posted`);
   if (payables.unpostedDocuments) exceptions.push(`${payables.unpostedDocuments} active supplier bill(s) are not GL-posted`);
-  if (!receivables.matched) exceptions.push(`Accounts receivable control differs from the customer subledger by K${Math.abs(receivables.difference).toFixed(2)}`);
-  if (!payables.matched) exceptions.push(`Accounts payable control differs from the supplier subledger by K${Math.abs(payables.difference).toFixed(2)}`);
+  if (!receivables.matched) exceptions.push(`Accounts receivable control differs from the customer subledger by ${baseCurrency} ${Math.abs(receivables.difference).toFixed(2)}`);
+  if (!payables.matched) exceptions.push(`Accounts payable control differs from the supplier subledger by ${baseCurrency} ${Math.abs(payables.difference).toFixed(2)}`);
   if (inventory.negativeStockLines) exceptions.push(`${inventory.negativeStockLines} stock line(s) have negative quantity`);
   if (banking.mappedAccounts !== banking.activeAccounts) exceptions.push(`${banking.activeAccounts - banking.mappedAccounts} active bank account(s) lack a GL mapping`);
   if (banking.unreconciledTransactions) exceptions.push(`${banking.unreconciledTransactions} bank transaction(s) remain unreconciled`);
@@ -215,7 +214,7 @@ export async function buildFinancialReconciliationSnapshot(options?: {
     generatedAt,
     generatedBy: options?.generatedBy || "local-system",
     asOf,
-    currency: "PGK" as const,
+    currency: baseCurrency,
     source: options?.source || "local-sqlite" as const,
     ledger: {
       postedJournals: journals.length,
