@@ -1427,10 +1427,11 @@ model AuditLog {
   @@index([entityType, entityCode])
 }
 model AuditChainState {
-  id           String   @id
-  nextSequence Int      @default(0)
-  headHash     String?
-  updatedAt    DateTime @updatedAt
+  id            String   @id
+  nextSequence  Int      @default(0)
+  headHash      String?
+  integrityHash String?
+  updatedAt     DateTime @updatedAt
 }
 
 
