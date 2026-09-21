@@ -64,6 +64,8 @@ export async function POST(request: Request) {
       projectId: quote.projectId || "",
       quoteDate: input.orderDate,
       expiryDate: "",
+      currency: String(quote.currency || "PGK"),
+      exchangeRate: Number(quote.exchangeRate || 0) || undefined,
       netAmount: Number(quote.netAmount || 0),
       gstAmount: Number(quote.gstAmount || 0),
       totalAmount: Number(quote.totalAmount || 0),
