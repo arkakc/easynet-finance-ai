@@ -32,11 +32,13 @@ export async function postFxRevaluationAtomic(input: {
 
   return runAtomicAccounting(async ({ tx, postJournal }) => {
     const baseCurrency = await companyBaseCurrency(tx);
-    const revaluationDateValue = new Date(`${revaluationDate}T00:00:00+10:00`);
+    const revaluationDateValue = new Date(`${revaluationDate}T23:59:59+10:00`);
+    const revaluationPostingDate = new Date(`${revaluationDate}T00:00:00+10:00`);
+
     const existing = await tx.fxRevaluation.findUnique({
       where: {
         revaluationDate_baseCurrency: {
-          revaluationDate: revaluationDateValue,
+          revaluationDate: revaluationPostingDate,
           baseCurrency,
         },
       },
@@ -53,36 +55,92 @@ export async function postFxRevaluationAtomic(input: {
       };
     }
 
-    const [invoices, bills] = await Promise.all([
+    // Reconstruct open monetary items as-of the closing date rather than using
+    // today's outstanding/status. This keeps retrospective period close correct
+    // even when later payments were posted before the controller ran revaluation.
+    const [invoices, bills, postedInvoiceCredits] = await Promise.all([
       tx.invoice.findMany({
         where: {
           glPosted: true,
-          outstanding: { gt: 0 },
-          currency: { not: baseCurrency },
           issuedDate: { lte: revaluationDateValue },
-          status: { in: ["SENT", "PARTIAL"] },
+          currency: { not: baseCurrency },
+          code: { not: { startsWith: "CN-" } },
+          status: { notIn: ["CANCELLED"] },
         },
         include: {
           customer: { select: { code: true } },
           project: { select: { code: true } },
+          paymentAllocations: {
+            where: {
+              allocationDate: { lte: revaluationDateValue },
+              OR: [{ reversalDate: null }, { reversalDate: { gt: revaluationDateValue } }],
+            },
+            select: { amount: true, baseAmount: true },
+          },
+          originalCreditNotes: {
+            where: {
+              issueDate: { lte: revaluationDateValue },
+              glPosted: true,
+              status: { not: "CANCELLED" },
+            },
+            select: { total: true },
+          },
         },
         orderBy: [{ currency: "asc" }, { issuedDate: "asc" }, { code: "asc" }],
       }),
       tx.supplierBill.findMany({
         where: {
           glPosted: true,
-          outstanding: { gt: 0 },
-          currency: { not: baseCurrency },
           billDate: { lte: revaluationDateValue },
-          status: { in: ["SENT", "PARTIAL"] },
+          currency: { not: baseCurrency },
+          status: { notIn: ["CANCELLED"] },
         },
         include: {
           supplier: { select: { code: true } },
           project: { select: { code: true } },
+          paymentAllocations: {
+            where: {
+              allocationDate: { lte: revaluationDateValue },
+              OR: [{ reversalDate: null }, { reversalDate: { gt: revaluationDateValue } }],
+            },
+            select: { amount: true, baseAmount: true },
+          },
+          refunds: {
+            where: {
+              refundDate: { lte: revaluationDateValue },
+              glPosted: true,
+              status: { not: "CANCELLED" },
+            },
+            select: { total: true },
+          },
         },
         orderBy: [{ currency: "asc" }, { billDate: "asc" }, { code: "asc" }],
       }),
+      tx.invoice.findMany({
+        where: {
+          code: { startsWith: "CN-" },
+          glPosted: true,
+          issuedDate: { lte: revaluationDateValue },
+          sourceDocId: { not: null },
+          status: { notIn: ["CANCELLED", "VOID"] },
+        },
+        select: {
+          sourceDocId: true,
+          total: true,
+          baseTotal: true,
+        },
+      }),
     ]);
+
+    const creditInvoiceByOriginal = new Map<string, { transaction: number; base: number }>();
+    for (const credit of postedInvoiceCredits) {
+      const key = String(credit.sourceDocId || "");
+      if (!key) continue;
+      const current = creditInvoiceByOriginal.get(key) || { transaction: 0, base: 0 };
+      current.transaction = roundCurrency(current.transaction + Number(credit.total || 0));
+      current.base = roundCurrency(current.base + Number(credit.baseTotal || 0));
+      creditInvoiceByOriginal.set(key, current);
+    }
 
     const journalLines: AtomicPostingLine[] = [];
     const detailRows: Array<{
@@ -111,15 +169,42 @@ export async function postFxRevaluationAtomic(input: {
         exchangeRate: Number(invoice.exchangeRate || 0) || undefined,
         postingDate: invoice.issuedDate,
       });
+
+      const allocationTransaction = roundCurrency(
+        invoice.paymentAllocations.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      );
+      const allocationBase = roundCurrency(
+        invoice.paymentAllocations.reduce((sum, row) => {
+          const stored = Number(row.baseAmount || 0);
+          return sum + (stored > 0 ? stored : Number(row.amount || 0) * documentFx.exchangeRate);
+        }, 0),
+      );
+      const legacyCreditTransaction = roundCurrency(
+        invoice.originalCreditNotes.reduce((sum, row) => sum + Number(row.total || 0), 0),
+      );
+      const invoiceCredit = creditInvoiceByOriginal.get(invoice.id) || { transaction: 0, base: 0 };
+      const creditTransaction = roundCurrency(legacyCreditTransaction + invoiceCredit.transaction);
+      const creditBase = roundCurrency(
+        legacyCreditTransaction * documentFx.exchangeRate
+        + (invoiceCredit.base > 0
+          ? invoiceCredit.base
+          : invoiceCredit.transaction * documentFx.exchangeRate),
+      );
+
+      const outstanding = roundCurrency(
+        Math.max(0, Number(invoice.total || 0) - allocationTransaction - creditTransaction),
+      );
+      if (outstanding <= 0.005) continue;
+
+      const baseTotal = Number(invoice.baseTotal || 0) > 0
+        ? roundCurrency(Number(invoice.baseTotal))
+        : roundCurrency(Number(invoice.total || 0) * documentFx.exchangeRate);
+      const historicalBase = roundCurrency(Math.max(0, baseTotal - allocationBase - creditBase));
       const closingRate = await latestExchangeRate(tx, {
         fromCurrency: invoice.currency,
         toCurrency: baseCurrency,
         rateDate: revaluationDate,
       });
-      const outstanding = roundCurrency(Number(invoice.outstanding || 0));
-      const historicalBase = Number(invoice.baseOutstanding || 0) > 0
-        ? roundCurrency(Number(invoice.baseOutstanding))
-        : roundCurrency(outstanding * documentFx.exchangeRate);
       const closingBase = roundCurrency(outstanding * closingRate);
       const difference = roundCurrency(closingBase - historicalBase);
       if (Math.abs(difference) < 0.01) continue;
@@ -180,6 +265,7 @@ export async function postFxRevaluationAtomic(input: {
           },
         );
       }
+
       totalGain = roundCurrency(totalGain + gain);
       totalLoss = roundCurrency(totalLoss + loss);
       detailRows.push({
@@ -206,15 +292,35 @@ export async function postFxRevaluationAtomic(input: {
         exchangeRate: Number(bill.exchangeRate || 0) || undefined,
         postingDate: bill.billDate,
       });
+
+      const allocationTransaction = roundCurrency(
+        bill.paymentAllocations.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      );
+      const allocationBase = roundCurrency(
+        bill.paymentAllocations.reduce((sum, row) => {
+          const stored = Number(row.baseAmount || 0);
+          return sum + (stored > 0 ? stored : Number(row.amount || 0) * documentFx.exchangeRate);
+        }, 0),
+      );
+      const refundTransaction = roundCurrency(
+        bill.refunds.reduce((sum, row) => sum + Number(row.total || 0), 0),
+      );
+      const refundBase = roundCurrency(refundTransaction * documentFx.exchangeRate);
+
+      const outstanding = roundCurrency(
+        Math.max(0, Number(bill.total || 0) - allocationTransaction - refundTransaction),
+      );
+      if (outstanding <= 0.005) continue;
+
+      const baseTotal = Number(bill.baseTotal || 0) > 0
+        ? roundCurrency(Number(bill.baseTotal))
+        : roundCurrency(Number(bill.total || 0) * documentFx.exchangeRate);
+      const historicalBase = roundCurrency(Math.max(0, baseTotal - allocationBase - refundBase));
       const closingRate = await latestExchangeRate(tx, {
         fromCurrency: bill.currency,
         toCurrency: baseCurrency,
         rateDate: revaluationDate,
       });
-      const outstanding = roundCurrency(Number(bill.outstanding || 0));
-      const historicalBase = Number(bill.baseOutstanding || 0) > 0
-        ? roundCurrency(Number(bill.baseOutstanding))
-        : roundCurrency(outstanding * documentFx.exchangeRate);
       const closingBase = roundCurrency(outstanding * closingRate);
       const difference = roundCurrency(closingBase - historicalBase);
       if (Math.abs(difference) < 0.01) continue;
@@ -275,6 +381,7 @@ export async function postFxRevaluationAtomic(input: {
           },
         );
       }
+
       totalGain = roundCurrency(totalGain + gain);
       totalLoss = roundCurrency(totalLoss + loss);
       detailRows.push({
@@ -350,7 +457,7 @@ export async function postFxRevaluationAtomic(input: {
     const record = await tx.fxRevaluation.create({
       data: {
         code,
-        revaluationDate: revaluationDateValue,
+        revaluationDate: revaluationPostingDate,
         reversalDate: new Date(`${reversalDate}T00:00:00+10:00`),
         baseCurrency,
         status: "POSTED",
