@@ -69,7 +69,16 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
     client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, parentId: true } }),
     client.bankAccount.findMany({ where: { isActive: true, chartOfAccountsId: { not: null } }, select: { chartOfAccountsId: true } }),
     client.globalSettings.findMany({
-      where: { key: { in: ["currency", "base_currency"] } },
+      where: {
+        key: {
+          in: [
+            "currency",
+            "base_currency",
+            "default_cash_account",
+            "default_bank_account",
+          ],
+        },
+      },
       select: { key: true, value: true },
     }),
   ]);
@@ -78,10 +87,22 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
     || currencySettings.find((row) => row.key === "base_currency")?.value
     || "PGK",
   ).trim().toUpperCase() || "PGK";
+  const configuredCashCodes = [
+    currencySettings.find((row) => row.key === "default_cash_account")?.value,
+    currencySettings.find((row) => row.key === "default_bank_account")?.value,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .map((value) => value.toUpperCase().startsWith("ACC-") ? value.slice(4) : value);
+  const configuredCashIds = accounts
+    .filter((account) => configuredCashCodes.includes(account.code))
+    .map((account) => account.id);
+
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
   const cashIds = new Set(accounts.filter((account) => /^(111|112)/.test(account.code)).map((account) => account.id));
   for (const bank of mappedBanks) if (bank.chartOfAccountsId) cashIds.add(bank.chartOfAccountsId);
+  for (const accountId of configuredCashIds) cashIds.add(accountId);
   const queue = [...cashIds];
   for (let index = 0; index < queue.length; index += 1) {
     for (const child of children.get(queue[index]) || []) if (!cashIds.has(child)) { cashIds.add(child); queue.push(child); }
