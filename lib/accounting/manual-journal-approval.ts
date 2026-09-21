@@ -1,6 +1,7 @@
 import { AccountTypeGL, Prisma, PrismaClient } from "@prisma/client";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
+import { appendAuditEvent } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 
 export type ManualJournalLineInput = {
@@ -323,16 +324,22 @@ export async function createPendingManualJournal(
       },
     });
 
-    await tx.auditLog.create({
-      data: {
-        action: "SUBMIT_FOR_APPROVAL",
-        entityType: "Journal",
-        entityId: journal.id,
-        entityCode: journal.code,
-        description: `Manual journal ${manualId} submitted for checker approval`,
-        userId: maker.id,
+    await appendAuditEvent({
+      action: "SUBMIT_FOR_APPROVAL",
+      entityType: "Journal",
+      entityId: journal.id,
+      entityCode: journal.code,
+      description: `Manual journal ${manualId} submitted for checker approval`,
+      actorEmail: maker.email,
+      userId: maker.id,
+      outcome: "SUCCESS",
+      metadata: {
+        manualId,
+        postingDate,
+        totalDebit: normalized.totalDebit,
+        totalCredit: normalized.totalCredit,
       },
-    });
+    }, tx);
 
     return {
       id: journal.id,
@@ -382,19 +389,24 @@ export async function approvePendingManualJournal(
       },
     });
 
-    await tx.auditLog.create({
-      data: {
-        action: "APPROVE_POST",
-        entityType: "Journal",
-        entityId: journal.id,
-        entityCode: journal.code,
-        description: [
-          "Checker approved and posted manual journal",
-          input.note ? `Note: ${String(input.note).trim()}` : "",
-        ].filter(Boolean).join(" · "),
-        userId: checker.id,
+    await appendAuditEvent({
+      action: "APPROVE_POST",
+      entityType: "Journal",
+      entityId: journal.id,
+      entityCode: journal.code,
+      description: [
+        "Checker approved and posted manual journal",
+        input.note ? `Note: ${String(input.note).trim()}` : "",
+      ].filter(Boolean).join(" · "),
+      actorEmail: checker.email,
+      userId: checker.id,
+      outcome: "SUCCESS",
+      metadata: {
+        makerEmail: journal.createdBy,
+        totalDebit: totals.totalDebit,
+        totalCredit: totals.totalCredit,
       },
-    });
+    }, tx);
 
     return {
       journalId: updated.code,
@@ -433,16 +445,17 @@ export async function rejectPendingManualJournal(
       data: { status: "CANCELLED" },
     });
 
-    await tx.auditLog.create({
-      data: {
-        action: "REJECT",
-        entityType: "Journal",
-        entityId: journal.id,
-        entityCode: journal.code,
-        description: `Manual journal rejected · Reason: ${note}`,
-        userId: checker.id,
-      },
-    });
+    await appendAuditEvent({
+      action: "REJECT",
+      entityType: "Journal",
+      entityId: journal.id,
+      entityCode: journal.code,
+      description: `Manual journal rejected · Reason: ${note}`,
+      actorEmail: checker.email,
+      userId: checker.id,
+      outcome: "SUCCESS",
+      metadata: { makerEmail: journal.createdBy, reason: note },
+    }, tx);
 
     return {
       journalId: updated.code,
