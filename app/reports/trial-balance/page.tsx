@@ -66,7 +66,8 @@ export default function TrialBalancePage() {
     ];
     const csv = rows
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
-      .join("\r\n");
+      .join("\r
+");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -133,10 +134,14 @@ export default function TrialBalancePage() {
               <span className="auto-badge">{data.accounts.length} Accounts</span>
             </div>
             <table className="data-table" style={{ minWidth: 900 }}>
-              <thead>\n                <tr><th>Account</th><th>Type</th><th>Current Balance</th><th>Debit</th><th>Credit</th><th>Net Dr/(Cr)</th></tr>\n              </thead>
+              <thead>
+<tr><th>Account</th><th>Type</th><th>Current Balance</th><th>Debit</th><th>Credit</th><th>Net Dr/(Cr)</th></tr>
+</thead>
               <tbody>
                 {data.accounts.map((row) => <tr key={row.accountId}>
-                  <td><strong>{row.accountCode} | {row.accountName}</strong></td>\n                  <td>{String(row.accountType).replaceAll("_", " ")}</td>\n                  <td>{money(Math.abs(row.balance), data.currency)} {row.balance < 0 ? "Cr" : "Dr"}</td>
+                  <td><strong>{row.accountCode} | {row.accountName}</strong></td>
+<td>{String(row.accountType).replaceAll("_", " ")}</td>
+<td>{money(Math.abs(row.balance), data.currency)} {row.balance < 0 ? "Cr" : "Dr"}</td>
                   <td>{money(row.debit, data.currency)}</td>
                   <td>{money(row.credit, data.currency)}</td>
                   <td>{money(row.balance, data.currency)}</td>
