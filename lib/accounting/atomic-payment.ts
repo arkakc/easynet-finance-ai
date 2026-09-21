@@ -2,7 +2,7 @@ import type { AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { allocateAdvancePaymentAtomic, createPaymentAllocationInTransaction } from "@/lib/accounting/payment-allocation";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
-import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
+import { realizedFxForSettlement, resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -21,6 +21,7 @@ export type AtomicPaymentFinalizationInput = {
   againstBillId?: string;
   exchangeGainAccountId?: string;
   exchangeLossAccountId?: string;
+  customerRefundCreditExchangeRate?: number;
   createdBy?: string;
   approvedBy?: string;
 };
@@ -91,8 +92,76 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       : null;
 
     let postingLines: AtomicPostingLine[];
+    let realizedFx = directAllocation?.realizedFx || 0;
 
-    if (directAllocation && !directAllocation.alreadyAllocated) {
+    if (input.documentType === "CUSTOMER_REFUND") {
+      const creditRate = Number(input.customerRefundCreditExchangeRate || 0);
+      if (fx.currency !== fx.baseCurrency && !(creditRate > 0)) {
+        throw new Error("Customer refund requires the historical exchange rate of the customer credit");
+      }
+      const carryingRate = fx.currency === fx.baseCurrency ? 1 : creditRate;
+      const refundFx = realizedFxForSettlement({
+        direction: "PAYABLE",
+        transactionAmount: amount,
+        documentExchangeRate: carryingRate,
+        settlementExchangeRate: fx.exchangeRate,
+      });
+      realizedFx = refundFx.signed;
+
+      const customerCreditAccount = input.lines.find((line) => Number(line.debit || 0) > 0)?.accountId;
+      if (!customerCreditAccount) throw new Error("Customer refund credit account could not be resolved");
+      const partyRef = payment.customer?.code || payment.customerId || "";
+      const projectRef = payment.project?.code || payment.projectId || input.projectId || "";
+      const txn = (side: "debit" | "credit", rate: number) => ({
+        transactionCurrency: fx.currency,
+        exchangeRate: rate,
+        transactionDebit: side === "debit" ? amount : 0,
+        transactionCredit: side === "credit" ? amount : 0,
+      });
+      const baseOnly = {
+        transactionCurrency: fx.baseCurrency,
+        exchangeRate: 1,
+        transactionDebit: 0,
+        transactionCredit: 0,
+      };
+
+      postingLines = [
+        {
+          accountId: customerCreditAccount,
+          debit: refundFx.documentBase,
+          ...txn("debit", carryingRate),
+          customerId: partyRef,
+          projectId: projectRef,
+          description: "Derecognize refundable customer credit",
+        },
+        {
+          accountId: input.cashBankAccountId,
+          credit: refundFx.settlementBase,
+          ...txn("credit", fx.exchangeRate),
+          customerId: partyRef,
+          projectId: projectRef,
+          description: "Customer refund payment",
+        },
+      ];
+      if (refundFx.gain > 0) {
+        postingLines.push({
+          accountId: input.exchangeGainAccountId || INITIAL_ACCOUNT_IDS.exchangeGain,
+          credit: refundFx.gain,
+          ...baseOnly,
+          projectId: projectRef,
+          description: "Realized foreign exchange gain on customer refund",
+        });
+      }
+      if (refundFx.loss > 0) {
+        postingLines.push({
+          accountId: input.exchangeLossAccountId || INITIAL_ACCOUNT_IDS.exchangeLoss,
+          debit: refundFx.loss,
+          ...baseOnly,
+          projectId: projectRef,
+          description: "Realized foreign exchange loss on customer refund",
+        });
+      }
+    } else if (directAllocation && !directAllocation.alreadyAllocated) {
       const cashAccount = input.cashBankAccountId;
       const settlementAccount = input.lines.find(
         (line) => String(line.accountId || "").toUpperCase() !== String(cashAccount || "").toUpperCase(),
@@ -235,7 +304,7 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       baseCurrency: fx.baseCurrency,
       exchangeRate: fx.exchangeRate,
       baseAmount,
-      realizedFx: directAllocation?.realizedFx || 0,
+      realizedFx,
     };
   });
 }
