@@ -309,7 +309,6 @@ export async function buildFinancialReconciliationSnapshot(options?: {
     client.$transaction((tx) => companyBaseCurrency(tx)),
   ]);
 
-  const accountById = new Map(accountsMaster.map((account) => [account.id, account]));
   const children = new Map<string, string[]>();
   for (const account of accountsMaster) {
     if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
@@ -382,7 +381,6 @@ export async function buildFinancialReconciliationSnapshot(options?: {
 
   const invoiceControl = invoices.map((invoice) => {
     const rate = numberValue(invoice.exchangeRate) || 1;
-    const transactionPaid = invoice.paymentAllocations.reduce((sum, row) => sum + numberValue(row.amount), 0);
     const transactionCredits = invoice.originalCreditNotes.reduce((sum, row) => sum + numberValue(row.total), 0);
     const basePaid = invoice.paymentAllocations.reduce((sum, row) => {
       const stored = numberValue(row.baseAmount);
@@ -401,7 +399,6 @@ export async function buildFinancialReconciliationSnapshot(options?: {
 
   const billControl = bills.map((bill) => {
     const rate = numberValue(bill.exchangeRate) || 1;
-    const transactionPaid = bill.paymentAllocations.reduce((sum, row) => sum + numberValue(row.amount), 0);
     const transactionCredits = bill.refunds.reduce((sum, row) => sum + numberValue(row.total), 0);
     const basePaid = bill.paymentAllocations.reduce((sum, row) => {
       const stored = numberValue(row.baseAmount);
