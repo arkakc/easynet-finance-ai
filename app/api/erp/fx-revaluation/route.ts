@@ -67,8 +67,8 @@ export async function POST(request: Request) {
       revaluationDate: input.revaluationDate,
       receivableAccountId: defaults.defaultReceivableAccount,
       payableAccountId: defaults.defaultPayableAccount,
-      exchangeGainAccountId: defaults.exchangeGainAccount,
-      exchangeLossAccountId: defaults.exchangeLossAccount,
+      exchangeGainAccountId: defaults.exchangeUnrealizedGainAccount,
+      exchangeLossAccountId: defaults.exchangeUnrealizedLossAccount,
       createdBy: user.email,
       approvedBy: user.email,
     });
