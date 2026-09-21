@@ -19,11 +19,9 @@ async function main() {
 
   const [
     { allocateAdvancePartial },
-    { findPaymentSchedules },
     { prisma },
   ] = await Promise.all([
     import("../lib/accounting/advance-allocation"),
-    import("../lib/accounting/payment-schedule-store"),
     import("../src/lib/prisma"),
   ]);
 
@@ -116,9 +114,11 @@ async function main() {
       throw new Error("Invalid partial advance allocation did not fail as expected");
     }
 
-    const [invoiceAfterFailure, schedulesAfterFailure, failedJournal] = await Promise.all([
+    const [invoiceAfterFailure, allocationsAfterFailure, failedJournal] = await Promise.all([
       prisma.invoice.findUnique({ where: { id: invoice.id } }),
-      findPaymentSchedules("CUSTOMER_ADVANCE_ALLOCATION", payment.id),
+      prisma.paymentAllocation.findMany({
+        where: { paymentId: payment.id, allocationType: "ADVANCE", status: "POSTED" },
+      }),
       prisma.journalHeader.findFirst({
         where: {
           sourceDocType: "CUSTOMER_ADVANCE_ALLOCATION",
@@ -134,8 +134,8 @@ async function main() {
     ) {
       throw new Error("Failed partial advance allocation changed AR");
     }
-    if (schedulesAfterFailure.length) {
-      throw new Error("Failed partial advance allocation left a ledger row");
+    if (allocationsAfterFailure.length) {
+      throw new Error("Failed partial advance allocation left a PaymentAllocation row");
     }
     if (failedJournal) {
       throw new Error("Failed partial advance allocation left a journal");
@@ -158,7 +158,10 @@ async function main() {
       allocationDate: "2099-06-02",
     });
     const afterFirst = await prisma.invoice.findUnique({ where: { id: invoice.id } });
-    const firstSchedules = await findPaymentSchedules("CUSTOMER_ADVANCE_ALLOCATION", payment.id);
+    const firstAllocations = await prisma.paymentAllocation.findMany({
+      where: { paymentId: payment.id, allocationType: "ADVANCE", status: "POSTED" },
+      orderBy: [{ allocationDate: "asc" }, { createdAt: "asc" }],
+    });
 
     if (
       !afterFirst
@@ -168,8 +171,13 @@ async function main() {
     ) {
       throw new Error("First partial advance allocation did not settle AR");
     }
-    if (firstSchedules.length !== 1 || Number(firstSchedules[0].amount) !== 25) {
-      throw new Error("First partial allocation ledger row was not committed");
+    if (
+      firstAllocations.length !== 1
+      || Number(firstAllocations[0].amount) !== 25
+      || firstAllocations[0].invoiceId !== invoice.id
+      || firstAllocations[0].journalId !== first.journalId
+    ) {
+      throw new Error("First partial PaymentAllocation row was not committed");
     }
 
     const second = await allocateAdvancePartial({
@@ -179,9 +187,12 @@ async function main() {
       amount: 15,
       allocationDate: "2099-06-03",
     });
-    const [afterSecond, schedulesAfterSecond, journalCount] = await Promise.all([
+    const [afterSecond, allocationsAfterSecond, journalCount] = await Promise.all([
       prisma.invoice.findUnique({ where: { id: invoice.id } }),
-      findPaymentSchedules("CUSTOMER_ADVANCE_ALLOCATION", payment.id),
+      prisma.paymentAllocation.findMany({
+        where: { paymentId: payment.id, allocationType: "ADVANCE", status: "POSTED" },
+        orderBy: [{ allocationDate: "asc" }, { createdAt: "asc" }],
+      }),
       prisma.journalHeader.count({
         where: { sourceDocType: "CUSTOMER_ADVANCE_ALLOCATION" },
       }),
@@ -195,8 +206,11 @@ async function main() {
     ) {
       throw new Error("Second partial advance allocation did not settle AR");
     }
-    if (schedulesAfterSecond.length !== 2) {
-      throw new Error("Multiple partial advance allocations were not preserved");
+    if (
+      allocationsAfterSecond.length !== 2
+      || allocationsAfterSecond.some((row) => row.invoiceId !== invoice.id || !row.journalId)
+    ) {
+      throw new Error("Multiple partial PaymentAllocation rows were not preserved");
     }
     if (first.remainingAdvance !== 35 || second.remainingAdvance !== 20) {
       throw new Error("Remaining advance balance is incorrect");
@@ -207,11 +221,11 @@ async function main() {
       liveDatabaseChanged: false,
       failedAllocationRolledBack,
       failedSettlementRolledBack: Number(invoiceAfterFailure.outstanding) === 100,
-      failedLedgerRowRolledBack: schedulesAfterFailure.length === 0,
+      failedAllocationRowRolledBack: allocationsAfterFailure.length === 0,
       failedJournalRolledBack: failedJournal === null,
       firstPartialAllocationCommitted: Number(afterFirst.outstanding) === 75,
       secondPartialAllocationCommitted: Number(afterSecond.outstanding) === 60,
-      multiplePartialAllocationsPreserved: schedulesAfterSecond.length === 2,
+      multiplePartialAllocationsPreserved: allocationsAfterSecond.length === 2,
       partialAllocationJournalsCommitted: journalCount === 2,
       remainingAdvanceCorrect: second.remainingAdvance === 20,
     }, null, 2));
