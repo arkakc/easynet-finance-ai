@@ -95,6 +95,9 @@ export default function StockWorkspaceV6(){
             </div>
           </details>
         )}
+        <Link prefetch={false} className="button-link secondary-link" href="/stock/warehouses">
+          Warehouse Stock
+        </Link>
         <Link prefetch={false} className="button-link secondary-link" href="/stock/new-item">
           + Quick New Item
         </Link>
