@@ -1509,6 +1509,49 @@ model ExchangeRate {
   @@index([fromCurrency, toCurrency, rateDate])
 }
 
+model FxRevaluation {
+  id                String              @id @default(cuid())
+  code              String              @unique
+  revaluationDate   DateTime
+  reversalDate      DateTime
+  baseCurrency      String
+  status            String              @default("POSTED")
+  totalGain         Decimal             @default(0)
+  totalLoss         Decimal             @default(0)
+  journalId         String              @unique
+  reversalJournalId String              @unique
+  createdBy         String
+  createdAt         DateTime            @default(now())
+  lines             FxRevaluationLine[]
+
+  @@index([revaluationDate])
+  @@index([status])
+}
+
+model FxRevaluationLine {
+  id                 String        @id @default(cuid())
+  revaluationId      String
+  documentType       String
+  documentId         String
+  documentNumber     String
+  partyType          String
+  partyId            String
+  projectId          String?
+  currency           String
+  outstandingAmount  Decimal
+  historicalBase     Decimal
+  closingRate        Decimal
+  closingBase        Decimal
+  baseDifference     Decimal
+  gainAmount         Decimal       @default(0)
+  lossAmount         Decimal       @default(0)
+  revaluation        FxRevaluation @relation(fields: [revaluationId], references: [id], onDelete: Cascade)
+
+  @@index([revaluationId])
+  @@index([documentType, documentId])
+  @@index([currency])
+}
+
 model AccountingPeriod {
   id               String                 @id @default(cuid())
   code             String                 @unique // YYYY-MM
