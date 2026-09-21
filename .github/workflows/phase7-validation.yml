@@ -1,0 +1,39 @@
+name: Phase 7 Multi-Currency Validation
+
+on:
+  push:
+    branches:
+      - fix/phase-7-multi-currency
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma validate
+        run: npx prisma validate
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        env:
+          SESSION_SECRET: phase7-ci-session-secret-please-change-only-for-ci
+          DATABASE_URL: file:./prisma/dev.db
+        run: npm run build
