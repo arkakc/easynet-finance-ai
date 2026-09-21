@@ -7,9 +7,11 @@ const REQUIRED_ACCOUNTS = [
   { accountId: "ACC-2191", accountCode: "2191", accountName: "Landed Cost Clearing", accountType: "Liability", parentAccount: "ACC-2100", active: true },
   { accountId: "ACC-4910", accountCode: "4910", accountName: "Inventory Adjustment / Revaluation Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
   { accountId: "ACC-4920", accountCode: "4920", accountName: "Realized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4930", accountCode: "4930", accountName: "Unrealized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
   { accountId: "ACC-5110", accountCode: "5110", accountName: "Purchase Price Variance", accountType: "Expense", parentAccount: "ACC-5000", active: true },
   { accountId: "ACC-5120", accountCode: "5120", accountName: "Inventory Adjustment / NRV Write-down", accountType: "Expense", parentAccount: "ACC-5000", active: true },
   { accountId: "ACC-6995", accountCode: "6995", accountName: "Realized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6996", accountCode: "6996", accountName: "Unrealized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
 ] as const;
 
 const REQUIRED_SETTINGS = [
@@ -21,6 +23,8 @@ const REQUIRED_SETTINGS = [
   { key: "currency", value: "PGK", notes: "Company base currency. General Ledger amounts are stored in this currency." },
   { key: "exchange_gain_account", value: "ACC-4920", notes: "Realized foreign exchange gain account." },
   { key: "exchange_loss_account", value: "ACC-6995", notes: "Realized foreign exchange loss account." },
+  { key: "exchange_unrealized_gain_account", value: "ACC-4930", notes: "Period-end unrealized foreign exchange gain account." },
+  { key: "exchange_unrealized_loss_account", value: "ACC-6996", notes: "Period-end unrealized foreign exchange loss account." },
 ] as const;
 
 let ensurePromise: Promise<void> | null = null;
