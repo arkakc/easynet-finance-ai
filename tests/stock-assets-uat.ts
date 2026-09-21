@@ -5,8 +5,15 @@ const baseUrl = process.env.UAT_BASE_URL || `http://localhost:${process.env.PORT
 
 async function main() {
   const { createSessionToken, sessionCookie, ROLE_PERMISSIONS } = await import("../lib/auth");
+  const roleUsers: Partial<Record<Role, { email: string; name: string }>> = {
+    "System Manager": { email: "admin@easynet.local", name: "UAT Administrator" },
+    "Sales User": { email: "sales@easynet.local", name: "UAT Sales User" },
+    "Stock User": { email: "field@easynet.local", name: "UAT Stock User" },
+  };
   const makeHeaders = (role: Role) => {
-    const user: SessionUser = { email: `${role.toLowerCase().replace(/\s+/g, ".")}@uat.local`, name: "UAT", roles: [role], permissions: ROLE_PERMISSIONS[role] };
+    const identity = roleUsers[role];
+    if (!identity) throw new Error(`No seeded UAT identity for ${role}`);
+    const user: SessionUser = { ...identity, roles: [role], permissions: ROLE_PERMISSIONS[role], sessionVersion: 1 };
     return { Cookie: `${sessionCookie.name}=${createSessionToken(user)}` };
   };
   const checks: Record<string, number> = {};
