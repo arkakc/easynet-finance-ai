@@ -30,7 +30,11 @@
     "warehouse-stock:preview": "tsx scripts/backfill-warehouse-stock.ts",
     "warehouse-stock:backfill": "tsx scripts/backfill-warehouse-stock.ts --apply",
     "multi-currency:preview": "tsx scripts/backfill-multi-currency.ts",
-    "multi-currency:backfill": "tsx scripts/backfill-multi-currency.ts --apply"
+    "multi-currency:backfill": "tsx scripts/backfill-multi-currency.ts --apply",
+    "db:clients": "prisma generate && npm run db:postgres:client",
+    "predev": "npm run db:clients",
+    "prebuild": "npm run db:clients",
+    "pretypecheck": "npm run db:clients"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.0.0",
