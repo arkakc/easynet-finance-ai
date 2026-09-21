@@ -43,6 +43,8 @@
     "warehouse-stock:preview": "tsx scripts/backfill-warehouse-stock.ts",
     "warehouse-stock:backfill": "tsx scripts/backfill-warehouse-stock.ts --apply",
     "test:warehouse-stock": "tsx tests/warehouse-stock-uat.ts",
+    "multi-currency:preview": "tsx scripts/backfill-multi-currency.ts",
+    "multi-currency:backfill": "tsx scripts/backfill-multi-currency.ts --apply",
     "test:financial-statements": "tsx tests/financial-statements-uat.ts",
     "test:cash-flow": "tsx tests/cash-flow-uat.ts",
     "test:subledger-recovery": "tsx tests/subledger-recovery-uat.ts",
