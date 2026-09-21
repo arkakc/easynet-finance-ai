@@ -20,18 +20,23 @@ export async function GET() {
         include: { chartOfAccounts: { select: { code: true } } },
       }).catch(() => []),
       prisma.globalSettings.findMany({
-        where: { key: { in: ["default_cash_account", "default_bank_account"] } },
-        select: { value: true },
+        where: { key: { in: ["default_cash_account", "default_bank_account", "currency", "base_currency"] } },
+        select: { key: true, value: true },
       }).catch(() => []),
     ]);
     const dynamicCashBankIds = new Set(CASH_BANK_IDS);
     linkedBankAccounts.forEach((row) => {
       if (row.chartOfAccounts?.code) dynamicCashBankIds.add(`ACC-${row.chartOfAccounts.code}`);
     });
-    settings.forEach((row) => {
+    settings.filter((row) => ["default_cash_account", "default_bank_account"].includes(row.key)).forEach((row) => {
       const code = String(row.value || "").trim().replace(/^ACC-/i, "");
       if (code) dynamicCashBankIds.add(`ACC-${code}`);
     });
+    const baseCurrency = String(
+      settings.find((row) => row.key === "currency")?.value
+      || settings.find((row) => row.key === "base_currency")?.value
+      || "PGK",
+    ).trim().toUpperCase();
 
     const balanceByAccount = new Map<string, number>();
     for (const line of lines.rows || []) {
@@ -58,7 +63,7 @@ export async function GET() {
       .filter((row) => row.isCashBank)
       .sort((a, b) => a.accountCode.localeCompare(b.accountCode));
 
-    return NextResponse.json({ ok: true, accounts: allAccounts, cashBankAccounts });
+    return NextResponse.json({ ok: true, accounts: allAccounts, cashBankAccounts, baseCurrency });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Reference option load failed";
     return NextResponse.json(
