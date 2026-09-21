@@ -140,9 +140,9 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
     }),
-    client.globalSettings.findFirst({
+    client.globalSettings.findMany({
       where: { key: { in: ["currency", "base_currency"] } },
-      select: { value: true },
+      select: { key: true, value: true },
     }),
     client.fxRevaluationLine.findMany({
       where: {
@@ -182,7 +182,11 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
   const totalEquity = total(equity);
   const equationDifference = round(totalAssets - totalLiabilities - totalEquity - currentEarnings);
 
-  const baseCurrency = String(baseCurrencySetting?.value || "PGK").trim().toUpperCase() || "PGK";
+  const baseCurrency = String(
+    baseCurrencySetting.find((row) => row.key === "currency")?.value
+    || baseCurrencySetting.find((row) => row.key === "base_currency")?.value
+    || "PGK",
+  ).trim().toUpperCase() || "PGK";
   const activeRevaluationByDocument = new Map<string, number>();
   for (const row of activeFxRevaluations) {
     activeRevaluationByDocument.set(
