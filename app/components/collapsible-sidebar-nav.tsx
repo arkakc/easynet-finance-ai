@@ -12,6 +12,7 @@ export type SidebarNavGroup = {
 
 type Props = {
   groups: SidebarNavGroup[];
+  compact?: boolean;
 };
 
 const AUTO_COLLAPSE_MS = 30_000;
@@ -27,7 +28,7 @@ function hrefIsActive(href: string, pathname: string, searchParams: URLSearchPar
   return true;
 }
 
-export default function CollapsibleSidebarNav({ groups }: Props) {
+export default function CollapsibleSidebarNav({ groups, compact = false }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -60,6 +61,7 @@ export default function CollapsibleSidebarNav({ groups }: Props) {
   }, []);
 
   const toggle = (label: string) => {
+    if (compact) return;
     setExpanded((current) => {
       const next = new Set(current);
       if (next.has(label)) {
@@ -78,14 +80,14 @@ export default function CollapsibleSidebarNav({ groups }: Props) {
 
   return <nav>
     {groups.map((group) => {
-      const isCollapsed = !expanded.has(group.label);
-      return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"}`} key={group.label}>
-        <button type="button" className="nav-label" onClick={() => toggle(group.label)} aria-expanded={!isCollapsed} aria-controls={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`}>
+      const isCollapsed = compact || !expanded.has(group.label);
+      return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"} ${compact ? "nav-section-compact" : ""}`} key={group.label} title={compact ? group.label : undefined}>
+        <button type="button" className="nav-label" onClick={() => toggle(group.label)} aria-expanded={!isCollapsed} aria-controls={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`} aria-label={compact ? group.label : undefined}>
           <span className="nav-label-main">
             <span className="nav-section-icon">{group.icon}</span>
-            <span>{group.label}</span>
+            <span className="nav-label-text">{group.label}</span>
           </span>
-          <span className="nav-section-chevron" aria-hidden="true">⌄</span>
+          {!compact && <span className="nav-section-chevron" aria-hidden="true">⌄</span>}
         </button>
         <div className="nav-links" id={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`}>
           {group.links.map((link) => link.disabled ? (
