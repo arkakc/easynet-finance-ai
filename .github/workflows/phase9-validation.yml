@@ -49,6 +49,21 @@ jobs:
       - name: Phase 8 reporting reconciliation regression
         run: npm run test:reporting-reconciliation
 
+      - name: Manual journal maker-checker regression
+        run: npm run test:manual-journal-approval
+
+      - name: Period close regression
+        run: npm run test:period-close
+
+      - name: Chart of Accounts import regression
+        run: npm run test:coa-import
+
+      - name: Transaction reset regression
+        run: npm run test:transaction-reset
+
+      - name: Master-data reset regression
+        run: npm run test:master-reset
+
       - name: Phase 9 security and audit UAT
         run: npm run test:security-audit
 
