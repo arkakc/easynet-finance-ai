@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { prisma } from "@/src/lib/prisma";
 
@@ -67,8 +68,8 @@ export default async function JournalsPage() {
 
   try {
     const [journalHeaders, journalLines, chartOfAccounts] = await Promise.all([
-      prisma.journalHeader.findMany({ where: { status: "POSTED" }, orderBy: { createdAt: "desc" } }),
-      prisma.journalLine.findMany({ where: { journal: { status: "POSTED" } }, orderBy: { lineNo: "asc" } }),
+      prisma.journalHeader.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.journalLine.findMany({ orderBy: { lineNo: "asc" } }),
       prisma.chartOfAccounts.findMany({ orderBy: { code: "asc" } }),
     ]);
 
@@ -110,16 +111,18 @@ export default async function JournalsPage() {
 
   const account = new Map(accounts.map((row) => [row.accountId, `${row.accountCode} — ${row.accountName}`]));
   headers.sort((a, b) => createdValue(b) - createdValue(a));
-  const totalDebits = lines.reduce((sum, line) => sum + n(line.debit), 0);
-  const totalCredits = lines.reduce((sum, line) => sum + n(line.credit), 0);
+  const postedIds = new Set(headers.filter((row) => row.status === "POSTED").map((row) => row.journalId));
+  const postedLines = lines.filter((line) => postedIds.has(line.journalId));
+  const totalDebits = postedLines.reduce((sum, line) => sum + n(line.debit), 0);
+  const totalCredits = postedLines.reduce((sum, line) => sum + n(line.credit), 0);
   const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
 
   return (
     <>
       <div className="page-head">
         <div>
-          <h2>Posted Journals</h2>
-          <p className="small">Papua New Guinea immutable accounting ledger · Prisma authoritative source.</p>
+          <h2>Journal Register</h2>
+          <p className="small">All drafted, pending, posted and cancelled journal entries · Prisma authoritative source.</p>
         </div>
         <div className="page-head-actions">
           <div className="badge">{isBalanced ? "✓ BALANCED" : "⚠️ UNBALANCED"}</div>
@@ -139,15 +142,15 @@ export default async function JournalsPage() {
 
       <div className="grid">
         <div className="card">
-          <div className="label">Posted Journals</div>
+          <div className="label">All Journals</div>
           <div className="value">{headers.length}</div>
         </div>
         <div className="card">
-          <div className="label">Total Debits</div>
+          <div className="label">Posted Debits</div>
           <div className="value">{money(totalDebits)}</div>
         </div>
         <div className="card">
-          <div className="label">Total Credits</div>
+          <div className="label">Posted Credits</div>
           <div className="value">{money(totalCredits)}</div>
         </div>
         <div className="card">
@@ -169,7 +172,7 @@ export default async function JournalsPage() {
           <section className="panel" key={header.journalId}>
             <div className="journal-head">
               <div>
-                <strong>{header.journalId}</strong>
+                <Link href={`/journals/${encodeURIComponent(header.journalId)}`}><strong>{header.journalId}</strong></Link>
                 <br />
                 <span className="small">
                   Created {createdLabel(header)} · Posting {formatAccountingDate(header.postingDate)} · {header.documentType} · {header.documentNumber}
