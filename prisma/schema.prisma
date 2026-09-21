@@ -22,6 +22,11 @@ model User {
   role              Role        @default(USER)
   status            UserStatus  @default(ACTIVE)
   lastLoginAt       DateTime?
+  lastFailedLoginAt DateTime?
+  failedLoginCount  Int         @default(0)
+  lockedUntil       DateTime?
+  sessionVersion    Int         @default(1)
+  passwordChangedAt DateTime?
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
   accounts          Account[]
@@ -84,6 +89,18 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([token, identifier])
+}
+
+model AuthThrottle {
+  id              String   @id @default(cuid())
+  keyHash         String   @unique
+  attempts        Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  blockedUntil    DateTime?
+  updatedAt       DateTime @updatedAt
+
+  @@index([blockedUntil])
+  @@index([updatedAt])
 }
 
 // ============================================
@@ -1381,22 +1398,30 @@ model Favorite {
 // AUDIT & LOGGING
 // ============================================
 model AuditLog {
-  id          String   @id @default(cuid())
-  action      String // CREATE, UPDATE, DELETE, POST, APPROVE, REJECT, LOGIN, etc.
-  entityType  String // User, Invoice, Payment, Journal, etc.
-  entityId    String?
-  entityCode  String?
-  description String?
-  changes     String? // before/after for updates
-  userId      String
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
-  user        User?    @relation(fields: [userId], references: [id])
+  id            String   @id @default(cuid())
+  action        String // CREATE, UPDATE, DELETE, POST, APPROVE, REJECT, LOGIN, etc.
+  entityType    String // User, Invoice, Payment, Journal, Security, etc.
+  entityId      String?
+  entityCode    String?
+  description   String?
+  changes       String? // before/after for updates
+  metadata      String? // structured security/audit context
+  outcome       String   @default("SUCCESS")
+  requestId     String?
+  actorEmail    String?
+  userId        String?
+  ipAddress     String?
+  userAgent     String?
+  previousHash  String?
+  integrityHash String?  @unique
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
   @@index([action])
+  @@index([outcome])
   @@index([userId])
+  @@index([requestId])
   @@index([createdAt])
   @@index([entityType, entityCode])
 }
