@@ -277,10 +277,58 @@ export async function applySubledgerRecovery(
       const journal = await tx.journalHeader.findUnique({ where: { id: row.journalId }, include: { lines: { include: { account: true } } } });
       if (!journal || journal.status !== "POSTED") throw new Error(`Posted journal ${row.journalCode} no longer exists`);
       const bankCode = journal.lines.find((line) => Number(line.debit) > 0 && /^(111|112)/.test(line.account.code))?.account.code || null;
-      const saved = await tx.payment.create({ data: { code: journal.code, type: "CUSTOMER_RECEIPT", date: journal.date, amount: row.total, currency: journal.currency, exchangeRate: journal.exchangeRate, paymentMethod: "BANK", referenceAccount: bankCode, referenceNumber: journal.reference, status: "CLEARED", notes: `Recovered from posted journal ${journal.code}; no duplicate GL posting created.`, customerId: invoice.customerId, invoiceId: invoice.id, depositAccount: bankCode, clearanceDate: journal.date, createdBy: input.actorEmail, approvedBy: input.actorEmail, approvedAt: new Date() } });
+      const exchangeRate = Number(invoice.exchangeRate || journal.exchangeRate || 1);
+      const baseAmount = round(row.total * exchangeRate);
+      const saved = await tx.payment.create({ data: {
+        code: journal.code,
+        type: "CUSTOMER_RECEIPT",
+        date: journal.date,
+        amount: row.total,
+        baseAmount,
+        currency: journal.currency,
+        exchangeRate,
+        paymentMethod: "BANK",
+        referenceAccount: bankCode,
+        referenceNumber: journal.reference,
+        status: "CLEARED",
+        notes: `Recovered from posted journal ${journal.code}; no duplicate GL posting created.`,
+        customerId: invoice.customerId,
+        depositAccount: bankCode,
+        clearanceDate: journal.date,
+        journalId: journal.code,
+        createdBy: input.actorEmail,
+        approvedBy: input.actorEmail,
+        approvedAt: new Date(),
+      } });
+      await tx.paymentAllocation.create({ data: {
+        code: `MIG-ALLOC-${journal.code}`,
+        paymentId: saved.id,
+        invoiceId: invoice.id,
+        allocationDate: journal.date,
+        amount: row.total,
+        baseAmount,
+        currency: journal.currency,
+        exchangeRate,
+        realizedFx: 0,
+        allocationType: "MIGRATED",
+        status: "POSTED",
+        journalId: journal.code,
+        idempotencyKey: `MIGRATED:${journal.id}:${invoice.id}`,
+        createdBy: input.actorEmail,
+      } });
       const paid = round(Number(invoice.amountPaid) + row.total);
       const outstanding = round(Math.max(0, Number(invoice.total) - paid));
-      await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid: paid, outstanding, status: outstanding === 0 ? "PAID" : "PARTIAL", updatedBy: input.actorEmail } });
+      const basePaid = round(Number(invoice.baseAmountPaid || 0) + baseAmount);
+      const invoiceBaseTotal = Number(invoice.baseTotal || 0) > 0 ? Number(invoice.baseTotal) : round(Number(invoice.total) * exchangeRate);
+      const baseOutstanding = round(Math.max(0, invoiceBaseTotal - basePaid));
+      await tx.invoice.update({ where: { id: invoice.id }, data: {
+        amountPaid: paid,
+        outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
+        status: outstanding === 0 ? "PAID" : "PARTIAL",
+        updatedBy: input.actorEmail,
+      } });
       created.push({ kind: row.kind, id: saved.id, code: saved.code });
     }
 
@@ -290,10 +338,58 @@ export async function applySubledgerRecovery(
       const journal = await tx.journalHeader.findUnique({ where: { id: row.journalId }, include: { lines: { include: { account: true } } } });
       if (!journal || journal.status !== "POSTED") throw new Error(`Posted journal ${row.journalCode} no longer exists`);
       const bankCode = journal.lines.find((line) => Number(line.credit) > 0 && /^(111|112)/.test(line.account.code))?.account.code || null;
-      const saved = await tx.payment.create({ data: { code: journal.code, type: "SUPPLIER_PAYMENT", date: journal.date, amount: row.total, currency: journal.currency, exchangeRate: journal.exchangeRate, paymentMethod: "BANK", referenceAccount: bankCode, referenceNumber: journal.reference, status: "CLEARED", notes: `Recovered from posted journal ${journal.code}; no duplicate GL posting created.`, supplierId: bill.supplierId, billId: bill.id, depositAccount: bankCode, clearanceDate: journal.date, createdBy: input.actorEmail, approvedBy: input.actorEmail, approvedAt: new Date() } });
+      const exchangeRate = Number(bill.exchangeRate || journal.exchangeRate || 1);
+      const baseAmount = round(row.total * exchangeRate);
+      const saved = await tx.payment.create({ data: {
+        code: journal.code,
+        type: "SUPPLIER_PAYMENT",
+        date: journal.date,
+        amount: row.total,
+        baseAmount,
+        currency: journal.currency,
+        exchangeRate,
+        paymentMethod: "BANK",
+        referenceAccount: bankCode,
+        referenceNumber: journal.reference,
+        status: "CLEARED",
+        notes: `Recovered from posted journal ${journal.code}; no duplicate GL posting created.`,
+        supplierId: bill.supplierId,
+        depositAccount: bankCode,
+        clearanceDate: journal.date,
+        journalId: journal.code,
+        createdBy: input.actorEmail,
+        approvedBy: input.actorEmail,
+        approvedAt: new Date(),
+      } });
+      await tx.paymentAllocation.create({ data: {
+        code: `MIG-ALLOC-${journal.code}`,
+        paymentId: saved.id,
+        billId: bill.id,
+        allocationDate: journal.date,
+        amount: row.total,
+        baseAmount,
+        currency: journal.currency,
+        exchangeRate,
+        realizedFx: 0,
+        allocationType: "MIGRATED",
+        status: "POSTED",
+        journalId: journal.code,
+        idempotencyKey: `MIGRATED:${journal.id}:${bill.id}`,
+        createdBy: input.actorEmail,
+      } });
       const paid = round(Number(bill.amountPaid) + row.total);
       const outstanding = round(Math.max(0, Number(bill.total) - paid));
-      await tx.supplierBill.update({ where: { id: bill.id }, data: { amountPaid: paid, outstanding, status: outstanding === 0 ? "PAID" : "PARTIAL", updatedBy: input.actorEmail } });
+      const basePaid = round(Number(bill.baseAmountPaid || 0) + baseAmount);
+      const billBaseTotal = Number(bill.baseTotal || 0) > 0 ? Number(bill.baseTotal) : round(Number(bill.total) * exchangeRate);
+      const baseOutstanding = round(Math.max(0, billBaseTotal - basePaid));
+      await tx.supplierBill.update({ where: { id: bill.id }, data: {
+        amountPaid: paid,
+        outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
+        status: outstanding === 0 ? "PAID" : "PARTIAL",
+        updatedBy: input.actorEmail,
+      } });
       created.push({ kind: row.kind, id: saved.id, code: saved.code });
     }
 
