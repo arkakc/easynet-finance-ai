@@ -17,6 +17,7 @@ import {
 } from "@/lib/backend/prisma-store";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { normalizeCurrency } from "@/lib/accounting/currency";
 
 const optionalText = z.string().trim().optional().default("");
 const optionalNumber = z.coerce.number().finite().nonnegative().optional().default(0);
@@ -31,6 +32,7 @@ const customerSchema = z.object({
   taxId: optionalText,
   creditTermsDays: optionalNumber,
   creditLimit: optionalNumber,
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
 });
 
 const supplierSchema = z.object({
@@ -42,6 +44,7 @@ const supplierSchema = z.object({
   address: optionalText,
   taxId: optionalText,
   paymentTermsDays: optionalNumber,
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
 });
 
 const projectSchema = z.object({
@@ -60,6 +63,14 @@ const projectSchema = z.object({
 
 function generatedId(prefix: string) {
   return documentSeriesId(prefix);
+}
+
+async function localBaseCurrency() {
+  const row = await prisma.globalSettings.findFirst({
+    where: { key: { in: ["currency", "base_currency"] } },
+    orderBy: { updatedAt: "desc" },
+  });
+  return normalizeCurrency(row?.value || "PGK");
 }
 
 async function syncPrimaryContact(input: {
@@ -216,6 +227,7 @@ export async function POST(request: Request) {
               taxId: parsed.taxId || null,
               paymentTerms: parsed.creditTermsDays || 30,
               creditLimit: parsed.creditLimit || null,
+              currency: parsed.currency ? normalizeCurrency(parsed.currency) : existing.currency,
             },
           });
           await syncPrimaryContact({ customerId: updated.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
@@ -235,7 +247,7 @@ export async function POST(request: Request) {
               taxId: updated.taxId || "",
               creditTermsDays: updated.paymentTerms || 30,
               creditLimit: Number(updated.creditLimit || 0),
-              currency: "PGK",
+              currency: updated.currency,
               active: updated.isActive !== false,
             },
           });
@@ -250,6 +262,7 @@ export async function POST(request: Request) {
             taxId: parsed.taxId || null,
             paymentTerms: parsed.creditTermsDays || 30,
             creditLimit: parsed.creditLimit || null,
+            currency: normalizeCurrency(parsed.currency || await localBaseCurrency()),
           },
         });
         await syncPrimaryContact({ customerId: created.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
@@ -269,7 +282,7 @@ export async function POST(request: Request) {
             taxId: created.taxId || "",
             creditTermsDays: created.paymentTerms || 30,
             creditLimit: Number(created.creditLimit || 0),
-            currency: "PGK",
+            currency: created.currency,
             active: true,
           },
         });
@@ -340,6 +353,7 @@ export async function POST(request: Request) {
               address: parsed.address || null,
               taxId: parsed.taxId || null,
               paymentTerms: parsed.paymentTermsDays || 30,
+              currency: parsed.currency ? normalizeCurrency(parsed.currency) : existing.currency,
             },
           });
           await syncPrimaryContact({ supplierId: updated.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
@@ -358,7 +372,7 @@ export async function POST(request: Request) {
               address: updated.address || "",
               taxId: updated.taxId || "",
               paymentTermsDays: updated.paymentTerms || 30,
-              currency: "PGK",
+              currency: updated.currency,
               active: updated.isActive !== false,
             },
           });
@@ -372,6 +386,7 @@ export async function POST(request: Request) {
             address: parsed.address || null,
             taxId: parsed.taxId || null,
             paymentTerms: parsed.paymentTermsDays || 30,
+            currency: normalizeCurrency(parsed.currency || await localBaseCurrency()),
           },
         });
         await syncPrimaryContact({ supplierId: created.id, name: parsed.contactPerson, email: parsed.email, phone: parsed.phone });
@@ -390,7 +405,7 @@ export async function POST(request: Request) {
             address: created.address || "",
             taxId: created.taxId || "",
             paymentTermsDays: created.paymentTerms || 30,
-            currency: "PGK",
+            currency: created.currency,
             active: true,
           },
         });
