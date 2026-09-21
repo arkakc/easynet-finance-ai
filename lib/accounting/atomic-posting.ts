@@ -1,6 +1,7 @@
 import { AccountTypeGL, Prisma, PrismaClient } from "@prisma/client";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { prisma } from "@/src/lib/prisma";
+import { companyBaseCurrency, normalizeCurrency, requireExchangeRate, roundCurrency, roundExchangeRate } from "@/lib/accounting/currency";
 
 export type AtomicPostingLine = {
   accountId: string;
@@ -12,6 +13,10 @@ export type AtomicPostingLine = {
   taxCode?: string;
   costCenter?: string;
   description?: string;
+  transactionCurrency?: string;
+  transactionDebit?: number;
+  transactionCredit?: number;
+  exchangeRate?: number;
 };
 
 export type AtomicPostingRequest = {
@@ -22,6 +27,9 @@ export type AtomicPostingRequest = {
   documentNumber: string;
   reference?: string;
   projectId?: string;
+  currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
   createdBy?: string;
   approvedBy?: string;
   lines: AtomicPostingLine[];
@@ -126,6 +134,12 @@ export async function postJournalInTransaction(
   const groups = accounts.filter((account) => account.children.length > 0).map((account) => account.code);
   if (groups.length) throw new Error(`Cannot post journal directly to group/control accounts: ${groups.join(", ")}`);
 
+  const baseCurrency = normalizeCurrency(request.baseCurrency || await companyBaseCurrency(tx));
+  const sourceCurrency = normalizeCurrency(request.currency || baseCurrency);
+  const sourceExchangeRate = sourceCurrency === baseCurrency
+    ? 1
+    : requireExchangeRate(sourceCurrency, baseCurrency, request.exchangeRate);
+
   const settings = await tx.globalSettings.findMany({
     where: { key: { in: ["default_cost_center", "round_off_cost_center"] } },
     select: { key: true, value: true },
@@ -145,8 +159,22 @@ export async function postJournalInTransaction(
         : null
     );
 
-    const debit = round2(Number(line.debit || 0));
-    const credit = round2(Number(line.credit || 0));
+    const debit = roundCurrency(Number(line.debit || 0));
+    const credit = roundCurrency(Number(line.credit || 0));
+    const transactionCurrency = normalizeCurrency(line.transactionCurrency || sourceCurrency);
+    const lineExchangeRate = transactionCurrency === baseCurrency
+      ? 1
+      : requireExchangeRate(
+          transactionCurrency,
+          baseCurrency,
+          line.exchangeRate ?? (transactionCurrency === sourceCurrency ? sourceExchangeRate : undefined),
+        );
+    const transactionDebit = line.transactionDebit !== undefined
+      ? roundCurrency(Number(line.transactionDebit || 0))
+      : roundCurrency(debit / lineExchangeRate);
+    const transactionCredit = line.transactionCredit !== undefined
+      ? roundCurrency(Number(line.transactionCredit || 0))
+      : roundCurrency(credit / lineExchangeRate);
 
     return {
       lineNo: index + 1,
@@ -155,7 +183,12 @@ export async function postJournalInTransaction(
       debit,
       credit,
       amount: Math.max(debit, credit),
-      currency: "PGK",
+      currency: baseCurrency,
+      transactionCurrency,
+      exchangeRate: roundExchangeRate(lineExchangeRate),
+      transactionDebit,
+      transactionCredit,
+      transactionAmount: Math.max(transactionDebit, transactionCredit),
       projectId: String(line.projectId || request.projectId || "").trim() || null,
       customerId: String(line.customerId || "").trim() || null,
       supplierId: String(line.supplierId || "").trim() || null,
@@ -163,6 +196,23 @@ export async function postJournalInTransaction(
       costCenter,
     };
   });
+
+  const transactionTotals = new Map<string, { debit: number; credit: number }>();
+  for (const line of normalizedLines) {
+    const current = transactionTotals.get(line.transactionCurrency) || { debit: 0, credit: 0 };
+    current.debit = roundCurrency(current.debit + Number(line.transactionDebit || 0));
+    current.credit = roundCurrency(current.credit + Number(line.transactionCredit || 0));
+    transactionTotals.set(line.transactionCurrency, current);
+  }
+  for (const [currency, totals] of transactionTotals.entries()) {
+    if (totals.debit !== totals.credit) {
+      throw new Error(
+        `Transaction-currency journal is not balanced for ${currency}: debit ${totals.debit.toFixed(2)} vs credit ${totals.credit.toFixed(2)}`,
+      );
+    }
+  }
+
+  const sourceTransactionTotals = transactionTotals.get(sourceCurrency) || { debit: 0, credit: 0 };
 
   const journalCode = String(request.journalId || "").trim() || documentSeriesId("Journal");
   const createdBy = request.createdBy || "finance-ui";
@@ -177,9 +227,13 @@ export async function postJournalInTransaction(
       sourceDocType: request.documentType,
       sourceDocId: request.documentId,
       status: "POSTED",
-      currency: "PGK",
+      currency: sourceCurrency,
+      baseCurrency,
+      exchangeRate: roundExchangeRate(sourceExchangeRate),
       totalDebit,
       totalCredit,
+      transactionTotalDebit: sourceTransactionTotals.debit,
+      transactionTotalCredit: sourceTransactionTotals.credit,
       isBalanced: true,
       createdBy,
       approvedBy,
