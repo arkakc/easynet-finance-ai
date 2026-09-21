@@ -15,8 +15,16 @@ export type AccountPickerOption = {
 
 type AccountKind = "all" | "income" | "expense" | "cash-bank";
 
+function money(value: number | string | undefined) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(amount);
+}
+
 function label(row: AccountPickerOption) {
-  return `${row.accountCode || row.accountId} — ${row.accountName || row.accountId}`;
+  const code = row.accountCode || row.accountId;
+  const name = row.accountName || row.accountId;
+  const type = String(row.accountType || "ACCOUNT").replaceAll("_", " ");
+  return `${code} | ${name} | ${type} | Balance: ${money(row.balance)}`;
 }
 
 function matchesKind(row: AccountPickerOption, kind: AccountKind) {
