@@ -160,12 +160,17 @@ export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) 
 
     // 11. Handle User accounts. Phase 9 AuditLog.userId uses ON DELETE SET NULL,
     // so sealed audit records must never be rewritten during a factory reset.
-    const adminUser = await tx.user.findFirst({
-      where: options.preserveAdminUser !== false
-        ? { OR: [{ email: options.adminEmail.toLowerCase() }, { role: "SYSTEM_MANAGER" }, { email: "admin@easynet.local" }] }
-        : { email: "admin@easynet.local" },
-    });
-    if (!adminUser) throw new Error("Cannot complete factory reset: a primary System Manager account is required");
+    const actorEmail = options.adminEmail.trim().toLowerCase();
+    const actorAdmin = await tx.user.findUnique({ where: { email: actorEmail } });
+    const adminUser = actorAdmin?.role === "SYSTEM_MANAGER" && actorAdmin.status === "ACTIVE"
+      ? actorAdmin
+      : await tx.user.findFirst({
+          where: { role: "SYSTEM_MANAGER", status: "ACTIVE" },
+          orderBy: [{ email: "asc" }, { id: "asc" }],
+        });
+    if (!adminUser) {
+      throw new Error("Cannot complete factory reset: an active System Manager account is required");
+    }
     const preservedAdminId = adminUser.id;
     await tx.authThrottle.deleteMany({});
     await tx.session.deleteMany({ where: { userId: { not: preservedAdminId } } });
