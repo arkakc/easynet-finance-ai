@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireRequestPermission } from "@/lib/auth";
+import { requireValidatedRequestPermission } from "@/lib/auth";
 import {
   approvePendingManualJournal,
   rejectPendingManualJournal,
@@ -14,7 +14,8 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const checker = requireRequestPermission(request, "post.approve");
+    const checker = await requireValidatedRequestPermission(request, "post.approve");
+    const isSystemManager = checker.roles.includes("System Manager");
     const input = schema.parse(await request.json());
 
     const result = input.decision === "APPROVE"
@@ -22,11 +23,13 @@ export async function POST(request: Request) {
           journalId: input.journalId,
           checkerEmail: checker.email,
           note: input.note,
+          allowSelfApproval: isSystemManager,
         })
       : await rejectPendingManualJournal({
           journalId: input.journalId,
           checkerEmail: checker.email,
           note: input.note,
+          allowSelfApproval: isSystemManager,
         });
 
     return NextResponse.json({ ok: true, result });
