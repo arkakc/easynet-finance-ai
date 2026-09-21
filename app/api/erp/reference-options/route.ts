@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
-import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 
 const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
 
-function active(value: unknown) {
-  return !["false", "0", "no", "inactive"].includes(String(value ?? "true").trim().toLowerCase());
-}
-
 export async function GET() {
   try {
     await requirePermission("dashboard.read");
-    const [accounts, lines, linkedBankAccounts, settings] = await Promise.all([
-      listTable<any>("Accounts", 500, 0),
-      listTable<any>("JournalLines", 500, 0),
+    const [accounts, linkedBankAccounts, settings] = await Promise.all([
+      prisma.chartOfAccounts.findMany({
+        where: { isActive: true },
+        include: {
+          parent: { select: { code: true } },
+          children: { select: { id: true } },
+          journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
+        },
+        orderBy: { code: "asc" },
+      }),
       prisma.bankAccount.findMany({
         where: { isActive: true, chartOfAccountsId: { not: null } },
         include: { chartOfAccounts: { select: { code: true } } },
@@ -38,26 +40,23 @@ export async function GET() {
       || "PGK",
     ).trim().toUpperCase();
 
-    const balanceByAccount = new Map<string, number>();
-    for (const line of lines.rows || []) {
-      const id = String(line.accountId || "");
-      if (!id) continue;
-      const next = (balanceByAccount.get(id) || 0) + Number(line.debit || 0) - Number(line.credit || 0);
-      balanceByAccount.set(id, Math.round((next + Number.EPSILON) * 100) / 100);
-    }
-
-    const allAccounts = (accounts.rows || [])
-      .filter((row: any) => active(row.active))
-      .map((row: any) => ({
-        accountId: String(row.accountId || ""),
-        accountCode: String(row.accountCode || ""),
-        accountName: String(row.accountName || row.accountId || ""),
-        accountType: String(row.accountType || ""),
-        parentAccount: String(row.parentAccount || ""),
-        balance: Number(balanceByAccount.get(String(row.accountId || "")) || 0),
-        isCashBank: dynamicCashBankIds.has(String(row.accountId || "")),
-        accountRole: dynamicCashBankIds.has(String(row.accountId || "")) ? "cash-bank" : "",
-      }));
+    const allAccounts = accounts
+      .filter((row) => row.children.length === 0)
+      .map((row) => {
+        const postingId = `ACC-${row.code}`;
+        const rawBalance = row.journalLines.reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0);
+        const creditNormal = ["LIABILITY", "EQUITY", "INCOME", "REVENUE"].includes(String(row.type).toUpperCase());
+        return {
+          accountId: postingId,
+          accountCode: row.code,
+          accountName: row.name,
+          accountType: String(row.type),
+          parentAccount: row.parent ? `ACC-${row.parent.code}` : "",
+          balance: creditNormal ? -rawBalance : rawBalance,
+          isCashBank: dynamicCashBankIds.has(postingId),
+          accountRole: dynamicCashBankIds.has(postingId) ? "cash-bank" : "",
+        };
+      });
 
     const cashBankAccounts = allAccounts
       .filter((row) => row.isCashBank)

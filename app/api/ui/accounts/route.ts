@@ -15,7 +15,7 @@ export async function GET() {
         include: {
           parent: { select: { id: true, code: true, name: true } },
           children: { select: { id: true } },
-          journalLines: { select: { debit: true, credit: true } },
+          journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
           _count: { select: { children: true, journalLines: true } },
         },
         orderBy: { code: "asc" },
