@@ -87,7 +87,7 @@ export default function CashFlowPage() {
 
         <section className="panel table-wrap">
           <div className="form-title-row"><h3>Included Cash Accounts</h3><span className="badge">{statement.cashAccounts.length} GL accounts</span></div>
-          <table className="data-table"><thead><tr><th>Code</th><th>Name</th></tr></thead><tbody>{statement.cashAccounts.map((account) => <tr key={account.code}><td><strong>{account.code}</strong></td><td>{account.name}</td></tr>)}</tbody></table>
+          <table className="data-table"><thead><tr><th>Account</th><th>Type</th><th>Current Balance</th></tr></thead><tbody>{statement.cashAccounts.map((account) => <tr key={account.code}><td><strong>{account.code} | {account.name}</strong></td><td>{String(account.type).replaceAll("_", " ")}</td><td>{money(account.balance, statement.currency)}</td></tr>)}</tbody></table>
         </section>
       </>}
     </>

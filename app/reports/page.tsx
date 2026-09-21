@@ -18,9 +18,9 @@ function AccountTable({ title, rows, total, currency }: { title: string; rows: S
     <section className="panel table-wrap">
       <div className="form-title-row"><h3>{title}</h3><strong>{money(total, currency)}</strong></div>
       <table className="data-table">
-        <thead><tr><th>Account</th><th>Name</th><th>Amount ({currency})</th></tr></thead>
+        <thead><tr><th>Account</th><th>Type</th><th>Current Balance ({currency})</th></tr></thead>
         <tbody>
-          {rows.map((row) => <tr key={row.code}><td><strong>{row.code}</strong></td><td>{row.name}</td><td>{money(row.amount, currency)}</td></tr>)}
+          {rows.map((row) => <tr key={row.code}><td><strong>{row.code} | {row.name}</strong></td><td>{String(row.type).replaceAll("_", " ")}</td><td>{money(row.amount, currency)}</td></tr>)}
           {!rows.length && <tr><td colSpan={3}>No posted activity in this section.</td></tr>}
           <tr><th colSpan={2}>Total</th><th>{money(total, currency)}</th></tr>
         </tbody>
