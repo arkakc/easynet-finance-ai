@@ -54,6 +54,7 @@ export const INITIAL_CHART_OF_ACCOUNTS = [
   { accountId: "ACC-4900", accountCode: "4900", accountName: "Other Income", accountType: "Income", parentAccount: "ACC-4000", active: true },
   { accountId: "ACC-4910", accountCode: "4910", accountName: "Inventory Adjustment / Revaluation Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
   { accountId: "ACC-4920", accountCode: "4920", accountName: "Realized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
+  { accountId: "ACC-4930", accountCode: "4930", accountName: "Unrealized Foreign Exchange Gain", accountType: "Income", parentAccount: "ACC-4000", active: true },
 
   // Cost of Sales / Direct Costs
   { accountId: "ACC-5000", accountCode: "5000", accountName: "Cost of Sales", accountType: "Expense", parentAccount: "", active: true },
@@ -89,6 +90,7 @@ export const INITIAL_CHART_OF_ACCOUNTS = [
   { accountId: "ACC-6980", accountCode: "6980", accountName: "Bad Debts / Impairment", accountType: "Expense", parentAccount: "ACC-6000", active: true },
   { accountId: "ACC-6990", accountCode: "6990", accountName: "Other Operating Expenses", accountType: "Expense", parentAccount: "ACC-6000", active: true },
   { accountId: "ACC-6995", accountCode: "6995", accountName: "Realized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
+  { accountId: "ACC-6996", accountCode: "6996", accountName: "Unrealized Foreign Exchange Loss", accountType: "Expense", parentAccount: "ACC-6000", active: true },
 ] as const;
 
 export const INITIAL_ACCOUNT_IDS = {
@@ -107,8 +109,10 @@ export const INITIAL_ACCOUNT_IDS = {
   landedCostClearing: "ACC-2191",
   inventoryRevaluationGain: "ACC-4910",
   exchangeGain: "ACC-4920",
+  exchangeUnrealizedGain: "ACC-4930",
   purchasePriceVariance: "ACC-5110",
   inventoryAdjustmentLoss: "ACC-5120",
   interestExpense: "ACC-6100",
   exchangeLoss: "ACC-6995",
+  exchangeUnrealizedLoss: "ACC-6996",
 } as const;
