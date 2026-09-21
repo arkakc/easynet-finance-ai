@@ -8,7 +8,7 @@ const money = (value: unknown, currency: string) =>
   new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
 
 export default async function JournalDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePermission("accounts.read");
+  const user = await requirePermission("accounts.read");
   const { id } = await params;
 
   const header = await prisma.journalHeader.findFirst({
@@ -33,6 +33,11 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
       ? supplierMap.get(line.supplierId) || line.supplierId
       : "—";
 
+  const canApprove = header.status === "PENDING"
+    && header.sourceDocType.startsWith("MANUAL_")
+    && user.permissions.includes("post.approve")
+    && String(header.createdBy || "").toLowerCase() !== String(user.email || "").toLowerCase();
+
   const baseCurrency = String(header.baseCurrency || "PGK").toUpperCase();
   const sourceCurrency = String(header.currency || baseCurrency).toUpperCase();
   const debit = header.lines.reduce((sum, row) => sum + Number(row.debit), 0);
@@ -50,6 +55,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
     <div className="document-page">
       <div className="document-toolbar no-print">
         <Link href="/journals">← Back to Journals</Link>
+        {canApprove ? <Link className="button-link" href="/approvals">Review & Approve</Link> : null}
       </div>
 
       <section className="document-sheet">
@@ -110,9 +116,9 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
             </tbody>
             <tfoot>
               <tr>
-                <th colSpan={5}>Total</th>
-                <th>{sourceCurrency === baseCurrency ? money(transactionDebit, baseCurrency) : sourceCurrency}</th>
-                <th>{sourceCurrency === baseCurrency ? money(transactionCredit, baseCurrency) : "Per-line currencies"}</th>
+                <th colSpan={6}>Total</th>
+                <th>{sourceCurrency === baseCurrency ? money(transactionDebit, baseCurrency) : "Per-line"}</th>
+                <th>{sourceCurrency === baseCurrency ? money(transactionCredit, baseCurrency) : "Per-line"}</th>
                 <th>{money(debit, baseCurrency)}</th>
                 <th>{money(credit, baseCurrency)}</th>
               </tr>
