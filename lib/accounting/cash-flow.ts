@@ -24,7 +24,7 @@ export type CashFlowStatement = {
   period: { from: string; asOf: string };
   generatedAt: string;
   rows: CashFlowRow[];
-  cashAccounts: Array<{ code: string; name: string }>;
+  cashAccounts: Array<{ code: string; name: string; type: string; balance: number }>;
   totals: { openingCash: number; operating: number; investing: number; financing: number; netChange: number; closingCash: number };
   control: { ledgerClosingCash: number; difference: number; balanced: boolean };
 };
@@ -49,7 +49,7 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   if (fromDate > asOfDate) throw new Error("from must be on or before asOf");
 
   const [accounts, mappedBanks, baseCurrency, settings] = await Promise.all([
-    client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, parentId: true } }),
+    client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, type: true, parentId: true } }),
     client.bankAccount.findMany({ where: { isActive: true, chartOfAccountsId: { not: null } }, select: { chartOfAccountsId: true } }),
     client.$transaction((tx) => companyBaseCurrency(tx)),
     client.globalSettings.findMany({
@@ -82,9 +82,7 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
 
   const lines = await client.journalLine.findMany({
     where: { accountId: { in: [...cashIds] }, journal: { status: "POSTED", date: { lte: asOfDate } } },
-    select: {
-      debit: true,
-      credit: true,
+    select: {\n      accountId: true,\n      debit: true,\n      credit: true,
       journal: { select: { id: true, code: true, date: true, sourceDocType: true, reference: true, description: true } },
     },
     orderBy: [{ journal: { date: "asc" } }, { journalId: "asc" }, { lineNo: "asc" }],
@@ -129,7 +127,13 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
     period: input,
     generatedAt: new Date().toISOString(),
     rows,
-    cashAccounts: [...cashIds].map((id) => accountById.get(id)).filter((account): account is NonNullable<typeof account> => Boolean(account)).sort((a, b) => a.code.localeCompare(b.code)).map(({ code, name }) => ({ code, name })),
+    cashAccounts: [...cashIds].map((id) => accountById.get(id)).filter((account): account is NonNullable<typeof account> => Boolean(account)).sort((a, b) => a.code.localeCompare(b.code)).map(({ id, code, name, type }) => ({
+      code, name, type: String(type),
+      balance: round(lines.filter((line) => {
+        const accountLine = line as typeof line & { accountId?: string };
+        return accountLine.accountId === id;
+      }).reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0)),
+    })),
     totals: { openingCash, operating, investing, financing, netChange, closingCash },
     control: { ledgerClosingCash, difference, balanced: Math.abs(difference) < 0.01 },
   };
