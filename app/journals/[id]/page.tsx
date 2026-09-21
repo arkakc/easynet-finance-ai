@@ -5,6 +5,7 @@ import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { prisma } from "@/src/lib/prisma";
 import JournalApprovalButton from "@/app/components/journal-approval-button";
 import JournalPreApprovalActions from "@/app/components/journal-preapproval-actions";
+import JournalReversalButton from "@/app/components/journal-reversal-button";
 
 const money = (value: unknown, currency: string) =>
   new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
@@ -37,6 +38,8 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
 
   const canEditDelete = ["DRAFT", "PENDING"].includes(header.status) && header.sourceDocType.startsWith("MANUAL_") && user.permissions.includes("accounts.write");
 
+  const canReverse = header.status === "POSTED" && header.sourceDocType !== "JOURNAL_REVERSAL" && user.permissions.includes("post.approve");
+
   const canApprove = header.status === "PENDING"
     && header.sourceDocType.startsWith("MANUAL_")
     && user.permissions.includes("post.approve")
@@ -61,6 +64,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
         <Link href="/journals">← Back to Journals</Link>
         {canEditDelete ? <JournalPreApprovalActions journalId={header.id} /> : null}
         {canApprove ? <JournalApprovalButton journalId={header.id} /> : null}
+        {canReverse ? <JournalReversalButton journalId={header.id} /> : null}
       </div>
 
       <section className="document-sheet">
