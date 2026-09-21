@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { parseBankStatementRows } from "@/lib/banking/statement-parser";
 import { companyBaseCurrency } from "@/lib/accounting/currency";
+import { appendAuditEvent, requestAuditContext } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 
 export const runtime = "nodejs";
@@ -146,6 +147,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const user = await requirePermission("accounts.write");
+    const context = requestAuditContext(request);
     const form = await request.formData();
     const file = form.get("file");
     const bankAccountId = String(form.get("bankAccountId") || "");
@@ -212,7 +214,18 @@ export async function POST(request: NextRequest) {
       }
       const dbUser = await tx.user.findUnique({ where: { email: user.email } });
       if (!dbUser) throw new Error("Authenticated user no longer exists");
-      await tx.auditLog.create({ data: { action: "IMPORT", entityType: "BANK_STATEMENT", entityId: bankAccount.id, entityCode: file.name, description: `Imported bank statement for ${bankAccount.code}`, changes: JSON.stringify(summary), userId: dbUser.id } });
+      await appendAuditEvent({
+        action: "BANK_STATEMENT_IMPORT",
+        entityType: "BankAccount",
+        entityId: bankAccount.id,
+        entityCode: bankAccount.code,
+        description: `Imported bank statement ${file.name} for ${bankAccount.code}`,
+        changes: summary,
+        actorEmail: user.email,
+        userId: dbUser.id,
+        outcome: "SUCCESS",
+        ...context,
+      }, tx);
     }, { timeout: 30_000 });
     return NextResponse.json({ ok: true, mode, message: `Imported ${summary.willImport} new bank transaction(s)`, summary });
   } catch (error) {
@@ -231,13 +244,31 @@ const actionSchema = z.discriminatedUnion("action", [
 
 export async function PATCH(request: NextRequest) {
   try {
+    const context = requestAuditContext(request);
     const body = actionSchema.parse(await request.json());
     if (body.action === "configure") {
-      await requirePermission("settings.manage");
+      const user = await requirePermission("settings.manage");
       const account = await prisma.chartOfAccounts.findFirst({ where: { id: body.chartOfAccountsId, isActive: true, type: "ASSET" } });
       if (!account) throw new Error("Select an active asset ledger account");
-      await prisma.bankAccount.update({ where: { id: body.bankAccountId }, data: { chartOfAccountsId: account.id } });
-      return NextResponse.json({ ok: true, message: `Bank account linked to ${account.code} — ${account.name}` });
+      const updatedBank = await prisma.$transaction(async (tx) => {
+        const before = await tx.bankAccount.findUnique({ where: { id: body.bankAccountId }, select: { id: true, code: true, chartOfAccountsId: true } });
+        if (!before) throw new Error("Bank account was not found");
+        const updated = await tx.bankAccount.update({ where: { id: body.bankAccountId }, data: { chartOfAccountsId: account.id } });
+        await appendAuditEvent({
+          action: "BANK_GL_CONFIGURE",
+          entityType: "BankAccount",
+          entityId: updated.id,
+          entityCode: before.code,
+          description: `Bank account linked to GL ${account.code} — ${account.name}`,
+          changes: { chartOfAccountsId: { from: before.chartOfAccountsId, to: account.id }, accountCode: account.code },
+          actorEmail: user.email,
+          userId: user.userId || null,
+          outcome: "SUCCESS",
+          ...context,
+        }, tx);
+        return updated;
+      });
+      return NextResponse.json({ ok: true, bankAccountId: updatedBank.id, message: `Bank account linked to ${account.code} — ${account.name}` });
     }
 
     const user = await requirePermission(body.action === "reconcile" ? "post.approve" : "accounts.write");
@@ -261,21 +292,72 @@ export async function PATCH(request: NextRequest) {
       }
       if (Math.abs(Math.abs(Number(transaction.amount)) - Number(payment.amount)) > 0.01) throw new Error("Bank transaction and payment amounts do not match");
       if (!directionMatches(Number(transaction.amount), payment.type)) throw new Error("Payment direction does not match the bank transaction");
-      const updated = await prisma.bankTransaction.update({ where: { id: transaction.id }, data: { matchStatus: "MATCHED", matchedPaymentId: payment.id, matchedInvoiceId: payment.invoiceId, matchedBillId: payment.billId, matchedBy: user.email, matchedAt: new Date(), matchNotes: `Matched to ${payment.code}` } });
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.bankTransaction.update({ where: { id: transaction.id }, data: { matchStatus: "MATCHED", matchedPaymentId: payment.id, matchedInvoiceId: payment.invoiceId, matchedBillId: payment.billId, matchedBy: user.email, matchedAt: new Date(), matchNotes: `Matched to ${payment.code}` } });
+        await appendAuditEvent({
+          action: "BANK_MATCH",
+          entityType: "BankTransaction",
+          entityId: row.id,
+          entityCode: row.code,
+          description: `Matched bank transaction to payment ${payment.code}`,
+          changes: { matchedPaymentId: payment.id, paymentCode: payment.code },
+          actorEmail: user.email,
+          userId: user.userId || null,
+          outcome: "SUCCESS",
+          ...context,
+        }, tx);
+        return row;
+      });
       return NextResponse.json({ ok: true, transactionId: updated.id, message: `Matched to ${payment.code}` });
     }
     if (body.action === "review") {
       const existing = await prisma.bankTransaction.findUnique({ where: { id: body.transactionId }, select: { isReconciled: true } });
       if (!existing) throw new Error("Bank transaction was not found");
       if (existing.isReconciled) throw new Error("A reconciled transaction cannot be changed");
-      const updated = await prisma.bankTransaction.update({ where: { id: body.transactionId }, data: { matchStatus: "REVIEWED", matchedPaymentId: null, matchedInvoiceId: null, matchedBillId: null, matchedBy: user.email, matchedAt: new Date(), matchNotes: body.notes } });
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.bankTransaction.update({ where: { id: body.transactionId }, data: { matchStatus: "REVIEWED", matchedPaymentId: null, matchedInvoiceId: null, matchedBillId: null, matchedBy: user.email, matchedAt: new Date(), matchNotes: body.notes } });
+        await appendAuditEvent({
+          action: "BANK_REVIEW",
+          entityType: "BankTransaction",
+          entityId: row.id,
+          entityCode: row.code,
+          description: "Bank transaction marked as manually reviewed",
+          metadata: { notes: body.notes },
+          actorEmail: user.email,
+          userId: user.userId || null,
+          outcome: "SUCCESS",
+          ...context,
+        }, tx);
+        return row;
+      });
       return NextResponse.json({ ok: true, transactionId: updated.id, message: "Transaction marked as manually reviewed" });
     }
     if (body.action === "unmatch") {
       const existing = await prisma.bankTransaction.findUnique({ where: { id: body.transactionId }, select: { isReconciled: true } });
       if (!existing) throw new Error("Bank transaction was not found");
       if (existing.isReconciled) throw new Error("A reconciled transaction cannot be changed");
-      const updated = await prisma.bankTransaction.update({ where: { id: body.transactionId }, data: { matchStatus: "UNMATCHED", matchedPaymentId: null, matchedInvoiceId: null, matchedBillId: null, matchedJournalId: null, matchedBy: null, matchedAt: null, matchNotes: null } });
+      const before = await prisma.bankTransaction.findUnique({ where: { id: body.transactionId }, select: { id: true, code: true, matchedPaymentId: true, matchedInvoiceId: true, matchedBillId: true, matchedJournalId: true } });
+      const updated = await prisma.$transaction(async (tx) => {
+        const row = await tx.bankTransaction.update({ where: { id: body.transactionId }, data: { matchStatus: "UNMATCHED", matchedPaymentId: null, matchedInvoiceId: null, matchedBillId: null, matchedJournalId: null, matchedBy: null, matchedAt: null, matchNotes: null } });
+        await appendAuditEvent({
+          action: "BANK_UNMATCH",
+          entityType: "BankTransaction",
+          entityId: row.id,
+          entityCode: row.code,
+          description: "Bank transaction match removed",
+          changes: {
+            matchedPaymentId: { from: before?.matchedPaymentId || null, to: null },
+            matchedInvoiceId: { from: before?.matchedInvoiceId || null, to: null },
+            matchedBillId: { from: before?.matchedBillId || null, to: null },
+            matchedJournalId: { from: before?.matchedJournalId || null, to: null },
+          },
+          actorEmail: user.email,
+          userId: user.userId || null,
+          outcome: "SUCCESS",
+          ...context,
+        }, tx);
+        return row;
+      });
       return NextResponse.json({ ok: true, transactionId: updated.id, message: "Match removed" });
     }
 
@@ -310,7 +392,27 @@ export async function PATCH(request: NextRequest) {
       const created = await tx.reconciliation.create({ data: { bankAccountId: bankAccount.id, periodStart, periodEnd, statementBalance: body.statementBalance, bookBalance: bookBalance.transactionBalance, difference, status: "COMPLETED", notes: body.notes || null, preparedBy: user.email, reviewedBy: user.email, reviewedAt: new Date() } });
       await tx.bankTransaction.updateMany({ where: { id: { in: transactions.map((row) => row.id) } }, data: { isReconciled: true, reconciliationId: created.id } });
       const dbUser = await tx.user.findUnique({ where: { email: user.email } });
-      if (dbUser) await tx.auditLog.create({ data: { action: "RECONCILE", entityType: "BankAccount", entityId: bankAccount.id, entityCode: bankAccount.code, description: `Completed bank reconciliation ${body.periodStart} to ${body.periodEnd}`, changes: JSON.stringify({ statementBalance: body.statementBalance, bookBalance: bookBalance.transactionBalance, baseBookBalance: bookBalance.baseBalance, currency: reconciliationCurrency, baseCurrency, difference, transactionCount: transactions.length }), userId: dbUser.id } });
+      if (!dbUser) throw new Error("Authenticated user no longer exists");
+      await appendAuditEvent({
+        action: "BANK_RECONCILE",
+        entityType: "BankAccount",
+        entityId: bankAccount.id,
+        entityCode: bankAccount.code,
+        description: `Completed bank reconciliation ${body.periodStart} to ${body.periodEnd}`,
+        changes: {
+          statementBalance: body.statementBalance,
+          bookBalance: bookBalance.transactionBalance,
+          baseBookBalance: bookBalance.baseBalance,
+          currency: reconciliationCurrency,
+          baseCurrency,
+          difference,
+          transactionCount: transactions.length,
+        },
+        actorEmail: user.email,
+        userId: dbUser.id,
+        outcome: "SUCCESS",
+        ...context,
+      }, tx);
       return created;
     });
     return NextResponse.json({ ok: true, reconciliationId: reconciliation.id, message: "Bank reconciliation completed", difference });
