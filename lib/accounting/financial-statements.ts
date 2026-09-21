@@ -340,24 +340,23 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
 
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
-  const rolledBalance = (code: string, creditNormal: boolean) => {
+  const rolledBalance = (code: string, creditNormal: boolean, legacyFamily = false) => {
     const root = accounts.find((account) => account.code === code);
-    if (!root) return 0;
-    const ids = [root.id];
+    const ids = root ? [root.id] : [];
+    if (legacyFamily) {
+      const legacyPrefix = code.slice(0, -1);
+      ids.push(...accounts.filter((account) => account.code.startsWith(legacyPrefix)).map((account) => account.id));
+    }
     for (let index = 0; index < ids.length; index += 1) ids.push(...(children.get(ids[index]) || []));
     const raw = [...new Set(ids)].reduce((sum, id) => sum + (cumulativeById.get(id) || 0), 0);
     return round(raw * (creditNormal ? -1 : 1));
   };
-  const arControlCode = accountCodeFromReference(
-    baseCurrencySetting.find((row) => row.key === "default_receivable_account")?.value,
-    INITIAL_ACCOUNT_IDS.accountsReceivable,
-  );
-  const apControlCode = accountCodeFromReference(
-    baseCurrencySetting.find((row) => row.key === "default_payable_account")?.value,
-    INITIAL_ACCOUNT_IDS.accountsPayable,
-  );
-  const arGl = rolledBalance(arControlCode, false);
-  const apGl = rolledBalance(apControlCode, true);
+  const arConfigured = baseCurrencySetting.find((row) => row.key === "default_receivable_account")?.value;
+  const apConfigured = baseCurrencySetting.find((row) => row.key === "default_payable_account")?.value;
+  const arControlCode = accountCodeFromReference(arConfigured, INITIAL_ACCOUNT_IDS.accountsReceivable);
+  const apControlCode = accountCodeFromReference(apConfigured, INITIAL_ACCOUNT_IDS.accountsPayable);
+  const arGl = rolledBalance(arControlCode, false, !arConfigured);
+  const apGl = rolledBalance(apControlCode, true, !apConfigured);
   const periodDebit = round(Number(periodLedger._sum.totalDebit || 0));
   const periodCredit = round(Number(periodLedger._sum.totalCredit || 0));
   const cumulativeDebit = round(Number(cumulativeLedger._sum.totalDebit || 0));
