@@ -63,7 +63,8 @@
     "test:setup-workflow": "tsx tests/setup-workflow-uat.ts",
     "test:business-routes": "tsx tests/business-route-uat.ts",
     "test:reporting-reconciliation": "tsx tests/reporting-reconciliation-hardening-uat.ts",
-    "test:security-audit": "tsx tests/security-audit-controls-uat.ts"
+    "test:security-audit": "tsx tests/security-audit-controls-uat.ts",
+    "test:full-uat": "tsx tests/full-uat.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.0.0",
