@@ -152,7 +152,7 @@ export async function PUT(request: Request) {
         makerEmail: existing.createdBy,
         manualId: existing.sourceDocId || undefined,
         journalId: existing.code,
-      }, tx as any);
+      }, tx);
     });
 
     return NextResponse.json({ ok: true, journalId: existing.code, status: "PENDING" });

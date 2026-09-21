@@ -262,7 +262,7 @@ async function validatePersistedPendingJournal(
 
 export async function createPendingManualJournal(
   input: PendingManualJournalInput,
-  client: PrismaClient = prisma,
+  client: PrismaClient | Prisma.TransactionClient = prisma,
 ) {
   const { normalized: postingDate, date } = accountingDate(input.postingDate);
   const entryType = String(input.entryType || "JOURNAL_ENTRY").trim().toUpperCase();
@@ -270,7 +270,7 @@ export async function createPendingManualJournal(
   const reference = String(input.reference || "").trim();
   if (reference.length < 3) throw new Error("Reference is required");
 
-  return client.$transaction(async (tx) => {
+  const create = async (tx: Prisma.TransactionClient) => {
     const maker = await activeUser(tx, input.makerEmail, "Maker");
     const normalized = await normalizeLines(tx, {
       postingDate,
@@ -352,7 +352,11 @@ export async function createPendingManualJournal(
       totalCredit: normalized.totalCredit,
       makerEmail: maker.email,
     };
-  });
+  };
+
+  return "$transaction" in client
+    ? client.$transaction(create)
+    : create(client);
 }
 
 export async function approvePendingManualJournal(
