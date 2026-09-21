@@ -328,14 +328,17 @@ export async function reversePostedJournal(
     // Any failure rolls the complete reversal back.
     await synchronizeSourceAfterReversal(tx, original, input.createdBy || "journal-reversal-ui", postingDate);
 
+    const reversalJournalCode = documentSeriesId("Journal");
+    const reversalDocumentNo = documentSeriesId("Journal Reversal");
+
     const reversal = await tx.journalHeader.create({
       data: {
-        code: documentSeriesId("Journal Reversal"),
+        code: reversalJournalCode,
         date: postingDate,
         description: input.reason,
         reference: input.reason,
         sourceDocType: "JOURNAL_REVERSAL",
-        sourceDocId: original.id,
+        sourceDocId: reversalDocumentNo,
         reversalOfJournalId: original.id,
         status: "POSTED",
         currency: original.currency,
@@ -392,6 +395,7 @@ export async function reversePostedJournal(
       originalDatabaseId: original.id,
       originalStatus: original.status,
       reversalJournalId: reversal.code,
+      reversalDocumentNo,
       reversalDatabaseId: reversal.id,
       postingDate: normalizedDate,
       sourceDocType: type,
