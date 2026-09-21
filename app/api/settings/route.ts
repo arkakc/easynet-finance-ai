@@ -301,6 +301,23 @@ export async function POST(request: Request) {
       gstStatusItem.value = normalizedStatus;
     }
 
+    const requestedBaseCurrency = itemsToSave.find((item) => item.key === "base_currency" || item.key === "currency");
+    if (requestedBaseCurrency && !backendConfigured) {
+      const normalizedRequested = requestedBaseCurrency.value.trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(normalizedRequested)) throw new Error("Base currency must be a 3-letter ISO currency code");
+      const [currentCurrency, postedJournalCount] = await Promise.all([
+        prisma.globalSettings.findFirst({ where: { key: { in: ["currency", "base_currency"] } } }),
+        prisma.journalHeader.count({ where: { status: "POSTED" } }),
+      ]);
+      const current = String(currentCurrency?.value || "").trim().toUpperCase();
+      if (postedJournalCount > 0 && current && normalizedRequested !== current) {
+        throw new Error(
+          `Base currency cannot be changed from ${current} to ${normalizedRequested} after posted accounting entries exist. Create a new company/database or perform a controlled currency migration instead.`,
+        );
+      }
+      requestedBaseCurrency.value = normalizedRequested;
+    }
+
     const parsedBankAccounts = body.bankAccounts === undefined
       ? null
       : z.array(bankAccountSchema).parse(body.bankAccounts);
