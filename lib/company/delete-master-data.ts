@@ -1,6 +1,7 @@
 import { prisma } from "@/src/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { deleteCompanyTransactions } from "./delete-transactions";
+import { appendAuditEvent } from "@/lib/security/audit";
 
 type DbClient = typeof prisma | Prisma.TransactionClient;
 
@@ -87,6 +88,7 @@ export type DeleteMasterDataOptions = {
   preserveAdminUser?: boolean;
   ipAddress?: string;
   userAgent?: string;
+  requestId?: string;
   // Injectable Prisma client for isolated UAT clones; production callers use the default singleton.
   database?: typeof prisma;
 };
@@ -106,6 +108,7 @@ export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) 
       resetStockQuantities: true,
       ipAddress: options.ipAddress,
       userAgent: options.userAgent,
+      requestId: options.requestId,
       transactionClient: tx,
     });
 
@@ -155,8 +158,8 @@ export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) 
     await tx.favorite.deleteMany({});
     await tx.document.deleteMany({});
 
-    // 11. Handle User accounts. Audit logs have foreign keys to User; reassign
-    // them before deleting non-admin users.
+    // 11. Handle User accounts. Phase 9 AuditLog.userId uses ON DELETE SET NULL,
+    // so sealed audit records must never be rewritten during a factory reset.
     const adminUser = await tx.user.findFirst({
       where: options.preserveAdminUser !== false
         ? { OR: [{ email: options.adminEmail.toLowerCase() }, { role: "SYSTEM_MANAGER" }, { email: "admin@easynet.local" }] }
@@ -164,29 +167,29 @@ export async function deleteCompanyMasterData(options: DeleteMasterDataOptions) 
     });
     if (!adminUser) throw new Error("Cannot complete factory reset: a primary System Manager account is required");
     const preservedAdminId = adminUser.id;
-    await tx.auditLog.updateMany({ where: { userId: { not: preservedAdminId } }, data: { userId: preservedAdminId } });
+    await tx.authThrottle.deleteMany({});
     await tx.session.deleteMany({ where: { userId: { not: preservedAdminId } } });
     await tx.userPreferences.deleteMany({ where: { userId: { not: preservedAdminId } } });
     await tx.favorite.deleteMany({ where: { userId: { not: preservedAdminId } } });
     await tx.user.deleteMany({ where: { id: { not: preservedAdminId } } });
 
-    // 12. Record immutable audit log entry
-    const audit = await tx.auditLog.create({
-      data: {
-        action: "DELETE_COMPANY_MASTER_DATA",
-        entityType: "Company",
-        entityCode: "ALL_MASTER_DATA",
-        description: `Complete Master Data Factory Reset executed by ${options.adminName || options.adminEmail} (${options.adminEmail}). All master entities wiped.`,
-        changes: JSON.stringify({
-          wipedMasterSummary: masterSummaryBefore,
-          preservedAdminId,
-          timestamp: new Date().toISOString(),
-        }),
-        userId: preservedAdminId || "admin-system",
-        ipAddress: options.ipAddress || null,
-        userAgent: options.userAgent || null,
+    // 12. Record a sealed Phase 9 audit event after the reset.
+    const audit = await appendAuditEvent({
+      action: "DELETE_COMPANY_MASTER_DATA",
+      entityType: "Company",
+      entityCode: "ALL_MASTER_DATA",
+      description: `Complete Master Data Factory Reset executed by ${options.adminName || options.adminEmail} (${options.adminEmail}). All master entities wiped.`,
+      changes: {
+        wipedMasterSummary: masterSummaryBefore,
+        preservedAdminId,
       },
-    });
+      outcome: "SUCCESS",
+      requestId: options.requestId || null,
+      actorEmail: options.adminEmail,
+      userId: preservedAdminId,
+      ipAddress: options.ipAddress || null,
+      userAgent: options.userAgent || null,
+    }, tx);
 
     return {
       success: true,
