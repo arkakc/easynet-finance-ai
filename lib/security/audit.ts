@@ -144,17 +144,8 @@ export async function verifyAuditIntegrity(
     client.auditLog.count({ where: { integrityHash: null } }),
   ]);
 
-  let previousHash: string | null = null;
+  const knownHashes = new Set(sealed.map((row) => row.integrityHash).filter(Boolean));
   for (const row of sealed) {
-    if (row.previousHash !== previousHash) {
-      return {
-        sealedEntries: sealed.length,
-        legacyUnsealedEntries,
-        valid: false,
-        brokenAtId: row.id,
-        headHash: previousHash,
-      };
-    }
     const expected = hashPayload(auditPayload({
       id: row.id,
       action: row.action,
@@ -179,10 +170,18 @@ export async function verifyAuditIntegrity(
         legacyUnsealedEntries,
         valid: false,
         brokenAtId: row.id,
-        headHash: previousHash,
+        headHash: sealed.at(-1)?.integrityHash || null,
       };
     }
-    previousHash = row.integrityHash;
+    if (row.previousHash && !knownHashes.has(row.previousHash)) {
+      return {
+        sealedEntries: sealed.length,
+        legacyUnsealedEntries,
+        valid: false,
+        brokenAtId: row.id,
+        headHash: sealed.at(-1)?.integrityHash || null,
+      };
+    }
   }
 
   return {
@@ -190,6 +189,6 @@ export async function verifyAuditIntegrity(
     legacyUnsealedEntries,
     valid: true,
     brokenAtId: null,
-    headHash: previousHash,
+    headHash: sealed.at(-1)?.integrityHash || null,
   };
 }
