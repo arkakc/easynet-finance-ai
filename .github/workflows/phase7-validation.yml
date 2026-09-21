@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/phase-7-multi-currency
+  pull_request:
+    branches:
+      - fix/phase-6-warehouse-stock
   workflow_dispatch:
 
 jobs:
