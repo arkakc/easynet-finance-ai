@@ -54,6 +54,7 @@
     "test:gst": "tsx tests/gst-uat.ts",
     "test:stock-assets": "tsx tests/stock-assets-uat.ts",
     "test:financial-reconciliation": "tsx tests/financial-reconciliation-uat.ts",
+    "test:reporting-hardening": "tsx tests/reporting-hardening-uat.ts",
     "test:go-live": "tsx tests/go-live-uat.ts",
     "test:health": "tsx tests/health-uat.ts",
     "test:master-reset": "tsx tests/master-reset-uat.ts",
