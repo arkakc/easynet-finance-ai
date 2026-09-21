@@ -49,8 +49,8 @@ export type FinancialStatements = {
   controls: {
     periodLedger: { debit: number; credit: number; difference: number; balanced: boolean };
     cumulativeLedger: { debit: number; credit: number; difference: number; balanced: boolean };
-    receivables: { glBalance: number; subledgerBalance: number; difference: number; matched: boolean };
-    payables: { glBalance: number; subledgerBalance: number; difference: number; matched: boolean };
+    receivables: { accountCode: string; glBalance: number; subledgerBalance: number; difference: number; matched: boolean };
+    payables: { accountCode: string; glBalance: number; subledgerBalance: number; difference: number; matched: boolean };
   };
 };
 
@@ -141,7 +141,16 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
     }),
     client.globalSettings.findMany({
-      where: { key: { in: ["currency", "base_currency"] } },
+      where: {
+        key: {
+          in: [
+            "currency",
+            "base_currency",
+            "default_receivable_account",
+            "default_payable_account",
+          ],
+        },
+      },
       select: { key: true, value: true },
     }),
     client.fxRevaluationLine.findMany({
@@ -261,18 +270,21 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
 
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
+  const settingValue = (key: string) => String(baseCurrencySetting.find((row) => row.key === key)?.value || "");
+  const controlCode = (value: string, fallback: string) =>
+    String(value || fallback).split("—")[0].trim().replace(/^ACC-/i, "") || fallback;
   const rolledBalance = (code: string, creditNormal: boolean) => {
     const root = accounts.find((account) => account.code === code);
     if (!root) return 0;
-    const legacySiblingPrefix = code.slice(0, -1);
-    const ids = accounts.filter((account) => account.code.startsWith(legacySiblingPrefix)).map((account) => account.id);
-    if (!ids.includes(root.id)) ids.push(root.id);
+    const ids = [root.id];
     for (let index = 0; index < ids.length; index += 1) ids.push(...(children.get(ids[index]) || []));
     const raw = [...new Set(ids)].reduce((sum, id) => sum + (cumulativeById.get(id) || 0), 0);
     return round(raw * (creditNormal ? -1 : 1));
   };
-  const arGl = rolledBalance("1130", false);
-  const apGl = rolledBalance("2110", true);
+  const arCode = controlCode(settingValue("default_receivable_account"), "1130");
+  const apCode = controlCode(settingValue("default_payable_account"), "2110");
+  const arGl = rolledBalance(arCode, false);
+  const apGl = rolledBalance(apCode, true);
   const periodDebit = round(Number(periodLedger._sum.totalDebit || 0));
   const periodCredit = round(Number(periodLedger._sum.totalCredit || 0));
   const cumulativeDebit = round(Number(cumulativeLedger._sum.totalDebit || 0));
@@ -288,8 +300,8 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
     controls: {
       periodLedger: { debit: periodDebit, credit: periodCredit, difference: round(periodDebit - periodCredit), balanced: Math.abs(periodDebit - periodCredit) < 0.01 },
       cumulativeLedger: { debit: cumulativeDebit, credit: cumulativeCredit, difference: round(cumulativeDebit - cumulativeCredit), balanced: Math.abs(cumulativeDebit - cumulativeCredit) < 0.01 },
-      receivables: { glBalance: arGl, subledgerBalance: receivables.total, difference: round(arGl - receivables.total), matched: Math.abs(arGl - receivables.total) < 0.01 },
-      payables: { glBalance: apGl, subledgerBalance: payables.total, difference: round(apGl - payables.total), matched: Math.abs(apGl - payables.total) < 0.01 },
+      receivables: { accountCode: arCode, glBalance: arGl, subledgerBalance: receivables.total, difference: round(arGl - receivables.total), matched: Math.abs(arGl - receivables.total) < 0.01 },
+      payables: { accountCode: apCode, glBalance: apGl, subledgerBalance: payables.total, difference: round(apGl - payables.total), matched: Math.abs(apGl - payables.total) < 0.01 },
     },
   };
 }
