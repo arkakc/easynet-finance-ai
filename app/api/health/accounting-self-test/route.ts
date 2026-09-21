@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
@@ -26,6 +27,7 @@ function totals(lines: PostingLine[]) {
 
 export async function GET() {
   try {
+    await requirePermission("settings.manage");
     await ensureAccountingInfrastructure();
     const accountResult = await listTable<{
       accountId: string;
@@ -132,6 +134,7 @@ export async function GET() {
       loanCheck: { ok: loan.completedMonths === 3 && Math.abs(loan.accruedInterest - 30.301) < 0.001, completedMonths: loan.completedMonths, accruedInterest: loan.accruedInterest },
     }, { status: ok ? 200 : 500 });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Accounting self-test failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Accounting self-test failed";
+    return NextResponse.json({ ok: false, error: message }, { status: message === "Unauthorized" ? 401 : message === "Forbidden" ? 403 : 500 });
   }
 }
