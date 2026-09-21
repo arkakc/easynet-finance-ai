@@ -24,6 +24,19 @@ import { deleteCompanyTransactions } from "../lib/company/delete-transactions";
 import { proxy } from "../proxy";
 
 async function main() {
+  const forbiddenLegacyRoutes = [
+    path.join(process.cwd(), "src", "app", "api", "auth", "register", "route.ts"),
+    path.join(process.cwd(), "src", "app", "api", "users", "route.ts"),
+  ];
+  for (const legacyRoute of forbiddenLegacyRoutes) {
+    try {
+      await fs.access(legacyRoute);
+      throw new Error(`Forbidden legacy security route still exists: ${path.relative(process.cwd(), legacyRoute)}`);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Forbidden legacy security route")) throw error;
+    }
+  }
+
   const sourceDatabase = path.join(process.cwd(), "prisma", "dev.db");
   await fs.access(sourceDatabase);
 
@@ -270,6 +283,7 @@ async function main() {
     console.log(JSON.stringify({
       database: "temporary clone",
       liveDatabaseChanged: false,
+      legacySecurityBypassesRemoved: true,
       accountLockout: {
         failedLoginCount: lockedRecord.failedLoginCount,
         locked: Boolean(lockedRecord.lockedUntil),
