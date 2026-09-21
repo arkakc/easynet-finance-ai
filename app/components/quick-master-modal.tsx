@@ -34,6 +34,7 @@ export default function QuickMasterModal({
 }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [baseCurrency, setBaseCurrency] = useState("PGK");
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -44,6 +45,18 @@ export default function QuickMasterModal({
       nameInputRef.current?.focus();
     }, 50);
     return () => clearTimeout(timer);
+  }, [isOpen, type]);
+
+  useEffect(() => {
+    if (!isOpen || type === "project") return;
+    let active = true;
+    void fetch("/api/erp/reference-options", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((body) => {
+        if (active && body?.ok) setBaseCurrency(String(body.baseCurrency || "PGK").toUpperCase());
+      })
+      .catch(() => undefined);
+    return () => { active = false; };
   }, [isOpen, type]);
 
   useEffect(() => {
@@ -205,6 +218,18 @@ export default function QuickMasterModal({
                   disabled={saving}
                 />
               </label>
+              <label>
+                Billing Currency
+                <input
+                  key={`customer-currency-${baseCurrency}`}
+                  name="currency"
+                  defaultValue={baseCurrency}
+                  maxLength={3}
+                  pattern="[A-Za-z]{3}"
+                  required
+                  disabled={saving}
+                />
+              </label>
               <label className="form-wide">
                 Address
                 <textarea
@@ -274,6 +299,18 @@ export default function QuickMasterModal({
                   type="number"
                   min="0"
                   defaultValue="30"
+                  disabled={saving}
+                />
+              </label>
+              <label>
+                Billing Currency
+                <input
+                  key={`supplier-currency-${baseCurrency}`}
+                  name="currency"
+                  defaultValue={baseCurrency}
+                  maxLength={3}
+                  pattern="[A-Za-z]{3}"
+                  required
                   disabled={saving}
                 />
               </label>
