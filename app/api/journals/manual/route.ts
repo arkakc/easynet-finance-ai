@@ -3,6 +3,7 @@ import { z } from "zod";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { createPendingManualJournal } from "@/lib/accounting/manual-journal-approval";
 import { requireValidatedRequestPermission } from "@/lib/auth";
+import { prisma } from "@/src/lib/prisma";
 
 const lineSchema = z.object({
   accountId: z.string().trim().min(1, "Account is required"),
@@ -84,6 +85,79 @@ export async function POST(request: Request) {
       : error instanceof Error
         ? error.message
         : "Manual journal submission failed";
+    const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
+    return NextResponse.json({ ok: false, error: message }, { status });
+  }
+}
+
+
+export async function DELETE(request: Request) {
+  try {
+    const user = await requireValidatedRequestPermission(request, "accounts.write");
+    const journalId = String(new URL(request.url).searchParams.get("journalId") || "").trim();
+    if (!journalId) throw new Error("Journal ID is required");
+
+    const journal = await prisma.journalHeader.findFirst({
+      where: { OR: [{ id: journalId }, { code: journalId }] },
+      select: { id: true, code: true, status: true, sourceDocType: true, createdBy: true },
+    });
+    if (!journal || !String(journal.sourceDocType || "").startsWith("MANUAL_")) throw new Error("Manual journal not found");
+    if (!["DRAFT", "PENDING"].includes(journal.status)) throw new Error("Approved/posted journals cannot be deleted");
+    const isSystemManager = user.roles.includes("System Manager");
+    if (!isSystemManager && journal.createdBy.toLowerCase() !== user.email.toLowerCase()) throw new Error("Only the maker or System Manager can delete this unapproved journal");
+
+    await prisma.journalHeader.delete({ where: { id: journal.id } });
+    return NextResponse.json({ ok: true, journalId: journal.code, deleted: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Manual journal delete failed";
+    const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
+    return NextResponse.json({ ok: false, error: message }, { status });
+  }
+}
+
+
+export async function PUT(request: Request) {
+  try {
+    const user = await requireValidatedRequestPermission(request, "accounts.write");
+    const raw = await request.json();
+    const journalId = String(raw.journalId || "").trim();
+    if (!journalId) throw new Error("Journal ID is required");
+    const input = schema.parse(raw);
+
+    const existing = await prisma.journalHeader.findFirst({
+      where: { OR: [{ id: journalId }, { code: journalId }] },
+      include: { lines: true },
+    });
+    if (!existing || !String(existing.sourceDocType || "").startsWith("MANUAL_")) throw new Error("Manual journal not found");
+    if (!["DRAFT", "PENDING"].includes(existing.status)) throw new Error("Approved/posted journals cannot be edited");
+    const isSystemManager = user.roles.includes("System Manager");
+    if (!isSystemManager && existing.createdBy.toLowerCase() !== user.email.toLowerCase()) throw new Error("Only the maker or System Manager can edit this unapproved journal");
+
+    const nonZeroLines = input.lines.map((line) => ({
+      accountId: line.accountId,
+      debit: Number(line.debit || 0),
+      credit: Number(line.credit || 0),
+      description: line.description || input.reference,
+    })).filter((line) => line.debit > 0 || line.credit > 0);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.journalHeader.delete({ where: { id: existing.id } });
+      await createPendingManualJournal({
+        entryType: input.entryType,
+        journalType: input.journalType,
+        postingDate: input.postingDate,
+        reference: input.reference,
+        remarks: input.remarks,
+        lines: nonZeroLines,
+        makerEmail: existing.createdBy,
+        manualId: existing.sourceDocId || undefined,
+        journalId: existing.code,
+      }, tx as any);
+    });
+
+    return NextResponse.json({ ok: true, journalId: existing.code, status: "PENDING" });
+  } catch (error) {
+    const message = error instanceof z.ZodError ? error.errors.map((issue) => issue.message).join("; ") : error instanceof Error ? error.message : "Manual journal update failed";
     const status = message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400;
     return NextResponse.json({ ok: false, error: message }, { status });
   }
