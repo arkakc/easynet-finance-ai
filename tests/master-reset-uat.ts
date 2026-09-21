@@ -1,8 +1,14 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PrismaClient } from "@prisma/client";
+import {
+  AccountTypeGL,
+  PrismaClient,
+  Role as PrismaRole,
+  UserStatus,
+} from "@prisma/client";
 import { deleteCompanyMasterData } from "../lib/company/delete-master-data";
+import { verifyAuditIntegrity } from "../lib/security/audit";
 import { databasePath, verifyLiveDatabase } from "../lib/system/database-backup";
 
 async function main() {
@@ -11,37 +17,146 @@ async function main() {
   const temporaryDatabase = path.join(temporaryRoot, "uat.sqlite");
   await fs.copyFile(databasePath, temporaryDatabase);
   const client = new PrismaClient({ datasourceUrl: `file:${temporaryDatabase.replace(/\\/g, "/")}` });
+
   try {
-    const admin = await client.user.findUnique({ where: { email: "admin@easynet.local" } });
-    const otherUser = await client.user.findFirst({ where: { id: { not: admin?.id || "" } } });
-    const account = await client.chartOfAccounts.findFirst();
-    if (!admin || !otherUser || !account) throw new Error("UAT requires seeded admin, second user and chart account");
+    const suffix = String(process.pid);
+    const manager = await client.user.create({
+      data: {
+        name: "Phase 9 Factory Reset Manager",
+        email: `phase9-reset-manager-${suffix}@example.test`,
+        role: PrismaRole.SYSTEM_MANAGER,
+        status: UserStatus.ACTIVE,
+        sessionVersion: 1,
+      },
+    });
+    const otherUser = await client.user.create({
+      data: {
+        name: "Phase 9 Factory Reset Secondary User",
+        email: `phase9-reset-user-${suffix}@example.test`,
+        role: PrismaRole.ACCOUNTS_USER,
+        status: UserStatus.ACTIVE,
+        sessionVersion: 1,
+      },
+    });
+    const account = await client.chartOfAccounts.create({
+      data: {
+        code: `UAT9-RESET-${suffix}`,
+        name: "Phase 9 Reset Test Account",
+        type: AccountTypeGL.ASSET,
+        currency: "PGK",
+      },
+    });
 
-    const marker = `UAT-${Date.now()}`;
-    await client.budget.create({ data: { code: `${marker}-BUD`, fiscalYear: 2026, period: "YEARLY", budgetAmount: 1, actualAmount: 0, variance: 1, variancePercent: 100, accountId: account.id, createdBy: otherUser.id } });
-    await client.document.create({ data: { code: `${marker}-DOC`, type: "CERTIFICATE", name: "UAT retained certificate", createdBy: otherUser.id } });
-    await client.auditLog.create({ data: { action: "UAT", entityType: "UAT", entityCode: marker, description: "UAT foreign-key coverage", userId: otherUser.id } });
+    const marker = `UAT9-${suffix}`;
+    await client.budget.create({
+      data: {
+        code: `${marker}-BUD`,
+        fiscalYear: 2026,
+        period: "YEARLY",
+        budgetAmount: 1,
+        actualAmount: 0,
+        variance: 1,
+        variancePercent: 100,
+        accountId: account.id,
+        createdBy: otherUser.id,
+      },
+    });
+    await client.document.create({
+      data: {
+        code: `${marker}-DOC`,
+        type: "CERTIFICATE",
+        name: "UAT reset source document",
+        createdBy: otherUser.id,
+      },
+    });
+    const legacyAudit = await client.auditLog.create({
+      data: {
+        action: "UAT_LEGACY",
+        entityType: "UAT",
+        entityCode: marker,
+        description: "Legacy unsealed audit FK coverage",
+        userId: otherUser.id,
+        actorEmail: otherUser.email,
+      },
+    });
 
-    const result = await deleteCompanyMasterData({ adminEmail: admin.email, adminName: "Master reset UAT", preserveAdminUser: true, database: client });
-    const [users, budgets, retainedDocument, auditRows, adminAfter] = await Promise.all([
+    const result = await deleteCompanyMasterData({
+      adminUserId: manager.id,
+      adminEmail: manager.email,
+      adminName: manager.name,
+      preserveAdminUser: true,
+      requestId: `phase9-master-reset-${suffix}`,
+      database: client,
+    });
+
+    const [
+      users,
+      budgets,
+      documents,
+      managerAfter,
+      otherAfter,
+      legacyAfter,
+      resetAudit,
+      integrity,
+    ] = await Promise.all([
       client.user.count(),
       client.budget.count(),
-      client.document.findUnique({ where: { code: `${marker}-DOC` }, select: { createdBy: true } }),
-      client.auditLog.findMany({ select: { userId: true } }),
-      client.user.findUnique({ where: { email: admin.email }, select: { id: true } }),
+      client.document.count(),
+      client.user.findUnique({ where: { id: manager.id } }),
+      client.user.findUnique({ where: { id: otherUser.id } }),
+      client.auditLog.findUnique({ where: { id: legacyAudit.id } }),
+      client.auditLog.findUnique({ where: { id: result.auditId } }),
+      verifyAuditIntegrity(client),
     ]);
-    if (users !== 1 || !adminAfter || budgets !== 0) throw new Error("Factory reset did not leave exactly one admin or clear budgets");
-    if (!retainedDocument || retainedDocument.createdBy !== adminAfter.id) throw new Error("Retained document creator was not reassigned to the preserved admin");
-    if (auditRows.some((row) => row.userId !== adminAfter.id)) throw new Error("Audit logs still reference deleted users");
 
-    console.log(JSON.stringify({ database: "temporary clone", liveDatabaseChanged: false, auditId: result.auditId, preservedUsers: users, budgetsRemaining: budgets, retainedDocumentReassigned: true, auditForeignKeysValid: true }, null, 2));
+    if (users !== 1 || !managerAfter || otherAfter) {
+      throw new Error("Factory reset did not preserve exactly the authenticated System Manager");
+    }
+    if (budgets !== 0 || documents !== 0) {
+      throw new Error("Factory reset left master/document records behind");
+    }
+    if (!legacyAfter || legacyAfter.userId !== null || legacyAfter.actorEmail !== otherUser.email) {
+      throw new Error("Legacy audit actor snapshot did not survive deleted-user FK cleanup");
+    }
+    if (
+      !resetAudit
+      || resetAudit.userId !== manager.id
+      || !resetAudit.integrityHash
+      || !resetAudit.sequence
+    ) {
+      throw new Error("Factory reset did not create a sealed audit event for the preserved manager");
+    }
+    if (!integrity.valid || integrity.sealedEntries < 2) {
+      throw new Error("Factory reset broke the Phase 9 audit integrity chain");
+    }
+
+    console.log(JSON.stringify({
+      database: "temporary clone",
+      liveDatabaseChanged: false,
+      auditId: result.auditId,
+      preservedUsers: users,
+      preservedManager: managerAfter.email,
+      budgetsRemaining: budgets,
+      documentsRemaining: documents,
+      deletedActorFkCleared: legacyAfter.userId === null,
+      deletedActorSnapshotPreserved: legacyAfter.actorEmail === otherUser.email,
+      resetAuditSealed: Boolean(resetAudit.integrityHash),
+      auditIntegrityValid: integrity.valid,
+      sealedAuditEvents: integrity.sealedEntries,
+      legacyUnsealedEvents: integrity.legacyUnsealedEntries,
+    }, null, 2));
   } finally {
     await client.$disconnect();
     const resolvedTemporaryRoot = path.resolve(temporaryRoot);
     const resolvedSystemTemp = path.resolve(os.tmpdir());
-    if (!resolvedTemporaryRoot.startsWith(`${resolvedSystemTemp}${path.sep}`)) throw new Error("Unsafe UAT cleanup path");
+    if (!resolvedTemporaryRoot.startsWith(`${resolvedSystemTemp}${path.sep}`)) {
+      throw new Error("Unsafe UAT cleanup path");
+    }
     await fs.rm(resolvedTemporaryRoot, { recursive: true, force: true });
   }
 }
 
-main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});
