@@ -158,6 +158,11 @@ export async function postPurchaseReceiptAtomic(input:{
     });
     if(!po) throw new Error("Purchase Receipt source must be a valid Purchase Order");
     if(!["SENT","PARTIAL_RECEIVED","RECEIVED","BILLED"].includes(po.status)) throw new Error("Purchase Receipt can only be created from an approved Purchase Order");
+    const fx=await resolveDocumentExchangeRate(tx,{
+      currency:po.currency,
+      exchangeRate:Number(po.exchangeRate||0)||undefined,
+      postingDate:input.postingDate,
+    });
     const warehouse=await resolveWarehouse(tx,input.warehouseRef);
     const project=input.projectRef?await tx.project.findFirst({where:{OR:[{id:input.projectRef},{code:input.projectRef}]}}):po.project;
     if(input.projectRef&&project?.id!==po.projectId) throw new Error("Purchase Receipt project does not match the Purchase Order");
@@ -178,22 +183,24 @@ export async function postPurchaseReceiptAtomic(input:{
 
       const current=await warehouseInventoryState(tx,item.id,warehouse.id,Number(item.purchasePrice||0));
       const poQty=poLines.reduce((s,x)=>s+Number(x.quantity),0);
-      const poRate=poQty>0?poLines.reduce((s,x)=>s+Number(x.quantity)*Number(x.unitPrice),0)/poQty:0;
-      const value=round2(req.qty*poRate); inventoryValue=round2(inventoryValue+value);
+      const poRateTransaction=poQty>0?poLines.reduce((s,x)=>s+Number(x.quantity)*Number(x.unitPrice),0)/poQty:0;
+      const poRateBase=toBaseAmount(poRateTransaction,fx.currency,fx.baseCurrency,fx.exchangeRate);
+      const transactionValue=round2(req.qty*poRateTransaction);
+      const value=toBaseAmount(transactionValue,fx.currency,fx.baseCurrency,fx.exchangeRate); inventoryValue=round2(inventoryValue+value);
       const id=`${input.receiptNumber}-${String(i+1).padStart(3,"0")}`;
       await tx.stockMovement.create({data:{
-        id,itemId:item.id,warehouseId:warehouse.id,type:"PURCHASE_RECEIPT",quantity:req.qty,unitCost:poRate,totalCost:value,
+        id,itemId:item.id,warehouseId:warehouse.id,type:"PURCHASE_RECEIPT",quantity:req.qty,unitCost:poRateBase,totalCost:value,
         referenceType:"PURCHASE_RECEIPT",referenceId:po.id,projectId:project?.id||null,
         createdAt:new Date(`${input.postingDate.slice(0,10)}T00:00:00+10:00`),createdBy:input.createdBy||"purchase-receipt-ui",
       }});
       createdIds.push(id);
       const nq=round4(current.qty+req.qty), nv=round2(current.value+value);
-      const rate=nq>0?round4(nv/nq):poRate;
+      const rate=nq>0?round4(nv/nq):poRateBase;
       await syncWarehouseBalance(tx,{itemId:item.id,warehouseId:warehouse.id,quantity:nq,value:nv,rate});
       valuations.push({
         itemId:item.id,itemCode:item.code,warehouseId:warehouse.id,warehouseCode:warehouse.code,
         orderedQty:ordered,alreadyReceived:already,receivedNow:req.qty,remainingAfter:Math.max(0,ordered-already-req.qty),
-        poRate,previousQty:current.qty,previousRate:current.rate,newQty:nq,movingAverageRate:rate,
+        poRate:poRateTransaction,poRateBase,currency:fx.currency,exchangeRate:fx.exchangeRate,previousQty:current.qty,previousRate:current.rate,newQty:nq,movingAverageRate:rate,
       });
     }
 
@@ -215,13 +222,15 @@ export async function postPurchaseReceiptAtomic(input:{
     const journal=await postJournal({
       postingDate:input.postingDate,documentType:"PURCHASE_RECEIPT",documentId:input.receiptNumber,
       documentNumber:input.receiptNumber,reference:`Purchase Receipt against ${po.code} into ${warehouse.code}`,
-      projectId:project?.code||project?.id,createdBy:input.createdBy||"purchase-receipt-ui",
+      projectId:project?.code||project?.id,currency:fx.currency,baseCurrency:fx.baseCurrency,exchangeRate:fx.exchangeRate,
+      createdBy:input.createdBy||"purchase-receipt-ui",
       approvedBy:input.approvedBy||"Finance Controller",lines,
     });
     await tx.stockMovement.updateMany({where:{id:{in:createdIds}},data:{journalId:journal.journalId}});
     return {
       receiptNumber:input.receiptNumber,purchaseOrderId:po.id,purchaseOrderNumber:po.code,journalId:journal.journalId,
       warehouse:{id:warehouse.id,code:warehouse.code,name:warehouse.name},valuations,inventoryValue,
+      currency:fx.currency,baseCurrency:fx.baseCurrency,exchangeRate:fx.exchangeRate,
     };
   });
 }
