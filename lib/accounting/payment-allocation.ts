@@ -4,6 +4,7 @@ import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 import { prisma } from "@/src/lib/prisma";
+import { assertSettlementCurrency, realizedFxForSettlement, resolveDocumentExchangeRate, roundCurrency } from "@/lib/accounting/currency";
 
 export type AllocationDocumentType = "Sales Invoice" | "Supplier Invoice";
 export type CanonicalAllocationType = "DIRECT" | "ADVANCE" | "MIGRATED";
@@ -110,6 +111,25 @@ export async function createPaymentAllocationInTransaction(
 
   const { invoice, bill } = await resolveTarget(tx, input);
 
+  const document = invoice || bill!;
+  assertSettlementCurrency(payment.currency, document.currency);
+  const paymentFx = await resolveDocumentExchangeRate(tx, {
+    currency: payment.currency,
+    exchangeRate: Number(payment.exchangeRate || 0) || undefined,
+    postingDate: normalized,
+  });
+  const documentFx = await resolveDocumentExchangeRate(tx, {
+    currency: document.currency,
+    exchangeRate: Number(document.exchangeRate || 0) || undefined,
+    postingDate: invoice ? invoice.issuedDate : bill!.billDate,
+  });
+  const settlementFx = realizedFxForSettlement({
+    direction: invoice ? "RECEIVABLE" : "PAYABLE",
+    transactionAmount: amount,
+    documentExchangeRate: documentFx.exchangeRate,
+    settlementExchangeRate: paymentFx.exchangeRate,
+  });
+
   if (invoice) {
     if (!payment.customerId || payment.customerId !== invoice.customerId) {
       throw new Error("Payment customer does not match Sales Invoice customer");
@@ -148,6 +168,10 @@ export async function createPaymentAllocationInTransaction(
       billId: bill?.id || null,
       allocationDate: date,
       amount,
+      baseAmount: settlementFx.documentBase,
+      currency: documentFx.currency,
+      exchangeRate: paymentFx.exchangeRate,
+      realizedFx: settlementFx.signed,
       allocationType: input.allocationType,
       status: "POSTED",
       journalId: input.journalId || null,
@@ -159,11 +183,18 @@ export async function createPaymentAllocationInTransaction(
   if (invoice) {
     const paid = round2(Number(invoice.amountPaid || 0) + amount);
     const outstanding = round2(Math.max(0, Number(invoice.total || 0) - paid));
+    const basePaid = roundCurrency(Number(invoice.baseAmountPaid || 0) + settlementFx.documentBase);
+    const baseTotal = Number(invoice.baseTotal || 0) > 0
+      ? Number(invoice.baseTotal)
+      : roundCurrency(Number(invoice.total || 0) * documentFx.exchangeRate);
+    const baseOutstanding = roundCurrency(Math.max(0, baseTotal - basePaid));
     await tx.invoice.update({
       where: { id: invoice.id },
       data: {
         amountPaid: paid,
         outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
         status: outstanding <= 0.001 ? "PAID" : "PARTIAL",
       },
     });
@@ -172,11 +203,18 @@ export async function createPaymentAllocationInTransaction(
   if (bill) {
     const paid = round2(Number(bill.amountPaid || 0) + amount);
     const outstanding = round2(Math.max(0, Number(bill.total || 0) - paid));
+    const basePaid = roundCurrency(Number(bill.baseAmountPaid || 0) + settlementFx.documentBase);
+    const baseTotal = Number(bill.baseTotal || 0) > 0
+      ? Number(bill.baseTotal)
+      : roundCurrency(Number(bill.total || 0) * documentFx.exchangeRate);
+    const baseOutstanding = roundCurrency(Math.max(0, baseTotal - basePaid));
     await tx.supplierBill.update({
       where: { id: bill.id },
       data: {
         amountPaid: paid,
         outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
         status: outstanding <= 0.001 ? "PAID" : "PARTIAL",
       },
     });
@@ -190,6 +228,15 @@ export async function createPaymentAllocationInTransaction(
     documentOutstanding: invoice
       ? round2(Math.max(0, Number(invoice.outstanding || 0) - amount))
       : round2(Math.max(0, Number(bill!.outstanding || 0) - amount)),
+    currency: documentFx.currency,
+    baseCurrency: documentFx.baseCurrency,
+    documentExchangeRate: documentFx.exchangeRate,
+    settlementExchangeRate: paymentFx.exchangeRate,
+    documentBaseAmount: settlementFx.documentBase,
+    settlementBaseAmount: settlementFx.settlementBase,
+    realizedFx: settlementFx.signed,
+    realizedGain: settlementFx.gain,
+    realizedLoss: settlementFx.loss,
   };
 }
 
@@ -228,6 +275,9 @@ export async function paymentAllocationSummary(
     paymentId: payment.id,
     paymentNumber: payment.code,
     paymentAmount: round2(Number(payment.amount || 0)),
+    paymentBaseAmount: Number(payment.baseAmount || 0),
+    currency: payment.currency,
+    exchangeRate: Number(payment.exchangeRate || 1),
     allocatedAmount,
     remainingAmount: round2(Math.max(0, Number(payment.amount || 0) - allocatedAmount)),
     allocations: payment.allocations.map((row) => ({
@@ -236,6 +286,10 @@ export async function paymentAllocationSummary(
       allocationDate: row.allocationDate.toISOString().slice(0, 10),
       allocationType: row.allocationType,
       amount: Number(row.amount || 0),
+      baseAmount: Number(row.baseAmount || 0),
+      currency: row.currency,
+      exchangeRate: Number(row.exchangeRate || 1),
+      realizedFx: Number(row.realizedFx || 0),
       journalId: row.journalId || "",
       againstDocumentType: row.invoiceId ? "Sales Invoice" : "Supplier Invoice",
       againstDocumentId: row.invoiceId || row.billId || "",
