@@ -43,7 +43,7 @@ export async function GET() {
       supplierId: "SELFTEST-SUPPLIER",
       projectId: "SELFTEST-PROJECT",
       serviceCostLines: [{ accountId: "ACC-5200", amount: 500 }],
-      stockLines: [{ invoiceAmount: 1100, receiptValue: 1000 }],
+      stockLines: [{ invoiceAmount: 1100, poAmount: 1100, receiptValue: 1000 }],
     });
 
     const cases: Array<{ name: string; lines: PostingLine[]; expectedDebit: number }> = [
