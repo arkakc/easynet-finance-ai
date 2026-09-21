@@ -152,8 +152,6 @@ export async function GET(request: Request) {
       ]);
       const localItems = items.map((item) => {
         const rows = movements.filter((movement) => movement.itemId === item.id);
-        const qtyIn = rows.filter((row) => ["PURCHASE_IN", "PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(String(row.type))).reduce((sum, row) => sum + Number(row.quantity), 0);
-        const qtyOut = rows.filter((row) => ["SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(String(row.type))).reduce((sum, row) => sum + Number(row.quantity), 0);
         const state = inventoryState(rows.map((row) => {
           const type = String(row.type || "").toUpperCase();
           const quantity = Number(row.quantity || 0);
@@ -177,9 +175,9 @@ export async function GET(request: Request) {
           uom: item.unit,
           revenueAccount: item.revenueAccount || "",
           costAccount: item.costAccount || "",
-          defaultRate: item.sellPrice || 0,
+          defaultRate: state.rate,
           taxCode: item.taxCode || "",
-          stockQty: qtyIn - qtyOut,
+          stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
         };
@@ -212,7 +210,8 @@ export async function GET(request: Request) {
           warehouseCode: movement.warehouse?.code || "",
           warehouseName: movement.warehouse?.name || "",
           transferId: movement.transferId || "",
-          movementType: movement.referenceType || movement.type,
+          movementType: movement.type,
+          referenceType: movement.referenceType || "",
           qtyIn: ["PURCHASE_IN", "PURCHASE_RECEIPT", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
           qtyOut: ["SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
           unitCost: Number(movement.unitCost || 0),
