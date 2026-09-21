@@ -429,6 +429,14 @@ async function postPayment(row: any) {
   const customerRefund = partyType === "Customer" && !receive;
   const advance = !customerRefund && !String(row.againstDocumentId || "").trim();
   const defaults = await loadConfiguredPostingAccounts();
+  const refundCredit = customerRefund
+    ? (await findRecords<any>("Invoices", {
+        invoiceId: String(row.sourceDocumentId || row.againstDocumentId || ""),
+      }, 1)).rows[0]
+    : null;
+  if (customerRefund && !refundCredit) {
+    throw new Error("Linked Sales Credit Note was not found for customer refund");
+  }
 
   const lines = customerRefund
     ? [
@@ -485,6 +493,9 @@ async function postPayment(row: any) {
     againstBillId: !customerRefund && !advance && !receive ? String(row.againstDocumentId) : undefined,
     exchangeGainAccountId: defaults.exchangeGainAccount,
     exchangeLossAccountId: defaults.exchangeLossAccount,
+    customerRefundCreditExchangeRate: customerRefund
+      ? Number(refundCredit?.exchangeRate || 0) || (String(refundCredit?.currency || "PGK").toUpperCase() === "PGK" ? 1 : undefined)
+      : undefined,
     createdBy: "payment-posting",
     approvedBy: "Finance Controller",
   });
