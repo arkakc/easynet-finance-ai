@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { cookies, headers } from "next/headers";
 import bcrypt from "bcryptjs";
 import { env } from "@/lib/env";
@@ -136,9 +137,15 @@ function sessionUserFromDatabase(user: {
   };
 }
 
-export async function authenticateDetailed(email: string, password: string): Promise<AuthenticationResult> {
+type AuthClient = PrismaClient | Prisma.TransactionClient;
+
+export async function authenticateDetailed(
+  email: string,
+  password: string,
+  client: AuthClient = prisma,
+): Promise<AuthenticationResult> {
   const normalizedEmail = email.trim().toLowerCase();
-  const found = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+  const found = await client.user.findUnique({ where: { email: normalizedEmail } });
   if (!found || found.status !== "ACTIVE" || !found.password || !PRISMA_ROLE_MAP[String(found.role)]) {
     return { ok: false, reason: "INVALID", retryAfterSeconds: 0 };
   }
@@ -159,7 +166,7 @@ export async function authenticateDetailed(email: string, password: string): Pro
     const lockedUntil = nextCount >= ACCOUNT_FAILURE_LIMIT
       ? new Date(now.getTime() + ACCOUNT_LOCK_MS)
       : null;
-    await prisma.user.update({
+    await client.user.update({
       where: { id: found.id },
       data: {
         failedLoginCount: nextCount,
@@ -174,7 +181,7 @@ export async function authenticateDetailed(email: string, password: string): Pro
     };
   }
 
-  const updated = await prisma.user.update({
+  const updated = await client.user.update({
     where: { id: found.id },
     data: {
       lastLoginAt: now,
@@ -189,8 +196,12 @@ export async function authenticateDetailed(email: string, password: string): Pro
     : { ok: false, reason: "INVALID", retryAfterSeconds: 0 };
 }
 
-export async function authenticate(email: string, password: string): Promise<SessionUser | null> {
-  const result = await authenticateDetailed(email, password);
+export async function authenticate(
+  email: string,
+  password: string,
+  client: AuthClient = prisma,
+): Promise<SessionUser | null> {
+  const result = await authenticateDetailed(email, password, client);
   return result.ok ? result.user : null;
 }
 
@@ -238,9 +249,12 @@ export function verifySessionToken(token?: string | null): SessionUser | null {
   }
 }
 
-export async function validateSessionUser(tokenUser: SessionUser | null): Promise<SessionUser | null> {
+export async function validateSessionUser(
+  tokenUser: SessionUser | null,
+  client: AuthClient = prisma,
+): Promise<SessionUser | null> {
   if (!tokenUser) return null;
-  const found = await prisma.user.findUnique({
+  const found = await client.user.findUnique({
     where: { id: tokenUser.userId },
     select: {
       id: true,
@@ -323,8 +337,8 @@ export async function requirePermission(permission: Permission) {
   return user;
 }
 
-export async function listConfiguredUsers() {
-  const users = await prisma.user.findMany({
+export async function listConfiguredUsers(client: AuthClient = prisma) {
+  const users = await client.user.findMany({
     orderBy: { email: "asc" },
     select: {
       id: true,
