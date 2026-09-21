@@ -83,8 +83,20 @@ function bestParty<T extends { id: string; code: string; name: string; legalName
 }
 
 function documentCode(kind: "INVOICE" | "BILL", text: string) {
-  const pattern = kind === "INVOICE" ? /\b(?:IN|SI)-\d{5}-\d{4}\b/i : /\bBI-\d{5}-\d{4}\b/i;
-  return text.match(pattern)?.[0].toUpperCase() || null;
+  const patterns = kind === "INVOICE"
+    ? [
+        /\b(?:IN|SI)-\d{5}-\d{4}\b/i,
+        /\b(?:INV|SINV)-\d{4}-\d{4,}\b/i,
+      ]
+    : [
+        /\bBI-\d{5}-\d{4}\b/i,
+        /\bBILL-\d{4}-\d{4,}\b/i,
+      ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern)?.[0];
+    if (match) return match.toUpperCase();
+  }
+  return null;
 }
 
 function dueDate(date: Date, days: number) {
