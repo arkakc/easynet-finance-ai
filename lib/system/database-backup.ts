@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { prisma } from "@/src/lib/prisma";
+import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
 
 export const databasePath = path.join(process.cwd(), "prisma", "dev.db");
 export const databaseBackupDirectory = path.join(process.cwd(), "backups", "database");
@@ -62,7 +62,15 @@ async function pragmaResult(client: PrismaClient, pragma: "quick_check" | "integ
   return rows.map((row) => String(Object.values(row)[0] ?? "").toLowerCase());
 }
 
+function assertSqliteRuntime() {
+  const runtime = databaseRuntimeInfo();
+  if (runtime.provider !== "sqlite") {
+    throw new Error("SQLite backup/restore utilities are disabled while DATABASE_PROVIDER=postgresql; use managed PostgreSQL backups/PITR.");
+  }
+}
+
 export async function verifyLiveDatabase() {
+  assertSqliteRuntime();
   const checks = await pragmaResult(prisma, "quick_check");
   if (checks.length !== 1 || checks[0] !== "ok") {
     throw new Error(`Live database quick check failed: ${checks.join("; ") || "no result"}`);
@@ -138,6 +146,7 @@ export async function createDatabaseBackup(options?: { createdBy?: string; reaso
 }
 
 export async function listDatabaseBackups(): Promise<DatabaseBackupSummary[]> {
+  assertSqliteRuntime();
   await fs.mkdir(databaseBackupDirectory, { recursive: true });
   const entries = await fs.readdir(databaseBackupDirectory, { withFileTypes: true });
   const files = entries
