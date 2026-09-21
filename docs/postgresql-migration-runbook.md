@@ -22,7 +22,7 @@ Local development may continue on `prisma/dev.db`. Production runtime uses Postg
     DATABASE_URL_POSTGRES=<production connection string>
     APP_ENV=production
     ```
-11. Redeploy/restart the application and verify `/api/health` reports `database.provider = postgresql` and `reachable = true`.
+11. Verify the managed PostgreSQL backup/PITR, then set `POSTGRES_BACKUP_VERIFIED_AT` to that verification time in ISO-8601 format.\n12. Redeploy/restart the application and verify `/api/health` reports `database.provider = postgresql` and `reachable = true`.
 12. Verify `/go-live` reports READY before reopening writes.
 13. Retain the final SQLite backup read-only for the agreed rollback/retention period.
 
