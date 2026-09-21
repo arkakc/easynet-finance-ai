@@ -20,10 +20,16 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
   });
   if (!header) notFound();
 
-  const [customers, suppliers, projects] = await Promise.all([
+  const [customers, suppliers, projects, reversalJournal, originalJournal] = await Promise.all([
     prisma.customer.findMany({ select: { id: true, name: true } }),
     prisma.supplier.findMany({ select: { id: true, name: true } }),
     prisma.project.findMany({ select: { id: true, name: true } }),
+    header.sourceDocType !== "JOURNAL_REVERSAL"
+      ? prisma.journalHeader.findFirst({ where: { reversalOfJournalId: header.id }, select: { code: true, status: true, sourceDocId: true } })
+      : Promise.resolve(null),
+    header.sourceDocType === "JOURNAL_REVERSAL" && header.reversalOfJournalId
+      ? prisma.journalHeader.findUnique({ where: { id: header.reversalOfJournalId }, select: { code: true, status: true, sourceDocType: true, sourceDocId: true } })
+      : Promise.resolve(null),
   ]);
 
   const customerMap = new Map(customers.map((row) => [row.id, `${row.name} (${row.id})`]));
@@ -91,6 +97,8 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           <div><span>Submitted At</span><strong>{header.createdAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}</strong></div>
           <div><span>Posted At</span><strong>{header.postedAt ? header.postedAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" }) : "Not posted"}</strong></div>
           <div><span>Reference</span><strong>{header.reference || header.description || "—"}</strong></div>
+          {reversalJournal ? <div><span>Reversal Status</span><strong>REVERSED · <Link href={`/journals/${reversalJournal.code}`}>{reversalJournal.code}</Link></strong></div> : null}
+          {originalJournal ? <div><span>Reversal Of</span><strong><Link href={`/journals/${originalJournal.code}`}>{originalJournal.code}</Link> · {originalJournal.sourceDocType || "JOURNAL"} · {originalJournal.sourceDocId || "—"}</strong></div> : null}
         </div>
 
         <div className="document-lines">
