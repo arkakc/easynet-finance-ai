@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { companyBaseCurrency } from "@/lib/accounting/currency";
 import { prisma } from "@/src/lib/prisma";
 
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -18,7 +19,7 @@ export type CashFlowRow = {
 };
 
 export type CashFlowStatement = {
-  currency: "PGK";
+  currency: string;
   period: { from: string; asOf: string };
   generatedAt: string;
   rows: CashFlowRow[];
@@ -46,9 +47,10 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const asOfDate = accountingDate(input.asOf, true);
   if (fromDate > asOfDate) throw new Error("from must be on or before asOf");
 
-  const [accounts, mappedBanks] = await Promise.all([
+  const [accounts, mappedBanks, baseCurrency] = await Promise.all([
     client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, parentId: true } }),
     client.bankAccount.findMany({ where: { isActive: true, chartOfAccountsId: { not: null } }, select: { chartOfAccountsId: true } }),
+    client.$transaction((tx) => companyBaseCurrency(tx)),
   ]);
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
@@ -105,7 +107,7 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const accountById = new Map(accounts.map((account) => [account.id, account]));
 
   return {
-    currency: "PGK",
+    currency: baseCurrency,
     period: input,
     generatedAt: new Date().toISOString(),
     rows,
