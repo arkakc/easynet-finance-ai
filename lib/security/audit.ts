@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { prisma } from "@/src/lib/prisma";
 
 type AuditClient = PrismaClient | Prisma.TransactionClient;
+const CHAIN_ID = "primary";
 
 export type AuditOutcome = "SUCCESS" | "FAILURE" | "DENIED" | "LOCKED" | "INFO";
 
@@ -26,9 +27,11 @@ export type AuditEventInput = {
 export type AuditIntegrityReport = {
   sealedEntries: number;
   legacyUnsealedEntries: number;
+  unsequencedSealedEntries: number;
   valid: boolean;
   brokenAtId: string | null;
   headHash: string | null;
+  chainSequence: number;
 };
 
 function integritySecret() {
@@ -42,8 +45,13 @@ function json(value: unknown) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+function hashPayload(payload: string) {
+  return createHmac("sha256", integritySecret()).update(payload).digest("base64url");
+}
+
 function auditPayload(row: {
   id: string;
+  sequence: number;
   action: string;
   entityType: string;
   entityId: string | null;
@@ -54,7 +62,6 @@ function auditPayload(row: {
   outcome: string;
   requestId: string | null;
   actorEmail: string | null;
-  userId: string | null;
   ipAddress: string | null;
   userAgent: string | null;
   previousHash: string | null;
@@ -62,6 +69,7 @@ function auditPayload(row: {
 }) {
   return JSON.stringify({
     id: row.id,
+    sequence: row.sequence,
     action: row.action,
     entityType: row.entityType,
     entityId: row.entityId,
@@ -72,9 +80,8 @@ function auditPayload(row: {
     outcome: row.outcome,
     requestId: row.requestId,
     actorEmail: row.actorEmail,
-    // userId is intentionally excluded from the seal. It is a navigational
-    // foreign key that may become null when a user is deleted; actorEmail is
-    // the immutable actor snapshot used for integrity verification.
+    // userId is deliberately excluded: the FK may be set null if the actor
+    // account is deleted, while actorEmail remains the immutable audit snapshot.
     ipAddress: row.ipAddress,
     userAgent: row.userAgent,
     previousHash: row.previousHash,
@@ -82,8 +89,12 @@ function auditPayload(row: {
   });
 }
 
-function hashPayload(payload: string) {
-  return createHmac("sha256", integritySecret()).update(payload).digest("base64url");
+function chainStatePayload(sequence: number, headHash: string | null) {
+  return JSON.stringify({ chainId: CHAIN_ID, sequence, headHash });
+}
+
+function isRootClient(client: AuditClient): client is PrismaClient {
+  return typeof (client as PrismaClient).$transaction === "function";
 }
 
 export function requestAuditContext(request: Request) {
@@ -95,20 +106,31 @@ export function requestAuditContext(request: Request) {
   };
 }
 
-export async function appendAuditEvent(
+async function appendAuditEventInTransaction(
   input: AuditEventInput,
-  client: AuditClient = prisma,
+  tx: Prisma.TransactionClient,
 ) {
-  const latest = await client.auditLog.findFirst({
-    where: { integrityHash: { not: null } },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { integrityHash: true },
+  // Updating one chain-state row first gives all audit writers a common
+  // serialization point. This prevents same-millisecond/concurrent events
+  // from forking the HMAC chain.
+  const state = await tx.auditChainState.upsert({
+    where: { id: CHAIN_ID },
+    create: {
+      id: CHAIN_ID,
+      nextSequence: 1,
+      headHash: null,
+      integrityHash: null,
+    },
+    update: { nextSequence: { increment: 1 } },
+    select: { nextSequence: true, headHash: true },
   });
 
   const createdAt = new Date();
   const id = randomUUID();
+  const sequence = state.nextSequence;
   const row = {
     id,
+    sequence,
     action: String(input.action || "UNKNOWN").trim().toUpperCase(),
     entityType: String(input.entityType || "System").trim(),
     entityId: input.entityId || null,
@@ -122,34 +144,86 @@ export async function appendAuditEvent(
     userId: input.userId || null,
     ipAddress: input.ipAddress || null,
     userAgent: input.userAgent || null,
-    previousHash: latest?.integrityHash || null,
+    previousHash: state.headHash,
     createdAt,
   };
   const integrityHash = hashPayload(auditPayload(row));
 
-  return client.auditLog.create({
+  const event = await tx.auditLog.create({
     data: {
       ...row,
       integrityHash,
     },
   });
+
+  const stateIntegrityHash = hashPayload(chainStatePayload(sequence, integrityHash));
+  await tx.auditChainState.update({
+    where: { id: CHAIN_ID },
+    data: {
+      headHash: integrityHash,
+      integrityHash: stateIntegrityHash,
+    },
+  });
+
+  return event;
+}
+
+export async function appendAuditEvent(
+  input: AuditEventInput,
+  client: AuditClient = prisma,
+) {
+  if (isRootClient(client)) {
+    return client.$transaction(
+      (tx) => appendAuditEventInTransaction(input, tx),
+      { timeout: 15_000 },
+    );
+  }
+  return appendAuditEventInTransaction(input, client);
 }
 
 export async function verifyAuditIntegrity(
   client: AuditClient = prisma,
 ): Promise<AuditIntegrityReport> {
-  const [sealed, legacyUnsealedEntries] = await Promise.all([
+  const [sealed, legacyUnsealedEntries, unsequencedSealedEntries, state] = await Promise.all([
     client.auditLog.findMany({
-      where: { integrityHash: { not: null } },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      where: { integrityHash: { not: null }, sequence: { not: null } },
+      orderBy: { sequence: "asc" },
     }),
     client.auditLog.count({ where: { integrityHash: null } }),
+    client.auditLog.count({ where: { integrityHash: { not: null }, sequence: null } }),
+    client.auditChainState.findUnique({ where: { id: CHAIN_ID } }),
   ]);
 
-  const knownHashes = new Set(sealed.map((row) => row.integrityHash).filter(Boolean));
+  const fail = (brokenAtId: string | null, headHash: string | null, chainSequence: number): AuditIntegrityReport => ({
+    sealedEntries: sealed.length,
+    legacyUnsealedEntries,
+    unsequencedSealedEntries,
+    valid: false,
+    brokenAtId,
+    headHash,
+    chainSequence,
+  });
+
+  if (unsequencedSealedEntries > 0) {
+    const first = await client.auditLog.findFirst({
+      where: { integrityHash: { not: null }, sequence: null },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true },
+    });
+    return fail(first?.id || null, state?.headHash || null, state?.nextSequence || 0);
+  }
+
+  let previousHash: string | null = null;
+  let expectedSequence = 1;
+
   for (const row of sealed) {
+    if (row.sequence !== expectedSequence || row.previousHash !== previousHash) {
+      return fail(row.id, state?.headHash || previousHash, state?.nextSequence || 0);
+    }
+
     const expected = hashPayload(auditPayload({
       id: row.id,
+      sequence: row.sequence,
       action: row.action,
       entityType: row.entityType,
       entityId: row.entityId,
@@ -160,37 +234,52 @@ export async function verifyAuditIntegrity(
       outcome: row.outcome,
       requestId: row.requestId,
       actorEmail: row.actorEmail,
-      userId: row.userId,
       ipAddress: row.ipAddress,
       userAgent: row.userAgent,
       previousHash: row.previousHash,
       createdAt: row.createdAt,
     }));
     if (row.integrityHash !== expected) {
+      return fail(row.id, state?.headHash || previousHash, state?.nextSequence || 0);
+    }
+
+    previousHash = row.integrityHash;
+    expectedSequence += 1;
+  }
+
+  const expectedStateSequence = sealed.length;
+  const expectedStateHash = hashPayload(chainStatePayload(expectedStateSequence, previousHash));
+
+  if (!state) {
+    if (sealed.length === 0) {
       return {
-        sealedEntries: sealed.length,
+        sealedEntries: 0,
         legacyUnsealedEntries,
-        valid: false,
-        brokenAtId: row.id,
-        headHash: sealed.at(-1)?.integrityHash || null,
+        unsequencedSealedEntries: 0,
+        valid: true,
+        brokenAtId: null,
+        headHash: null,
+        chainSequence: 0,
       };
     }
-    if (row.previousHash && !knownHashes.has(row.previousHash)) {
-      return {
-        sealedEntries: sealed.length,
-        legacyUnsealedEntries,
-        valid: false,
-        brokenAtId: row.id,
-        headHash: sealed.at(-1)?.integrityHash || null,
-      };
-    }
+    return fail(null, previousHash, 0);
+  }
+
+  if (
+    state.nextSequence !== expectedStateSequence
+    || state.headHash !== previousHash
+    || state.integrityHash !== expectedStateHash
+  ) {
+    return fail(null, state.headHash, state.nextSequence);
   }
 
   return {
     sealedEntries: sealed.length,
     legacyUnsealedEntries,
+    unsequencedSealedEntries,
     valid: true,
     brokenAtId: null,
-    headHash: sealed.at(-1)?.integrityHash || null,
+    headHash: previousHash,
+    chainSequence: state.nextSequence,
   };
 }
