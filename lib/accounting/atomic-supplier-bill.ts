@@ -5,6 +5,7 @@ import {
   supplierBillPostingMixed,
 } from "@/lib/accounting/posting-rules";
 import { round2 } from "@/lib/accounting/inventory";
+import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 export type AtomicSupplierBillInput = {
   billId: string;
@@ -50,6 +51,19 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       },
     });
     if (!bill) throw new Error("Supplier Invoice not found");
+
+    const fx = await resolveDocumentExchangeRate(tx, {
+      currency: bill.currency,
+      exchangeRate: Number(bill.exchangeRate || 0) || undefined,
+      postingDate: input.postingDate,
+    });
+    const baseSubtotal = toBaseAmount(Number(bill.subtotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseTaxTotal = toBaseAmount(Number(bill.taxTotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseDiscountTotal = toBaseAmount(Number(bill.discountTotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseFreight = toBaseAmount(Number(bill.freight || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseTotal = toBaseAmount(Number(bill.total || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseAmountPaid = toBaseAmount(Number(bill.amountPaid || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseOutstanding = toBaseAmount(Number(bill.outstanding || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
 
     if (bill.glPosted && bill.journalId) {
       return {
@@ -124,6 +138,9 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
         documentNumber: input.documentNumber,
         reference: input.reference || `Supplier bill ${input.documentNumber}`,
         projectId: projectRef,
+        currency: fx.currency,
+        baseCurrency: fx.baseCurrency,
+        exchangeRate: fx.exchangeRate,
         createdBy: input.createdBy || "supplier-bill-posting",
         approvedBy: input.approvedBy || "Finance Controller",
         lines: supplierBillPostingByLines({
@@ -133,12 +150,25 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
           projectId: projectRef,
           payableAccountId: input.payableAccountId,
           costLines,
+          currency: fx.currency,
+          baseCurrency: fx.baseCurrency,
+          exchangeRate: fx.exchangeRate,
         }),
       });
 
       await tx.supplierBill.update({
         where: { id: bill.id },
-        data: { journalId: journal.journalId },
+        data: {
+          journalId: journal.journalId,
+          exchangeRate: fx.exchangeRate,
+          baseSubtotal,
+          baseTaxTotal,
+          baseDiscountTotal,
+          baseFreight,
+          baseTotal,
+          baseAmountPaid,
+          baseOutstanding,
+        },
       });
 
       return {
@@ -164,6 +194,11 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       },
     });
     if (!purchaseOrder) throw new Error("Referenced Purchase Order not found");
+    if (String(purchaseOrder.currency || fx.baseCurrency).toUpperCase() !== fx.currency) {
+      throw new Error(
+        `Supplier Invoice currency ${fx.currency} does not match Purchase Order currency ${purchaseOrder.currency}`,
+      );
+    }
     if (purchaseOrder.supplierId !== bill.supplierId) {
       throw new Error("Supplier Invoice supplier does not match the Purchase Order");
     }
@@ -322,6 +357,9 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       payableAccountId: input.payableAccountId,
       stockReceivedButNotBilledAccountId: input.stockReceivedButNotBilledAccountId,
       purchasePriceVarianceAccountId: input.purchasePriceVarianceAccountId,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
     });
 
     const fullyBilled = [...poLinesByItem.entries()].every(([itemId, poLines]) => {
@@ -367,6 +405,9 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       documentNumber: input.documentNumber,
       reference: input.reference || `Supplier bill ${input.documentNumber}`,
       projectId: projectRef,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
       createdBy: input.createdBy || "supplier-bill-posting",
       approvedBy: input.approvedBy || "Finance Controller",
       lines: mixed.lines,
@@ -374,7 +415,17 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
 
     await tx.supplierBill.update({
       where: { id: bill.id },
-      data: { journalId: journal.journalId },
+      data: {
+        journalId: journal.journalId,
+        exchangeRate: fx.exchangeRate,
+        baseSubtotal,
+        baseTaxTotal,
+        baseDiscountTotal,
+        baseFreight,
+        baseTotal,
+        baseAmountPaid,
+        baseOutstanding,
+      },
     });
 
     return {
@@ -385,6 +436,11 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       grniCleared: mixed.receiptValue,
       purchaseOrderStatus: fullyBilled ? "BILLED" : purchaseOrder.status,
       alreadyPosted: false,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
+      baseTotal,
+      baseOutstanding,
     };
   });
 }
