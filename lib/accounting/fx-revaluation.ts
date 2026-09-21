@@ -58,7 +58,7 @@ export async function postFxRevaluationAtomic(input: {
     // Reconstruct open monetary items as-of the closing date rather than using
     // today's outstanding/status. This keeps retrospective period close correct
     // even when later payments were posted before the controller ran revaluation.
-    const [invoices, bills, postedInvoiceCredits] = await Promise.all([
+    const [invoices, bills, postedInvoiceCredits, foreignBankAccounts] = await Promise.all([
       tx.invoice.findMany({
         where: {
           glPosted: true,
@@ -131,6 +131,21 @@ export async function postFxRevaluationAtomic(input: {
           baseTotal: true,
           journalId: true,
         },
+      }),
+      tx.bankAccount.findMany({
+        where: {
+          isActive: true,
+          chartOfAccountsId: { not: null },
+          currency: { not: baseCurrency },
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          currency: true,
+          chartOfAccountsId: true,
+        },
+        orderBy: { code: "asc" },
       }),
     ]);
 
@@ -426,6 +441,119 @@ export async function postFxRevaluationAtomic(input: {
         projectId: bill.projectId,
         currency: bill.currency,
         outstandingAmount: outstanding,
+        historicalBase,
+        closingRate,
+        closingBase,
+        baseDifference: difference,
+        gainAmount: gain,
+        lossAmount: loss,
+      });
+    }
+
+    for (const bank of foreignBankAccounts) {
+      if (!bank.chartOfAccountsId) continue;
+      const bankLines = await tx.journalLine.findMany({
+        where: {
+          accountId: bank.chartOfAccountsId,
+          journal: {
+            status: "POSTED",
+            date: { lte: revaluationDateValue },
+          },
+        },
+        select: {
+          debit: true,
+          credit: true,
+          transactionCurrency: true,
+          transactionDebit: true,
+          transactionCredit: true,
+        },
+      });
+
+      const transactionBalance = roundCurrency(
+        bankLines
+          .filter((line) => String(line.transactionCurrency || "").toUpperCase() === bank.currency.toUpperCase())
+          .reduce(
+            (sum, line) => sum + Number(line.transactionDebit || 0) - Number(line.transactionCredit || 0),
+            0,
+          ),
+      );
+      if (Math.abs(transactionBalance) <= 0.005) continue;
+
+      const historicalBase = roundCurrency(
+        bankLines.reduce(
+          (sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0),
+          0,
+        ),
+      );
+      const closingRate = await latestExchangeRate(tx, {
+        fromCurrency: bank.currency,
+        toCurrency: baseCurrency,
+        rateDate: revaluationDate,
+      });
+      const closingBase = roundCurrency(transactionBalance * closingRate);
+      const difference = roundCurrency(closingBase - historicalBase);
+      if (Math.abs(difference) < 0.01) continue;
+
+      const baseAudit = {
+        transactionCurrency: baseCurrency,
+        exchangeRate: 1,
+      };
+      let gain = 0;
+      let loss = 0;
+
+      if (difference > 0) {
+        gain = difference;
+        journalLines.push(
+          {
+            accountId: bank.chartOfAccountsId,
+            debit: difference,
+            ...baseAudit,
+            transactionDebit: difference,
+            transactionCredit: 0,
+            description: `FX revaluation bank ${bank.code}`,
+          },
+          {
+            accountId: input.exchangeGainAccountId,
+            credit: difference,
+            ...baseAudit,
+            transactionDebit: 0,
+            transactionCredit: difference,
+            description: `Unrealized FX gain on bank ${bank.code}`,
+          },
+        );
+      } else {
+        loss = Math.abs(difference);
+        journalLines.push(
+          {
+            accountId: input.exchangeLossAccountId,
+            debit: loss,
+            ...baseAudit,
+            transactionDebit: loss,
+            transactionCredit: 0,
+            description: `Unrealized FX loss on bank ${bank.code}`,
+          },
+          {
+            accountId: bank.chartOfAccountsId,
+            credit: loss,
+            ...baseAudit,
+            transactionDebit: 0,
+            transactionCredit: loss,
+            description: `FX revaluation bank ${bank.code}`,
+          },
+        );
+      }
+
+      totalGain = roundCurrency(totalGain + gain);
+      totalLoss = roundCurrency(totalLoss + loss);
+      detailRows.push({
+        documentType: "Bank Account",
+        documentId: bank.id,
+        documentNumber: bank.code,
+        partyType: "Bank",
+        partyId: bank.code,
+        projectId: null,
+        currency: bank.currency,
+        outstandingAmount: transactionBalance,
         historicalBase,
         closingRate,
         closingBase,
