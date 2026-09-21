@@ -26,20 +26,56 @@ function postgresReadinessCheck(): GoLiveCheck {
   };
 }
 
+async function backupReadinessCheck(): Promise<GoLiveCheck> {
+  const runtime = databaseRuntimeInfo();
+
+  if (runtime.provider === "postgresql") {
+    const raw = process.env.POSTGRES_BACKUP_VERIFIED_AT?.trim() || "";
+    const verifiedAt = raw ? new Date(raw) : null;
+    const valid = Boolean(verifiedAt && !Number.isNaN(verifiedAt.getTime()));
+    const ageMs = valid ? Date.now() - verifiedAt!.getTime() : Number.POSITIVE_INFINITY;
+    const fresh = valid && ageMs >= -5 * 60 * 1000 && ageMs <= 24 * 60 * 60 * 1000;
+
+    return {
+      key: "backup",
+      label: "Managed PostgreSQL backup/PITR verified within 24 hours",
+      blocking: true,
+      passed: fresh,
+      detail: fresh
+        ? `Backup verification recorded at ${verifiedAt!.toISOString()}`
+        : "Set POSTGRES_BACKUP_VERIFIED_AT to the ISO timestamp of a verified managed backup/PITR check performed within the last 24 hours",
+    };
+  }
+
+  const backups = await listDatabaseBackups();
+  const latest = backups[0];
+  const fresh = Boolean(latest && Date.now() - new Date(latest.createdAt).getTime() <= 24 * 60 * 60 * 1000);
+
+  return {
+    key: "backup",
+    label: "Verified SQLite backup within 24 hours",
+    blocking: true,
+    passed: fresh,
+    detail: latest
+      ? `${latest.fileName} · ${new Date(latest.createdAt).toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}`
+      : "No verified SQLite backup found",
+  };
+}
+
 export async function buildGoLiveReadiness() {
-  const [snapshot, backups, payrollJournals, payrollRuns, missingSources] = await Promise.all([
+  const [snapshot, backupCheck, payrollJournals, payrollRuns, missingSources] = await Promise.all([
     buildFinancialReconciliationSnapshot({ generatedBy: "go-live-readiness" }),
-    listDatabaseBackups(),
+    backupReadinessCheck(),
     prisma.journalHeader.findMany({ where: { status: "POSTED", sourceDocType: "PAYROLL" }, select: { id: true, code: true } }),
     prisma.payrollRun.findMany({ where: { status: { not: "CANCELLED" } }, select: { journalId: true } }),
     prisma.document.count({ where: { status: { not: "ARCHIVED" }, OR: [{ fileUrl: null }, { fileUrl: "" }] } }),
   ]);
+
   const linkedPayrollJournals = new Set(payrollRuns.map((run) => run.journalId).filter(Boolean));
   const orphanPayroll = payrollJournals.filter((journal) => !linkedPayrollJournals.has(journal.id));
-  const latestBackup = backups[0];
-  const backupFresh = Boolean(latestBackup && Date.now() - new Date(latestBackup.createdAt).getTime() <= 24 * 60 * 60 * 1000);
+
   const checks: GoLiveCheck[] = [
-    { key: "backup", label: "Verified database backup within 24 hours", blocking: true, passed: backupFresh, detail: latestBackup ? `${latestBackup.fileName} · ${new Date(latestBackup.createdAt).toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}` : "No verified backup found" },
+    backupCheck,
     { key: "ledger", label: "Posted ledger balanced", blocking: true, passed: snapshot.controls.ledgerBalanced, detail: snapshot.controls.ledgerBalanced ? `Debit and credit both K${snapshot.ledger.totalDebit.toFixed(2)}` : `Ledger difference K${Math.abs(snapshot.ledger.difference).toFixed(2)}` },
     { key: "ar", label: "Accounts receivable reconciled", blocking: true, passed: snapshot.receivables.matched, detail: `GL K${snapshot.receivables.glBalance.toFixed(2)} · subledger K${snapshot.receivables.outstanding.toFixed(2)} · difference K${Math.abs(snapshot.receivables.difference).toFixed(2)}` },
     { key: "ap", label: "Accounts payable reconciled", blocking: true, passed: snapshot.payables.matched, detail: `GL K${snapshot.payables.glBalance.toFixed(2)} · subledger K${snapshot.payables.outstanding.toFixed(2)} · difference K${Math.abs(snapshot.payables.difference).toFixed(2)}` },
@@ -50,5 +86,11 @@ export async function buildGoLiveReadiness() {
     { key: "auth", label: "NextAuth secret configured", blocking: true, passed: Boolean(process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32), detail: process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32 ? "Secret present" : "AUTH_SECRET must be at least 32 characters" },
     { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: true, detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
   ];
-  return { generatedAt: new Date().toISOString(), ready: checks.filter((check) => check.blocking).every((check) => check.passed), checks, snapshot: { asOf: snapshot.asOf, fingerprint: snapshot.fingerprint, migrationReady: snapshot.controls.migrationReady } };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    ready: checks.filter((check) => check.blocking).every((check) => check.passed),
+    checks,
+    snapshot: { asOf: snapshot.asOf, fingerprint: snapshot.fingerprint, migrationReady: snapshot.controls.migrationReady },
+  };
 }
