@@ -394,6 +394,14 @@ async function createWarehouse(raw: unknown) {
     if (duplicate) throw new Error(`Warehouse code already exists: ${code}`);
     const count = await tx.warehouse.count();
     const makeDefault = record.isDefault || count === 0;
+    if (record.isDefault && count > 0) {
+      const legacyUnassigned = await tx.stockMovement.count({ where: { warehouseId: null } });
+      if (legacyUnassigned > 0) {
+        throw new Error(
+          "Legacy stock movements are still unassigned. Run the controlled warehouse backfill before changing the default warehouse.",
+        );
+      }
+    }
     if (makeDefault) await tx.warehouse.updateMany({ data: { isDefault: false } });
     const warehouse = await tx.warehouse.create({
       data: { code, name: record.name, location: record.location || null, isDefault: makeDefault, isActive: true },
