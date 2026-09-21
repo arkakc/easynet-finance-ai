@@ -178,7 +178,12 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal submission failed");
-      setMessage(editJournal ? `Journal ${body.journalId} updated successfully.` : `Successfully drafted with Document ID ${body.manualId || body.journalId}.`);
+      setMessage(editJournal ? `Journal ${body.journalId} updated successfully. Returning to journal view…` : `Successfully drafted with Document ID ${body.manualId || body.journalId}.`);
+      if (editJournal) {
+        router.push(`/journals/${encodeURIComponent(body.journalId || editJournal.journalId)}`);
+        router.refresh();
+        return;
+      }
       setLines([blankLine("Debit line"), blankLine("Credit line")]);
       setRemarks("");
       try {
