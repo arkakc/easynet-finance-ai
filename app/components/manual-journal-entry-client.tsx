@@ -162,7 +162,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal submission failed");
-      setMessage(`Manual journal ${body.journalId} submitted as PENDING. It will affect the GL only after approval by a different authorised checker.`);
+      setMessage(`Successfully drafted with Document ID ${body.manualId || body.journalId}.`);
       setLines([blankLine("Debit line"), blankLine("Credit line")]);
       setRemarks("");
       try {
@@ -262,7 +262,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
         <div className="form-wide button-row">
           <button type="button" className="secondary" disabled={busy} onClick={() => setLines((current) => [...current, blankLine("Journal line")])}>+ Add line</button>
           <button type="submit" disabled={!canPost} style={!canPost ? { opacity: 0.6, cursor: "not-allowed", filter: "grayscale(1)" } : undefined}>
-            {busy ? "Submitting…" : "Submit for Approval"}
+            {busy ? "Saving…" : "Save"}
           </button>
         </div>
         {message ? <div className="form-wide status-banner">{message}</div> : null}
