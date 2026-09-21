@@ -54,6 +54,15 @@ async function main() {
     sessionVersion: managerRecord.sessionVersion,
   };
 
+  const baselineAccount = await prisma.chartOfAccounts.create({
+    data: {
+      code: `UAT-COA-ROOT-${suffix}`,
+      name: "COA UAT Root",
+      type: "ASSET",
+      currency: "PGK",
+    },
+  });
+
   const readonly = await prisma.user.create({
     data: {
       name: "COA Import Read Only UAT",
@@ -152,6 +161,7 @@ async function main() {
       dbValidatedRbac: true,
     }, null, 2));
   } finally {
+    await prisma.chartOfAccounts.delete({ where: { id: baselineAccount.id } }).catch(() => undefined);
     await prisma.user.delete({ where: { id: readonly.id } }).catch(() => undefined);
     await prisma.user.delete({ where: { id: managerRecord.id } }).catch(() => undefined);
     await prisma.$disconnect();
