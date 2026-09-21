@@ -14,6 +14,8 @@ export type ConfiguredPostingAccounts = {
   retainedEarningsAccount: string;
   roundOffAccount: string;
   exchangeGainLossAccount: string;
+  exchangeGainAccount: string;
+  exchangeLossAccount: string;
   defaultEmployeeAdvanceAccount: string;
   defaultCostOfGoodsSoldAccount: string;
   defaultIncomeAccount: string;
@@ -81,6 +83,8 @@ export async function loadConfiguredPostingAccounts(): Promise<ConfiguredPosting
     retainedEarningsAccount: resolve("retained_earnings_account", "ACC-3200"),
     roundOffAccount: resolve("round_off_account", "ACC-6990"),
     exchangeGainLossAccount: resolve("exchange_gain_loss_account", "ACC-6990"),
+    exchangeGainAccount: resolve("exchange_gain_account", INITIAL_ACCOUNT_IDS.exchangeGain),
+    exchangeLossAccount: resolve("exchange_loss_account", INITIAL_ACCOUNT_IDS.exchangeLoss),
     defaultEmployeeAdvanceAccount: resolve("default_employee_advance_account", "ACC-1180"),
     defaultCostOfGoodsSoldAccount: resolve("default_cost_of_goods_sold_account", "ACC-5100"),
     defaultIncomeAccount: resolve("default_income_account", "ACC-4100"),
