@@ -6,7 +6,17 @@ const baseUrl = process.env.UAT_BASE_URL || `http://localhost:${process.env.PORT
 
 async function main() {
   const { createSessionToken, sessionCookie, ROLE_PERMISSIONS } = await import("../lib/auth");
-  const user = (role: Role): SessionUser => ({ email: `${role.toLowerCase().replace(/\s+/g, ".")}@uat.local`, name: "Business UAT", roles: [role], permissions: ROLE_PERMISSIONS[role] });
+  const roleUsers: Record<Role, { email: string; name: string }> = {
+    "System Manager": { email: "admin@easynet.local", name: "UAT Administrator" },
+    "Finance Controller": { email: "controller@easynet.local", name: "UAT Finance Controller" },
+    "Accounts User": { email: "accounts@easynet.local", name: "UAT Accounts User" },
+    "Sales User": { email: "sales@easynet.local", name: "UAT Sales User" },
+    "Purchase User": { email: "purchase@easynet.local", name: "UAT Purchase User" },
+    "Stock User": { email: "field@easynet.local", name: "UAT Stock User" },
+    "Management": { email: "willie@easynet.local", name: "UAT Management" },
+    "Auditor": { email: "auditor@easynet.local", name: "UAT Auditor" },
+  };
+  const user = (role: Role): SessionUser => ({ ...roleUsers[role], roles: [role], permissions: ROLE_PERMISSIONS[role], sessionVersion: 1 });
   const headers = (role: Role) => ({ Cookie: `${sessionCookie.name}=${createSessionToken(user(role))}` });
   const jsonHeaders = (role: Role) => ({ ...headers(role), "Content-Type": "application/json" });
   const checks: Record<string, number> = {};
