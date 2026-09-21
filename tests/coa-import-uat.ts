@@ -30,13 +30,18 @@ function request(user: SessionUser | null, body: unknown) {
 
 async function main() {
   const suffix = String(process.pid);
+  const managerEmail = `coa-manager-${suffix}@example.test`;
   const tempEmail = `coa-readonly-${suffix}@example.test`;
 
-  const managerRecord = await prisma.user.findFirst({
-    where: { role: PrismaRole.SYSTEM_MANAGER, status: UserStatus.ACTIVE },
-    orderBy: { createdAt: "asc" },
+  const managerRecord = await prisma.user.create({
+    data: {
+      name: "COA Import Manager UAT",
+      email: managerEmail,
+      role: PrismaRole.SYSTEM_MANAGER,
+      status: UserStatus.ACTIVE,
+      sessionVersion: 1,
+    },
   });
-  if (!managerRecord) throw new Error("No active System Manager exists for COA import UAT");
 
   const managerRole = PRISMA_ROLE_MAP[String(managerRecord.role)];
   if (!managerRole) throw new Error("System Manager role mapping is unavailable");
@@ -148,6 +153,7 @@ async function main() {
     }, null, 2));
   } finally {
     await prisma.user.delete({ where: { id: readonly.id } }).catch(() => undefined);
+    await prisma.user.delete({ where: { id: managerRecord.id } }).catch(() => undefined);
     await prisma.$disconnect();
   }
 }
