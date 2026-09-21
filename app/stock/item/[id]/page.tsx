@@ -58,11 +58,12 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
         <h3>Movement & Source Document Tracking</h3>
         <div className="table-wrap">
           <table className="data-table">
-            <thead><tr><th>Date</th><th>Movement</th><th>Qty In</th><th>Qty Out</th><th>Unit Cost</th><th>Value</th><th>Project</th><th>Source Document</th></tr></thead>
+            <thead><tr><th>Date</th><th>Warehouse</th><th>Movement</th><th>Qty In</th><th>Qty Out</th><th>Unit Cost</th><th>Value</th><th>Project</th><th>Source Document</th></tr></thead>
             <tbody>
-              {movements.length === 0 && <tr><td colSpan={8}>No stock movements recorded for this item.</td></tr>}
+              {movements.length === 0 && <tr><td colSpan={9}>No stock movements recorded for this item.</td></tr>}
               {[...movements].reverse().map((row: any) => <tr key={row.movementId}>
                 <td>{row.movementDate}</td>
+                <td><strong>{row.warehouseCode || "LEGACY / DEFAULT"}</strong>{row.warehouseName ? <><br /><span className="small">{row.warehouseName}</span></> : null}</td>
                 <td>{row.movementType}<br /><span className="small">{row.movementId}</span></td>
                 <td>{qtyText(row.qtyIn)}</td>
                 <td>{qtyText(row.qtyOut)}</td>
