@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { createPendingManualJournal } from "@/lib/accounting/manual-journal-approval";
-import { requireRequestPermission } from "@/lib/auth";
+import { requireValidatedRequestPermission } from "@/lib/auth";
 
 const lineSchema = z.object({
   accountId: z.string().trim().min(1, "Account is required"),
@@ -47,7 +47,7 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const user = requireRequestPermission(request, "accounts.write");
+    const user = await requireValidatedRequestPermission(request, "accounts.write");
     const input = schema.parse(await request.json());
     const manualId = documentSeriesId("Manual Journal");
     const nonZeroLines = input.lines

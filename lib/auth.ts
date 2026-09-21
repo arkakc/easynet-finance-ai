@@ -328,10 +328,56 @@ export function requireRequestPermission(request: Request, permission: Permissio
   return user;
 }
 
+const OPERATIONAL_WRITE_PERMISSIONS = new Set<Permission>([
+  "sales.write",
+  "purchase.write",
+  "stock.write",
+  "accounts.write",
+  "post.approve",
+]);
+
+export const BANK_SETUP_REQUIRED_ERROR =
+  "Bank setup required. Add at least one active company bank account in Company Banking Details before entering transactions.";
+
+async function assertOperationalBankReady(permission: Permission) {
+  if (!OPERATIONAL_WRITE_PERMISSIONS.has(permission)) return;
+
+  const setupRows = await prisma.globalSettings.findMany({
+    where: { key: { in: ["setup_status", "setup_completed_step_index"] } },
+    select: { key: true, value: true },
+  });
+  const setup = new Map(setupRows.map((row) => [row.key, String(row.value || "")]));
+  const setupActive =
+    String(setup.get("setup_status") || "").toUpperCase() === "ACTIVE"
+    && Number(setup.get("setup_completed_step_index") || -1) >= 7;
+
+  // The banking gate applies after Fresh Setup activation. During the setup
+  // wizard, configuration writes remain available so an installation can be completed.
+  if (!setupActive) return;
+
+  const validBank = await prisma.bankAccount.findFirst({
+    where: {
+      isActive: true,
+      bankName: { not: "" },
+      accountNumber: { not: "" },
+      chartOfAccountsId: { not: null },
+      chartOfAccounts: {
+        isActive: true,
+        type: "ASSET",
+        children: { none: {} },
+      },
+    },
+    select: { id: true },
+  });
+
+  if (!validBank) throw new Error(BANK_SETUP_REQUIRED_ERROR);
+}
+
 export async function requireValidatedRequestPermission(request: Request, permission: Permission) {
   const user = await getValidatedRequestUser(request);
   if (!user) throw new Error("Unauthorized");
   if (!hasPermission(user, permission)) throw new Error("Forbidden");
+  await assertOperationalBankReady(permission);
   return user;
 }
 
@@ -339,6 +385,7 @@ export async function requirePermission(permission: Permission) {
   const user = await getCurrentUser();
   if (!user) throw new Error("Unauthorized");
   if (!hasPermission(user, permission)) throw new Error("Forbidden");
+  await assertOperationalBankReady(permission);
   return user;
 }
 
