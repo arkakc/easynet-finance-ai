@@ -1697,20 +1697,6 @@ model Currency {
   @@index([code])
 }
 
-model ExchangeRate {
-  id           String   @id @default(cuid())
-  fromCurrency String
-  toCurrency   String
-  rate         Decimal
-  rateDate     DateTime
-  source       String? // ECB, FIXER, MANUAL, etc.
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@unique([fromCurrency, toCurrency, rateDate])
-  @@index([rateDate])
-  @@index([fromCurrency, toCurrency])
-}
 
 // ============================================
 // TAXES
