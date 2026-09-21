@@ -21,8 +21,8 @@
     "db:postgres:schema": "tsx scripts/database/generate-postgres-schema.ts",
     "db:postgres:validate": "npm run db:postgres:schema && tsx scripts/database/validate-postgres-schema.ts",
     "db:postgres:client": "npm run db:postgres:schema && tsx scripts/database/generate-postgres-client.ts",
-    "db:postgres:preflight": "npm run db:postgres:client && tsx scripts/database/postgres-transfer.ts --mode=preflight",
-    "db:postgres:transfer": "npm run db:postgres:client && tsx scripts/database/postgres-transfer.ts --mode=transfer",
+    "db:postgres:preflight": "npm run db:generate && npm run db:postgres:client && tsx scripts/database/postgres-transfer.ts --mode=preflight",
+    "db:postgres:transfer": "npm run db:generate && npm run db:postgres:client && tsx scripts/database/postgres-transfer.ts --mode=transfer",
     "hash-password": "tsx scripts/hash-password.ts",
     "lint": "eslint .",
     "payment-allocations:preview": "tsx scripts/backfill-payment-allocations.ts",
@@ -31,10 +31,12 @@
     "warehouse-stock:backfill": "tsx scripts/backfill-warehouse-stock.ts --apply",
     "multi-currency:preview": "tsx scripts/backfill-multi-currency.ts",
     "multi-currency:backfill": "tsx scripts/backfill-multi-currency.ts --apply",
-    "db:clients": "prisma generate && npm run db:postgres:client",
-    "predev": "npm run db:clients",
-    "prebuild": "npm run db:clients",
-    "pretypecheck": "npm run db:clients"
+    "db:clients": "npm run db:generate && npm run db:postgres:client",
+    "predev": "npm run db:runtime-client",
+    "prebuild": "npm run clean:next && npm run db:runtime-client",
+    "pretypecheck": "npm run clean:next && npm run db:runtime-client",
+    "clean:next": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\"",
+    "db:runtime-client": "tsx scripts/database/generate-runtime-client.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.0.0",
