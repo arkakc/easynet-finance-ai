@@ -5,13 +5,35 @@ import { ManualJournalEntryClient, type ManualJournalAccount } from "@/app/compo
 
 export const dynamic = "force-dynamic";
 
-export default async function ManualJournalEntryPage() {
+export default async function ManualJournalEntryPage({ searchParams }: { searchParams: Promise<{ edit?: string }> }) {
   await requirePermission("accounts.write");
+  const { edit } = await searchParams;
+  let editJournal: any = null;
   let accounts: ManualJournalAccount[] = [];
   let baseCurrency = "PGK";
   let error = "";
 
   try {
+    if (edit) {
+      const journal = await prisma.journalHeader.findFirst({
+        where: { OR: [{ id: edit }, { code: edit }] },
+        include: { lines: { orderBy: { lineNo: "asc" }, include: { account: true } } },
+      });
+      if (!journal || !String(journal.sourceDocType || "").startsWith("MANUAL_")) throw new Error("Manual journal not found");
+      if (!["DRAFT", "PENDING"].includes(journal.status)) throw new Error("Approved/posted journals cannot be edited");
+      editJournal = {
+        journalId: journal.id,
+        entryType: String(journal.sourceDocType || "MANUAL_JOURNAL_ENTRY").replace(/^MANUAL_/, ""),
+        postingDate: journal.date.toISOString().slice(0, 10),
+        remarks: journal.description || "",
+        lines: journal.lines.map((line) => ({
+          accountId: `ACC-${line.account.code}`,
+          debit: Number(line.debit) ? String(Number(line.debit)) : "",
+          credit: Number(line.credit) ? String(Number(line.credit)) : "",
+          description: line.description || "",
+        })),
+      };
+    }
     // Core operational data is Prisma-only. Optional Apps Script integrations
     // must never switch this route away from the authoritative database.
     const backendConfigured = false;
@@ -50,7 +72,7 @@ export default async function ManualJournalEntryPage() {
         {error ? <div className="badge">Account list warning</div> : <div className="badge">MAKER ENTRY</div>}
       </div>
       {error ? <section className="panel"><strong>Backend warning:</strong> {error}</section> : null}
-      <ManualJournalEntryClient accounts={accounts} baseCurrency={baseCurrency} defaultPostingDate={new Date().toISOString().slice(0, 10)} />
+      <ManualJournalEntryClient accounts={accounts} baseCurrency={baseCurrency} defaultPostingDate={new Date().toISOString().slice(0, 10)} editJournal={editJournal} />
     </>
   );
 }
