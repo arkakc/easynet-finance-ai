@@ -22,10 +22,13 @@ export type AgingRow = {
   overdueDays: number;
   bucket: AgingBucket;
   outstanding: number;
+  transactionCurrency?: string;
+  transactionOutstanding?: number;
+  historicalExchangeRate?: number;
 };
 
 export type FinancialStatements = {
-  currency: "PGK";
+  currency: string;
   period: { from: string; asOf: string };
   generatedAt: string;
   profitAndLoss: {
@@ -93,7 +96,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
   const fromDate = accountingDate(from);
   if (fromDate > asOfDate) throw new Error("from must be on or before asOf");
 
-  const [accounts, periodBalances, cumulativeBalances, periodLedger, cumulativeLedger, invoices, bills] = await Promise.all([
+  const [accounts, periodBalances, cumulativeBalances, periodLedger, cumulativeLedger, invoices, bills, baseCurrencySetting, activeFxRevaluations] = await Promise.all([
     client.chartOfAccounts.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, name: true, type: true, parentId: true } }),
     client.journalLine.groupBy({
       by: ["accountId"],
@@ -111,7 +114,13 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       where: { issuedDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
       include: {
         customer: { select: { code: true, name: true } },
-        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, OR: [{ reversalDate: null }, { reversalDate: { gt: asOfDate } }] }, select: { amount: true } },
+        paymentAllocations: {
+          where: {
+            allocationDate: { lte: asOfDate },
+            OR: [{ reversalDate: null }, { reversalDate: { gt: asOfDate } }],
+          },
+          select: { amount: true, baseAmount: true },
+        },
         originalCreditNotes: { where: { issueDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
@@ -120,10 +129,30 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
       where: { billDate: { lte: asOfDate }, glPosted: true, status: { notIn: ["CANCELLED", "VOID"] } },
       include: {
         supplier: { select: { code: true, name: true } },
-        paymentAllocations: { where: { allocationDate: { lte: asOfDate }, status: "POSTED" }, select: { amount: true } },
+        paymentAllocations: {
+          where: {
+            allocationDate: { lte: asOfDate },
+            OR: [{ reversalDate: null }, { reversalDate: { gt: asOfDate } }],
+          },
+          select: { amount: true, baseAmount: true },
+        },
         refunds: { where: { refundDate: { lte: asOfDate }, glPosted: true, status: { not: "CANCELLED" } }, select: { total: true } },
       },
       orderBy: [{ dueDate: "asc" }, { code: "asc" }],
+    }),
+    client.globalSettings.findFirst({
+      where: { key: { in: ["currency", "base_currency"] } },
+      select: { value: true },
+    }),
+    client.fxRevaluationLine.findMany({
+      where: {
+        revaluation: {
+          revaluationDate: { lte: asOfDate },
+          reversalDate: { gt: asOfDate },
+          status: "POSTED",
+        },
+      },
+      select: { documentType: true, documentId: true, baseDifference: true },
     }),
   ]);
 
@@ -153,17 +182,70 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
   const totalEquity = total(equity);
   const equationDifference = round(totalAssets - totalLiabilities - totalEquity - currentEarnings);
 
+  const baseCurrency = String(baseCurrencySetting?.value || "PGK").trim().toUpperCase() || "PGK";
+  const activeRevaluationByDocument = new Map<string, number>();
+  for (const row of activeFxRevaluations) {
+    activeRevaluationByDocument.set(
+      row.documentId,
+      round((activeRevaluationByDocument.get(row.documentId) || 0) + Number(row.baseDifference || 0)),
+    );
+  }
+
   const receivableRows: AgingRow[] = invoices.map((invoice) => {
     const aging = bucketFor(invoice.dueDate, asOfDate);
-    const receipts = invoice.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
-    const credits = invoice.originalCreditNotes.reduce((sum, credit) => sum + Number(credit.total), 0);
-    return { id: invoice.id, code: invoice.code, partyCode: invoice.customer.code, partyName: invoice.customer.name, dueDate: invoice.dueDate?.toISOString().slice(0, 10) || null, overdueDays: aging.days, bucket: aging.bucket, outstanding: round(Math.max(0, Number(invoice.total) - receipts - credits)) };
+    const rate = Number(invoice.exchangeRate || 1);
+    const transactionReceipts = invoice.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
+    const transactionCredits = invoice.originalCreditNotes.reduce((sum, credit) => sum + Number(credit.total), 0);
+    const transactionOutstanding = round(Math.max(0, Number(invoice.total) - transactionReceipts - transactionCredits));
+    const baseTotal = Number(invoice.baseTotal || 0) > 0 ? Number(invoice.baseTotal) : round(Number(invoice.total || 0) * rate);
+    const baseReceipts = invoice.paymentAllocations.reduce((sum, allocation) => {
+      const stored = Number(allocation.baseAmount || 0);
+      return sum + (stored > 0 ? stored : round(Number(allocation.amount || 0) * rate));
+    }, 0);
+    const baseCredits = round(transactionCredits * rate);
+    const historicalOutstanding = round(Math.max(0, baseTotal - baseReceipts - baseCredits));
+    const outstanding = round(Math.max(0, historicalOutstanding + (activeRevaluationByDocument.get(invoice.id) || 0)));
+    return {
+      id: invoice.id,
+      code: invoice.code,
+      partyCode: invoice.customer.code,
+      partyName: invoice.customer.name,
+      dueDate: invoice.dueDate?.toISOString().slice(0, 10) || null,
+      overdueDays: aging.days,
+      bucket: aging.bucket,
+      outstanding,
+      transactionCurrency: invoice.currency,
+      transactionOutstanding,
+      historicalExchangeRate: rate,
+    };
   }).filter((invoice) => invoice.outstanding >= 0.005);
   const payableRows: AgingRow[] = bills.map((bill) => {
     const aging = bucketFor(bill.dueDate, asOfDate);
-    const payments = bill.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
-    const credits = bill.refunds.reduce((sum, refund) => sum + Number(refund.total), 0);
-    return { id: bill.id, code: bill.code, partyCode: bill.supplier.code, partyName: bill.supplier.name, dueDate: bill.dueDate?.toISOString().slice(0, 10) || null, overdueDays: aging.days, bucket: aging.bucket, outstanding: round(Math.max(0, Number(bill.total) - payments - credits)) };
+    const rate = Number(bill.exchangeRate || 1);
+    const transactionPayments = bill.paymentAllocations.reduce((sum, allocation) => sum + Number(allocation.amount), 0);
+    const transactionCredits = bill.refunds.reduce((sum, refund) => sum + Number(refund.total), 0);
+    const transactionOutstanding = round(Math.max(0, Number(bill.total) - transactionPayments - transactionCredits));
+    const baseTotal = Number(bill.baseTotal || 0) > 0 ? Number(bill.baseTotal) : round(Number(bill.total || 0) * rate);
+    const basePayments = bill.paymentAllocations.reduce((sum, allocation) => {
+      const stored = Number(allocation.baseAmount || 0);
+      return sum + (stored > 0 ? stored : round(Number(allocation.amount || 0) * rate));
+    }, 0);
+    const baseCredits = round(transactionCredits * rate);
+    const historicalOutstanding = round(Math.max(0, baseTotal - basePayments - baseCredits));
+    const outstanding = round(Math.max(0, historicalOutstanding + (activeRevaluationByDocument.get(bill.id) || 0)));
+    return {
+      id: bill.id,
+      code: bill.code,
+      partyCode: bill.supplier.code,
+      partyName: bill.supplier.name,
+      dueDate: bill.dueDate?.toISOString().slice(0, 10) || null,
+      overdueDays: aging.days,
+      bucket: aging.bucket,
+      outstanding,
+      transactionCurrency: bill.currency,
+      transactionOutstanding,
+      historicalExchangeRate: rate,
+    };
   }).filter((bill) => bill.outstanding >= 0.005);
   const agingSummary = (rows: AgingRow[]) => {
     const buckets = emptyBuckets();
@@ -193,7 +275,7 @@ export async function buildFinancialStatements(input: { from?: string; asOf: str
   const cumulativeCredit = round(Number(cumulativeLedger._sum.totalCredit || 0));
 
   return {
-    currency: "PGK",
+    currency: baseCurrency,
     period: { from, asOf: input.asOf },
     generatedAt: new Date().toISOString(),
     profitAndLoss: { revenue, expenses, totals: { revenue: totalRevenue, expenses: totalExpenses, netProfit } },
