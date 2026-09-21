@@ -1,17 +1,29 @@
 # PostgreSQL production migration runbook
 
-The active local-development database remains `prisma/dev.db`. This runbook prepares a controlled future move to PostgreSQL; it does not send data to any remote service.
+Local development may continue on `prisma/dev.db`. Production runtime uses PostgreSQL through the generated PostgreSQL Prisma client.
 
-1. Stop writes and create a verified SQLite backup with `npm run db:backup`.
-2. Create the signed financial baseline with `npm run db:reconcile:snapshot -- --as-of=YYYY-MM-DD`. Resolve every reported control exception or obtain a documented Finance Controller waiver.
-3. Set `DATABASE_URL_POSTGRES` only on the production migration host.
-4. Run `npm run db:postgres:preflight`. It generates and validates a dedicated PostgreSQL Prisma Client, inventories every source table, and validates foreign-key insertion order without contacting the target.
-5. Provision a private PostgreSQL database with TLS, daily encrypted backups, point-in-time recovery, and least-privilege application credentials.
-6. Rehearse against a new, empty PostgreSQL database/schema with `npm run db:postgres:transfer -- --confirm=TRANSFER_TO_EMPTY_POSTGRES`. The URL is accepted only through `DATABASE_URL_POSTGRES`; it is never printed in the migration report. The tool refuses a non-empty target, reads from an immutable backup, inserts all current ERP tables in foreign-key order inside one transaction, and rolls back if any control fails.
-7. Review the fingerprinted report under `backups/migration`. Confirm that every table row count and every financial control match: trial balance by account, receivables, payables, stock quantity/value, bank GL balances, and master record counts. The permitted monetary variance is K0.01.
-8. Schedule a maintenance window, take a final verified SQLite backup, repeat the migration, and obtain Finance Controller approval of the reconciliations.
-9. Keep the final SQLite snapshot read-only through the agreed retention period. Record the cutover and rollback decision in the audit register.
+## Controlled migration
 
-For local development, `npm run db:backup:install-daily` installs a 7:00 PM Windows backup task. This installer is not executed automatically. `BACKUP_RETENTION_COUNT` defaults to the newest 30 snapshots and accepts 7–365.
+1. Stop application writes.
+2. Create and verify a SQLite backup with `npm run db:backup`.
+3. Create a reconciliation snapshot with `npm run db:reconcile:snapshot -- --as-of=YYYY-MM-DD` and resolve every blocking control exception.
+4. Provision a new empty PostgreSQL database/schema with TLS, encrypted backups and point-in-time recovery.
+5. Set `DATABASE_URL_POSTGRES` on the migration host. Do not commit it.
+6. Run `npm run db:postgres:validate`.
+7. Run `npm run db:postgres:preflight`. Preflight validates the generated PostgreSQL schema/client, source rows, field conversions and foreign-key insertion order without changing the target.
+8. Transfer only into an empty target:
+   ```powershell
+   npm run db:postgres:transfer -- --confirm=TRANSFER_TO_EMPTY_POSTGRES
+   ```
+9. Review the fingerprinted migration report under `backups/migration`. Table row counts and financial reconciliation must match.
+10. For application cutover set:
+    ```text
+    DATABASE_PROVIDER=postgresql
+    DATABASE_URL_POSTGRES=<production connection string>
+    APP_ENV=production
+    ```
+11. Redeploy/restart the application and verify `/api/health` reports `database.provider = postgresql` and `reachable = true`.
+12. Verify `/go-live` reports READY before reopening writes.
+13. Retain the final SQLite backup read-only for the agreed rollback/retention period.
 
-Do not switch the application datasource until an automated data-transfer tool and financial reconciliation report have both passed UAT.
+The transfer tool does not automatically switch the application datasource. Cutover is explicit through `DATABASE_PROVIDER=postgresql`.
