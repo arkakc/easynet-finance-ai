@@ -1,12 +1,9 @@
-import { PrismaClient as SqlitePrismaClient } from "@prisma/client";
-import { PrismaClient as PostgresPrismaClient } from "../../prisma/generated/postgresql-client";
+import { PrismaClient } from "@prisma/client";
 
 export type DatabaseProvider = "sqlite" | "postgresql";
 
-type RuntimePrismaClient = SqlitePrismaClient;
-
 const globalForPrisma = globalThis as unknown as {
-  prisma: RuntimePrismaClient | undefined;
+  prisma: PrismaClient | undefined;
   prismaProvider: DatabaseProvider | undefined;
 };
 
@@ -39,23 +36,14 @@ if (globalForPrisma.prisma && globalForPrisma.prismaProvider && globalForPrisma.
   throw new Error("Database provider changed inside a running process; restart the application");
 }
 
-function createClient(): RuntimePrismaClient {
-  const log = process.env.NODE_ENV === "development" ? ["query", "error", "warn"] as const : ["error"] as const;
+const datasourceUrl = provider === "postgresql" ? postgresUrl : sqliteOverride;
 
-  if (provider === "postgresql") {
-    return new PostgresPrismaClient({
-      datasourceUrl: postgresUrl!,
-      log: [...log],
-    }) as unknown as RuntimePrismaClient;
-  }
-
-  return new SqlitePrismaClient({
-    ...(sqliteOverride ? { datasourceUrl: sqliteOverride } : {}),
-    log: [...log],
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    ...(datasourceUrl ? { datasourceUrl } : {}),
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
   });
-}
-
-export const prisma = globalForPrisma.prisma ?? createClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
