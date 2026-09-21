@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function ManualJournalEntryPage() {
   await requirePermission("accounts.write");
   let accounts: ManualJournalAccount[] = [];
+  let baseCurrency = "PGK";
   let error = "";
 
   try {
@@ -19,6 +20,8 @@ export default async function ManualJournalEntryPage() {
         orderBy: { code: "asc" },
         include: { children: { select: { id: true } }, parent: { select: { code: true } } },
       });
+      const currencySetting = await prisma.globalSettings.findFirst({ where: { key: { in: ["currency", "base_currency"] } }, orderBy: { updatedAt: "desc" } });
+      baseCurrency = String(currencySetting?.value || "PGK").trim().toUpperCase();
       accounts = chartOfAccounts.map((row) => ({
         accountId: row.id,
         postingAccountId: `ACC-${row.code}`,
@@ -47,7 +50,7 @@ export default async function ManualJournalEntryPage() {
         {error ? <div className="badge">Account list warning</div> : <div className="badge">MAKER ENTRY</div>}
       </div>
       {error ? <section className="panel"><strong>Backend warning:</strong> {error}</section> : null}
-      <ManualJournalEntryClient accounts={accounts} defaultPostingDate={new Date().toISOString().slice(0, 10)} />
+      <ManualJournalEntryClient accounts={accounts} baseCurrency={baseCurrency} defaultPostingDate={new Date().toISOString().slice(0, 10)} />
     </>
   );
 }
