@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/src/lib/prisma";
 import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
+import { appendAuditEvent } from "@/lib/security/audit";
 
 export type CloseCheck = {
   key: string;
@@ -131,7 +132,17 @@ export async function closeAccountingPeriod(month: string, actorEmail: string, c
       create: { key: "posting_lock_date", value: nextLock, description: "No journals may post on or before this closed-period date", updatedBy: actorEmail },
       update: { value: nextLock, description: "No journals may post on or before this closed-period date", updatedBy: actorEmail, updatedAt: new Date() },
     });
-    await tx.auditLog.create({ data: { action: "CLOSE", entityType: "AccountingPeriod", entityId: saved.id, entityCode: month, description: `Closed accounting period through ${checklist.periodEnd}`, changes: JSON.stringify(checklist), userId: dbUser.id } });
+    await appendAuditEvent({
+      action: "CLOSE",
+      entityType: "AccountingPeriod",
+      entityId: saved.id,
+      entityCode: month,
+      description: `Closed accounting period through ${checklist.periodEnd}`,
+      changes: checklist,
+      actorEmail,
+      userId: dbUser.id,
+      outcome: "SUCCESS",
+    }, tx);
     return saved;
   });
   return { period, checklist };
@@ -154,7 +165,20 @@ export async function reopenAccountingPeriod(month: string, actorEmail: string, 
       create: { key: "posting_lock_date", value: nextLockDate, description: "No journals may post on or before this closed-period date", updatedBy: actorEmail },
       update: { value: nextLockDate, updatedBy: actorEmail, updatedAt: new Date() },
     });
-    await tx.auditLog.create({ data: { action: "REOPEN", entityType: "AccountingPeriod", entityId: saved.id, entityCode: month, description: `Reopened accounting period: ${reason}`, changes: JSON.stringify({ previousLockDate: period.endDate.toISOString().slice(0, 10), nextLockDate }), userId: dbUser.id } });
+    await appendAuditEvent({
+      action: "REOPEN",
+      entityType: "AccountingPeriod",
+      entityId: saved.id,
+      entityCode: month,
+      description: `Reopened accounting period: ${reason}`,
+      changes: {
+        previousLockDate: period.endDate.toISOString().slice(0, 10),
+        nextLockDate,
+      },
+      actorEmail,
+      userId: dbUser.id,
+      outcome: "SUCCESS",
+    }, tx);
     return saved;
   });
   return reopened;
