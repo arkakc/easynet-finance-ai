@@ -71,7 +71,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
             <div className="document-number">{header.code}</div>
           </div>
           <div className={`status-pill ${header.status === "POSTED" ? "status-posted" : ""}`}>
-            {header.status === "POSTED" ? "APPROVED" : header.status === "PENDING" ? "APPROVAL PENDING" : header.status || "—"}
+            {header.status === "POSTED" ? "APPROVED AND POSTED" : header.status === "PENDING" ? "APPROVAL PENDING" : header.status || "—"}
           </div>
         </header>
 
