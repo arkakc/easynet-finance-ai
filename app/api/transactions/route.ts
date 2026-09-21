@@ -424,28 +424,47 @@ async function postSupplierBill(row: any, approveAtomically = false) {
 
 async function postPayment(row: any) {
   await ensureAccountingInfrastructure();
+  const partyType = String(row.partyType || "");
   const receive = String(row.paymentType || "").toUpperCase() === "RECEIVE";
-  const advance = !String(row.againstDocumentId || "").trim();
+  const customerRefund = partyType === "Customer" && !receive;
+  const advance = !customerRefund && !String(row.againstDocumentId || "").trim();
   const defaults = await loadConfiguredPostingAccounts();
 
-  const lines = receive
-    ? receiptPosting({
-        amount: Number(row.amount),
-        customerId: row.partyId,
-        projectId: row.projectId,
-        cashBankAccountId: row.cashBankAccountId,
-        advance,
-        receivableAccountId: defaults.defaultReceivableAccount,
-        deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
-      })
-    : supplierPaymentPosting({
-        amount: Number(row.amount),
-        supplierId: row.partyId,
-        projectId: row.projectId,
-        cashBankAccountId: row.cashBankAccountId,
-        advance,
-        payableAccountId: defaults.defaultPayableAccount,
-      });
+  const lines = customerRefund
+    ? [
+        {
+          accountId: defaults.defaultDeferredRevenueAccount,
+          debit: Number(row.amount),
+          customerId: row.partyId,
+          projectId: row.projectId,
+          description: "Refund customer credit",
+        },
+        {
+          accountId: row.cashBankAccountId,
+          credit: Number(row.amount),
+          customerId: row.partyId,
+          projectId: row.projectId,
+          description: "Customer refund payment",
+        },
+      ]
+    : receive
+      ? receiptPosting({
+          amount: Number(row.amount),
+          customerId: row.partyId,
+          projectId: row.projectId,
+          cashBankAccountId: row.cashBankAccountId,
+          advance,
+          receivableAccountId: defaults.defaultReceivableAccount,
+          deferredRevenueAccountId: defaults.defaultDeferredRevenueAccount,
+        })
+      : supplierPaymentPosting({
+          amount: Number(row.amount),
+          supplierId: row.partyId,
+          projectId: row.projectId,
+          cashBankAccountId: row.cashBankAccountId,
+          advance,
+          payableAccountId: defaults.defaultPayableAccount,
+        });
 
   const posted = await finalizePaymentAtomic({
     paymentId: row.paymentId,
@@ -454,14 +473,16 @@ async function postPayment(row: any) {
     paymentMethod: String(row.paymentMethod || "Cash"),
     cashBankAccountId: String(row.cashBankAccountId || ""),
     reference: String(row.reference || row.paymentNumber || row.paymentId),
-    documentType: advance
-      ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE")
-      : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
+    documentType: customerRefund
+      ? "CUSTOMER_REFUND"
+      : advance
+        ? (receive ? "CUSTOMER_ADVANCE" : "SUPPLIER_ADVANCE")
+        : (receive ? "CUSTOMER_RECEIPT" : "SUPPLIER_PAYMENT"),
     documentNumber: String(row.paymentNumber || row.paymentId),
     projectId: String(row.projectId || ""),
     lines,
-    againstInvoiceId: !advance && receive ? String(row.againstDocumentId) : undefined,
-    againstBillId: !advance && !receive ? String(row.againstDocumentId) : undefined,
+    againstInvoiceId: !customerRefund && !advance && receive ? String(row.againstDocumentId) : undefined,
+    againstBillId: !customerRefund && !advance && !receive ? String(row.againstDocumentId) : undefined,
     exchangeGainAccountId: defaults.exchangeGainAccount,
     exchangeLossAccountId: defaults.exchangeLossAccount,
     createdBy: "payment-posting",
@@ -474,6 +495,7 @@ async function postPayment(row: any) {
     status: posted.alreadyFinalized ? "already-posted" : "POSTED",
     journalId: posted.journalId,
     advance,
+    customerRefund,
   };
 }
 
