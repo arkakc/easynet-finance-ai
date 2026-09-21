@@ -591,25 +591,6 @@ export default function SettingsPage() {
     }
   };
 
-  const handleQuickFillDefaults = () => {
-    if (settingsReadOnly) return;
-    setCompanyName("Easynet IT Solutions Limited");
-    setCompanyShortName("Easynet PNG");
-    setBaseCurrency("PGK");
-    setFinancialYearPeriod("FY 2026 (01 Jan 2026 - 31 Dec 2026)");
-    setGstNumber("TIN-50012389");
-    setGstStatus("REGISTERED");
-    setBankAccounts([{
-      ...newBankDraft(),
-      displayName: "Main Operating Bank",
-      bankName: "Bank South Pacific (BSP)",
-      accountNumber: "1001234567",
-      bsb: "088-301",
-      currency: "PGK",
-    }]);
-    setErrorMessage("");
-  };
-
   return (
     <>
       {/* Page Header */}
@@ -1181,16 +1162,6 @@ export default function SettingsPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <button
-              type="button"
-              className="coa-btn"
-              onClick={handleQuickFillDefaults}
-              disabled={settingsFieldDisabled}
-              title="Populate with Easynet PNG standard corporate profile"
-            >
-              Fill Easynet PNG Defaults
-            </button>
-
             <button
               type="submit"
               className="coa-btn coa-btn-primary"
