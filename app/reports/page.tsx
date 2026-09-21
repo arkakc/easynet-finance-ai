@@ -77,6 +77,7 @@ export default function ReportsPage() {
       <div className="page-head">
         <div><h2>Financial Statements Centre</h2><p className="small">Auditable base-currency statements derived only from posted general-ledger journals.</p></div>
         <div className="page-head-actions">
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/general-ledger">General Ledger</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/trial-balance">Trial Balance</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/cashflow">Cash Flow</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/gst">IRC GST</Link>
