@@ -878,6 +878,7 @@ export async function prismaAppendRecord<T = any>(
           taxId: record.taxId ? String(record.taxId) : null,
           paymentTerms: Number(record.creditTermsDays || 30),
           creditLimit: record.creditLimit ? Number(record.creditLimit) : null,
+          currency: normalizeCurrency(record.currency || "PGK"),
           isActive: record.active !== false,
         },
       });
@@ -896,6 +897,7 @@ export async function prismaAppendRecord<T = any>(
           address: record.address ? String(record.address) : null,
           taxId: record.taxId ? String(record.taxId) : null,
           paymentTerms: Number(record.paymentTermsDays || 30),
+          currency: normalizeCurrency(record.currency || "PGK"),
           isActive: record.active !== false,
         },
       });
@@ -1455,6 +1457,7 @@ export async function prismaUpdateRecord<T = any>(
           taxId: patch.taxId !== undefined ? (patch.taxId ? String(patch.taxId) : null) : undefined,
           paymentTerms: patch.creditTermsDays !== undefined ? Number(patch.creditTermsDays) : undefined,
           creditLimit: patch.creditLimit !== undefined ? Number(patch.creditLimit) : undefined,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
         },
       });
       return mapCustomer(updated) as T;
@@ -1474,6 +1477,7 @@ export async function prismaUpdateRecord<T = any>(
           address: patch.address !== undefined ? (patch.address ? String(patch.address) : null) : undefined,
           taxId: patch.taxId !== undefined ? (patch.taxId ? String(patch.taxId) : null) : undefined,
           paymentTerms: patch.paymentTermsDays !== undefined ? Number(patch.paymentTermsDays) : undefined,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
         },
       });
       return mapSupplier(updated) as T;
@@ -1511,6 +1515,9 @@ export async function prismaUpdateRecord<T = any>(
         where: { OR: [{ id: idValue }, { code: idValue }] },
       });
       if (!existing) throw new Error(`PurchaseOrder ${idValue} not found`);
+      if (patch.currency !== undefined && existing.status !== "DRAFT" && normalizeCurrency(patch.currency) !== existing.currency) {
+        throw new Error("Purchase Order currency cannot be changed after approval");
+      }
       const statusStr = patch.status ? String(patch.status).toUpperCase() : "";
       let poStatus: any = undefined;
       if (statusStr) {
@@ -1541,6 +1548,9 @@ export async function prismaUpdateRecord<T = any>(
         where: { OR: [{ id: idValue }, { code: idValue }] },
       });
       if (!existing) throw new Error(`Quote ${idValue} not found`);
+      if (patch.currency !== undefined && existing.status !== "DRAFT" && normalizeCurrency(patch.currency) !== existing.currency) {
+        throw new Error("Quotation / Sales Order currency cannot be changed after approval");
+      }
       const statusStr = patch.status ? String(patch.status).toUpperCase() : "";
       let quoteStatus: any = undefined;
       if (statusStr) {
@@ -1555,6 +1565,8 @@ export async function prismaUpdateRecord<T = any>(
         where: { id: existing.id },
         data: {
           status: quoteStatus,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
+          exchangeRate: patch.exchangeRate !== undefined ? Number(patch.exchangeRate || 0) || null : undefined,
           sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
         },
         include: { customer: true, project: true },
@@ -1567,6 +1579,9 @@ export async function prismaUpdateRecord<T = any>(
         where: { OR: [{ id: idValue }, { code: idValue }] },
       });
       if (!existing) throw new Error(`Invoice ${idValue} not found`);
+      if (patch.currency !== undefined && (existing.glPosted || existing.status !== "DRAFT") && normalizeCurrency(patch.currency) !== existing.currency) {
+        throw new Error("Sales Invoice currency cannot be changed after posting/approval");
+      }
       const statusStr = patch.status ? String(patch.status).toUpperCase() : "";
       let invoiceStatus: any = undefined;
       if (statusStr) {
@@ -1580,6 +1595,8 @@ export async function prismaUpdateRecord<T = any>(
         where: { id: existing.id },
         data: {
           status: invoiceStatus,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
+          exchangeRate: patch.exchangeRate !== undefined ? Number(patch.exchangeRate || 0) || null : undefined,
           outstanding: patch.outstandingAmount !== undefined ? Number(patch.outstandingAmount) : undefined,
           journalId: patch.journalId !== undefined ? (patch.journalId ? String(patch.journalId) : null) : undefined,
           sourceDocId: patch.sourceDocumentId !== undefined ? (patch.sourceDocumentId ? String(patch.sourceDocumentId) : null) : undefined,
@@ -1594,6 +1611,9 @@ export async function prismaUpdateRecord<T = any>(
         where: { OR: [{ id: idValue }, { code: idValue }] },
       });
       if (!existing) throw new Error(`SupplierBill ${idValue} not found`);
+      if (patch.currency !== undefined && (existing.glPosted || existing.status !== "DRAFT") && normalizeCurrency(patch.currency) !== existing.currency) {
+        throw new Error("Supplier Invoice currency cannot be changed after posting/approval");
+      }
       const statusStr = patch.status ? String(patch.status).toUpperCase() : "";
       let billStatus: any = undefined;
       if (statusStr) {
@@ -1607,6 +1627,8 @@ export async function prismaUpdateRecord<T = any>(
         where: { id: existing.id },
         data: {
           status: billStatus,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
+          exchangeRate: patch.exchangeRate !== undefined ? Number(patch.exchangeRate || 0) || null : undefined,
           outstanding: patch.outstandingAmount !== undefined ? Number(patch.outstandingAmount) : undefined,
           amountPaid: patch.paidAmount !== undefined ? Number(patch.paidAmount) : undefined,
           journalId: patch.journalId ? String(patch.journalId) : undefined,
@@ -1621,6 +1643,9 @@ export async function prismaUpdateRecord<T = any>(
         where: { OR: [{ id: idValue }, { code: idValue }] },
       });
       if (!existing) throw new Error(`Payment ${idValue} not found`);
+      if (patch.currency !== undefined && existing.status !== "PENDING" && normalizeCurrency(patch.currency) !== existing.currency) {
+        throw new Error("Payment currency cannot be changed after approval");
+      }
       const statusStr = patch.status ? String(patch.status).trim().toUpperCase() : "";
       const paymentStatus = statusStr === "DRAFT"
         ? "PENDING"
@@ -1654,6 +1679,8 @@ export async function prismaUpdateRecord<T = any>(
           status: paymentStatus as any,
           date: patch.paymentDate !== undefined ? new Date(String(patch.paymentDate)) : undefined,
           amount: patch.amount !== undefined ? Number(patch.amount) : undefined,
+          currency: patch.currency !== undefined ? normalizeCurrency(patch.currency) : undefined,
+          exchangeRate: patch.exchangeRate !== undefined ? Number(patch.exchangeRate || 0) || null : undefined,
           paymentMethod: patch.paymentMethod !== undefined ? String(patch.paymentMethod) : undefined,
           depositAccount: patch.cashBankAccountId !== undefined ? (patch.cashBankAccountId ? String(patch.cashBankAccountId) : null) : undefined,
           referenceNumber: patch.reference !== undefined ? (patch.reference ? String(patch.reference) : null) : undefined,
