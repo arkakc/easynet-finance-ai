@@ -36,7 +36,7 @@ type Balance = {
 
 const qty = (value: unknown) =>
   Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 4 });
-const money = (value: unknown) => \`K\${Number(value || 0).toFixed(2)}\`;
+const money = (value: unknown) => `K${Number(value || 0).toFixed(2)}`;
 
 function localDate() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -46,7 +46,7 @@ function localDate() {
     day: "2-digit",
   }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return \`\${values.year}-\${values.month}-\${values.day}\`;
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 export default function WarehouseStockClient() {
@@ -99,7 +99,7 @@ export default function WarehouseStockClient() {
         location: form.get("location"),
         isDefault: form.get("isDefault") === "on",
       });
-      setMessage(\`Warehouse created: \${body.warehouse.warehouseCode} — \${body.warehouse.warehouseName}\`);
+      setMessage(`Warehouse created: ${body.warehouse.warehouseCode} — ${body.warehouse.warehouseName}`);
       event.currentTarget.reset();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Warehouse creation failed");
@@ -125,7 +125,7 @@ export default function WarehouseStockClient() {
       });
       const result = body.transfer;
       setMessage(
-        \`Transfer \${result.transferId} posted: \${qty(result.quantity)} \${result.itemCode} · \${result.fromWarehouse.code} → \${result.toWarehouse.code} · no GL entry required.\`,
+        `Transfer ${result.transferId} posted: ${qty(result.quantity)} ${result.itemCode} · ${result.fromWarehouse.code} → ${result.toWarehouse.code} · no GL entry required.`,
       );
       event.currentTarget.reset();
     } catch (error) {
@@ -173,7 +173,7 @@ export default function WarehouseStockClient() {
           <h3>Warehouse Master</h3>
           <p className="small">Every physical stock movement belongs to an active warehouse. One warehouse is the controlled default.</p>
         </div>
-        <span className="auto-badge">{loading ? "Loading…" : \`\${warehouses.length} Warehouses\`}</span>
+        <span className="auto-badge">{loading ? "Loading…" : `${warehouses.length} Warehouses`}</span>
       </div>
       <table className="data-table">
         <thead><tr><th>Code</th><th>Warehouse</th><th>Location</th><th>Default</th><th>Status</th></tr></thead>
@@ -212,7 +212,7 @@ export default function WarehouseStockClient() {
           {!balances.length && <tr><td colSpan={7}>No warehouse stock balances yet.</td></tr>}
           {balances.map((row) => <tr key={row.balanceId}>
             <td><strong>{row.warehouseCode}</strong><br /><span className="small">{row.warehouseName}</span></td>
-            <td><Link href={\`/stock/item/\${encodeURIComponent(row.itemId)}\`}><strong>{row.itemCode}</strong></Link><br /><span className="small">{row.itemName}</span></td>
+            <td><Link href={`/stock/item/${encodeURIComponent(row.itemId)}`}><strong>{row.itemCode}</strong></Link><br /><span className="small">{row.itemName}</span></td>
             <td>{qty(row.quantity)}</td>
             <td>{qty(row.reserved)}</td>
             <td><strong>{qty(row.available)}</strong></td>
