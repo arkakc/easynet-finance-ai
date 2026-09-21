@@ -31,6 +31,13 @@ type SalesInvoice = {
   totalAmount?: number;
 };
 
+type Warehouse = {
+  warehouseId: string;
+  warehouseCode: string;
+  warehouseName: string;
+  isDefault?: boolean;
+};
+
 function localDate(plusDays = 0) {
   const date = new Date();
   date.setDate(date.getDate() + plusDays);
@@ -50,6 +57,8 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
   const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([]);
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
   const [legacyInvoices, setLegacyInvoices] = useState<SalesInvoice[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouseId, setWarehouseId] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"delivery" | "invoice" | "">("");
   const [message, setMessage] = useState("");
@@ -57,9 +66,16 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/erp/transactions", { cache: "no-store" });
-      const body = await response.json();
+      const [response, warehouseResponse] = await Promise.all([
+        fetch("/api/erp/transactions", { cache: "no-store" }),
+        fetch("/api/erp/warehouse-options", { cache: "no-store" }),
+      ]);
+      const [body, warehouseBody] = await Promise.all([
+        response.json(),
+        warehouseResponse.json(),
+      ]);
       if (!response.ok || !body.ok) throw new Error(body.error || "Sales Order lifecycle load failed");
+      if (!warehouseResponse.ok || !warehouseBody.ok) throw new Error(warehouseBody.error || "Warehouse options failed");
       const current = ((body.salesOrders || []) as SalesOrder[]).find((row) => String(row.quoteId || "") === orderId) || null;
       if (!current) throw new Error("Sales Order not found in the sales lifecycle");
       const linkedDeliveries = ((body.deliveryNotes || []) as DeliveryNote[]).filter((row) => String(row.sourceDocumentId || "") === orderId);
@@ -68,6 +84,9 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
         ? []
         : ((body.invoices || []) as SalesInvoice[]).filter((row) => String(row.sourceDocumentId || "") === String(current.sourceDocumentId || "") && Math.abs(Number(row.totalAmount || 0) - Number(current.totalAmount || 0)) < 0.01);
       setOrder(current);
+      const activeWarehouses = (warehouseBody.warehouses || []) as Warehouse[];
+      setWarehouses(activeWarehouses);
+      setWarehouseId((currentWarehouse) => currentWarehouse || String((activeWarehouses.find((row) => row.isDefault) || activeWarehouses[0])?.warehouseId || ""));
       setDeliveryNotes(linkedDeliveries);
       setInvoices(directInvoices);
       setLegacyInvoices(legacyInvoices);
@@ -89,7 +108,7 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
       const response = await fetch("/api/erp/sales-delivery-note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ salesOrderId: orderId, deliveryDate: localDate() }),
+        body: JSON.stringify({ salesOrderId: orderId, deliveryDate: localDate(), warehouseId }),
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Delivery Note / Stock Out failed");
@@ -140,8 +159,16 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
     {order.sourceDocumentId && <div className="button-row" style={{ marginTop: 12 }}><Link prefetch={false} className="button-link secondary-link" href={`/transactions/quote/${encodeURIComponent(order.sourceDocumentId)}?returnModule=sales&returnTab=salesQuote&returnMode=list`}>Source Sales Quotation</Link></div>}
     {deliveryNotes.length > 0 && <div className="document-meta" style={{ marginTop: 14 }}>{deliveryNotes.map((delivery) => <div key={delivery.deliveryId}><span>Delivery Note / Stock Out</span><strong>{delivery.deliveryNumber || delivery.deliveryId}</strong>{delivery.journalId && <><br/><Link prefetch={false} href={`/journals/${encodeURIComponent(delivery.journalId)}`}>Journal {delivery.journalId}</Link></>}</div>)}</div>}
     {activeInvoice && <div className="document-meta" style={{ marginTop: 14 }}><div><span>Linked Sales Invoice</span><strong><Link prefetch={false} href={`/transactions/invoice/${encodeURIComponent(activeInvoice.invoiceId)}`}>{activeInvoice.invoiceNumber || activeInvoice.invoiceId}</Link></strong></div><div><span>Invoice Status</span><strong>{activeInvoice.status}</strong></div></div>}
+    {canDeliver && !activeInvoice && <div className="form-grid" style={{ marginTop: 14 }}>
+      <label>Fulfil From Warehouse
+        <select value={warehouseId} onChange={(event) => setWarehouseId(event.target.value)} required disabled={Boolean(busy)}>
+          <option value="">Select warehouse</option>
+          {warehouses.map((warehouse) => <option key={warehouse.warehouseId} value={warehouse.warehouseId}>{warehouse.warehouseCode} — {warehouse.warehouseName}</option>)}
+        </select>
+      </label>
+    </div>}
     <div className="button-row" style={{ marginTop: 14 }}>
-      {canDeliver && !activeInvoice && <button type="button" disabled={Boolean(busy)} onClick={() => void createDeliveryNote()}>{busy === "delivery" ? "Posting Stock Out…" : "Create Delivery Note / Stock Out"}</button>}
+      {canDeliver && !activeInvoice && <button type="button" disabled={Boolean(busy) || !warehouseId} onClick={() => void createDeliveryNote()}>{busy === "delivery" ? "Posting Stock Out…" : "Create Delivery Note / Stock Out"}</button>}
       {deliveryComplete && !activeInvoice && <button type="button" disabled={Boolean(busy)} onClick={() => void createSalesInvoice()}>{busy === "invoice" ? "Creating Invoice…" : legacyInvoices.length ? "Link Draft Invoice to Delivered Sales Order" : "Convert Delivery to Sales Invoice"}</button>}
       {status === "DRAFT" && <button type="button" disabled>Approve Sales Order First</button>}
     </div>
