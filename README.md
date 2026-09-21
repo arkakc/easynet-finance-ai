@@ -13,9 +13,7 @@ Authenticated application services
   ↓
 Prisma ORM
   ↓
-SQLite (local/development)
-  ↓
-PostgreSQL migration path (production)
+SQLite (local/development) OR PostgreSQL (production)
 ```
 
 Core accounting uses the Prisma database as the single source of truth. Legacy Google Sheets / Apps Script components are not the accounting authority.
@@ -91,7 +89,7 @@ npm run db:restore
 npm run db:reconcile:snapshot
 ```
 
-PostgreSQL migration utilities are included but should only be used against an explicitly configured target database:
+Production runtime uses `DATABASE_PROVIDER=postgresql` with `DATABASE_URL_POSTGRES`. Migration utilities must only be used against an explicitly configured target database:
 
 ```powershell
 npm run db:postgres:validate
