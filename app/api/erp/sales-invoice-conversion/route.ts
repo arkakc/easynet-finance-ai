@@ -205,7 +205,8 @@ export async function POST(request: Request) {
       invoiceDate: input.invoiceDate,
       dueDate,
       currency: String(quote.currency || "PGK"),
-      exchangeRate: Number(quote.exchangeRate || 0) || undefined,
+      // Sales Order FX is planning information. The accounting invoice resolves
+      // its own rate at invoice/posting date unless a controller enters one.
       netAmount,
       gstAmount,
       totalAmount,
