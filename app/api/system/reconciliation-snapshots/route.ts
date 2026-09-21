@@ -51,6 +51,7 @@ export async function GET() {
       inventoryDifference: snapshot.inventory.difference,
       bankBookBalance: snapshot.banking.glBookBalance,
       bankReconciliationDrift: snapshot.banking.reconciliationDrift,
+      bankAccounts: snapshot.banking.accounts,
       controls: snapshot.controls,
     })) });
   } catch (error) {
