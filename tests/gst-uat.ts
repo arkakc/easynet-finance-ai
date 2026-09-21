@@ -5,7 +5,7 @@ const baseUrl = process.env.UAT_BASE_URL || `http://localhost:${process.env.PORT
 
 async function main() {
   const { createSessionToken, sessionCookie, ROLE_PERMISSIONS } = await import("../lib/auth");
-  const manager: SessionUser = { email: "system.manager@uat.local", name: "UAT", roles: ["System Manager"], permissions: ROLE_PERMISSIONS["System Manager"] };
+  const manager: SessionUser = { email: "admin@easynet.local", name: "UAT Administrator", roles: ["System Manager"], permissions: ROLE_PERMISSIONS["System Manager"], sessionVersion: 1 };
   const cookie = `${sessionCookie.name}=${createSessionToken(manager)}`;
   const unauthenticated = await fetch(`${baseUrl}/api/reports/irc-gst?year=2026&month=1`);
   if (unauthenticated.status !== 401) throw new Error(`Unauthenticated GST report expected 401, got ${unauthenticated.status}`);
