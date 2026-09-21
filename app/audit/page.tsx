@@ -23,6 +23,7 @@ export default async function AuditPage() {
         actorEmail: true,
         ipAddress: true,
         requestId: true,
+        sequence: true,
         integrityHash: true,
       },
     }),
@@ -48,6 +49,7 @@ export default async function AuditPage() {
           <div className="value small-value">{integrity.valid ? "VALID" : "BROKEN"}</div>
         </div>
         <div className="card"><div className="label">Sealed Events</div><div className="value">{integrity.sealedEntries}</div></div>
+        <div className="card"><div className="label">Chain Sequence</div><div className="value">{integrity.chainSequence}</div></div>
         <div className="card"><div className="label">Legacy Unsealed</div><div className="value">{integrity.legacyUnsealedEntries}</div></div>
         <div className="card"><div className="label">Latest Seal</div><div className="value small-value">{integrity.headHash ? integrity.headHash.slice(0, 12) : "—"}</div></div>
       </div>
@@ -66,6 +68,7 @@ export default async function AuditPage() {
         <table className="data-table" style={{ minWidth: 1200 }}>
           <thead>
             <tr>
+              <th>Seq.</th>
               <th>Time</th>
               <th>Outcome</th>
               <th>Action</th>
@@ -79,6 +82,7 @@ export default async function AuditPage() {
           <tbody>
             {entries.map((row) => (
               <tr key={row.id}>
+                <td>{row.sequence ?? "—"}</td>
                 <td>{row.createdAt.toLocaleString()}</td>
                 <td><strong>{row.outcome}</strong></td>
                 <td>{row.action}</td>
@@ -89,7 +93,7 @@ export default async function AuditPage() {
                 <td>{row.integrityHash ? <strong>SEALED</strong> : <span className="small">LEGACY</span>}</td>
               </tr>
             ))}
-            {!entries.length && <tr><td colSpan={8}>No audit events recorded.</td></tr>}
+            {!entries.length && <tr><td colSpan={9}>No audit events recorded.</td></tr>}
           </tbody>
         </table>
       </section>
