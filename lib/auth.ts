@@ -37,12 +37,12 @@ export type Permission =
   | "post.approve";
 
 export type SessionUser = {
-  userId: string;
+  userId?: string;
   email: string;
   name: string;
   roles: Role[];
   permissions: Permission[];
-  sessionVersion: number;
+  sessionVersion?: number;
 };
 
 export type AuthenticationResult =
@@ -208,12 +208,12 @@ export async function authenticate(
 export function createSessionToken(user: SessionUser) {
   const now = Math.floor(Date.now() / 1000);
   const payload = Buffer.from(JSON.stringify({
-    userId: user.userId,
+    userId: user.userId || null,
     email: user.email,
     name: user.name,
     roles: user.roles,
     permissions: user.permissions,
-    sessionVersion: user.sessionVersion,
+    sessionVersion: user.sessionVersion ?? 1,
     iat: now,
     exp: now + SESSION_TTL_SECONDS,
   })).toString("base64url");
@@ -234,10 +234,10 @@ export function verifySessionToken(token?: string | null): SessionUser | null {
     const now = Math.floor(Date.now() / 1000);
     if (!decoded.exp || decoded.exp < now) return null;
     if (!decoded.iat || decoded.iat > now + 300) return null;
-    if (!decoded.userId || !decoded.email || !Number.isInteger(decoded.sessionVersion)) return null;
+    if (!decoded.email || !Number.isInteger(decoded.sessionVersion)) return null;
     if (!Array.isArray(decoded.roles) || !Array.isArray(decoded.permissions)) return null;
     return {
-      userId: String(decoded.userId),
+      userId: decoded.userId ? String(decoded.userId) : undefined,
       email: String(decoded.email).trim().toLowerCase(),
       name: String(decoded.name || decoded.email),
       roles: decoded.roles as Role[],
@@ -255,7 +255,9 @@ export async function validateSessionUser(
 ): Promise<SessionUser | null> {
   if (!tokenUser) return null;
   const found = await client.user.findUnique({
-    where: { id: tokenUser.userId },
+    where: tokenUser.userId
+      ? { id: tokenUser.userId }
+      : { email: tokenUser.email.trim().toLowerCase() },
     select: {
       id: true,
       email: true,
@@ -267,7 +269,7 @@ export async function validateSessionUser(
   });
   if (!found || found.status !== "ACTIVE") return null;
   if (found.email.trim().toLowerCase() !== tokenUser.email.trim().toLowerCase()) return null;
-  if (found.sessionVersion !== tokenUser.sessionVersion) return null;
+  if (found.sessionVersion !== (tokenUser.sessionVersion ?? 1)) return null;
   return sessionUserFromDatabase(found);
 }
 
