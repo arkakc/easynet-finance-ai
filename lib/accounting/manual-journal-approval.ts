@@ -155,12 +155,13 @@ async function normalizeLines(
   }
 
   const settings = await tx.globalSettings.findMany({
-    where: { key: { in: ["default_cost_center", "round_off_cost_center"] } },
+    where: { key: { in: ["default_cost_center", "round_off_cost_center", "currency", "base_currency"] } },
     select: { key: true, value: true },
   });
   const setting = new Map(settings.map((row) => [row.key, String(row.value || "")]));
   const defaultCostCenter = setting.get("default_cost_center") || "Main";
   const roundOffCostCenter = setting.get("round_off_cost_center") || defaultCostCenter;
+  const baseCurrency = String(setting.get("currency") || setting.get("base_currency") || "PGK").trim().toUpperCase();
 
   const lines = input.lines.map((line, index) => {
     const code = accountCode(line.accountId);
@@ -179,12 +180,17 @@ async function normalizeLines(
       debit,
       credit,
       amount: Math.max(debit, credit),
-      currency: "PGK",
+      currency: baseCurrency,
+      transactionCurrency: baseCurrency,
+      exchangeRate: 1,
+      transactionDebit: debit,
+      transactionCredit: credit,
+      transactionAmount: Math.max(debit, credit),
       costCenter,
     };
   });
 
-  return { ...totals, lines };
+  return { ...totals, baseCurrency, lines };
 }
 
 type PersistedPendingJournal = {
@@ -301,9 +307,13 @@ export async function createPendingManualJournal(
         sourceDocType: `MANUAL_${entryType}`,
         sourceDocId: manualId,
         status: "PENDING",
-        currency: "PGK",
+        currency: normalized.baseCurrency,
+        baseCurrency: normalized.baseCurrency,
+        exchangeRate: 1,
         totalDebit: normalized.totalDebit,
         totalCredit: normalized.totalCredit,
+        transactionTotalDebit: normalized.totalDebit,
+        transactionTotalCredit: normalized.totalCredit,
         isBalanced: true,
         createdBy: maker.email,
         approvedBy: null,
