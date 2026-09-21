@@ -16,6 +16,7 @@ import {
   PrismaClient,
   ReconciliationStatus,
 } from "@prisma/client";
+import { buildCashFlowStatement } from "../lib/accounting/cash-flow";
 import { buildFinancialReconciliationSnapshot } from "../lib/system/financial-reconciliation";
 
 async function main() {
@@ -456,6 +457,16 @@ async function main() {
       throw new Error(`Clean reconciliation fixture is not ready: ${clean.controls.exceptions.join("; ")}`);
     }
 
+    const cashFlow = await buildCashFlowStatement({
+      from: "2026-01-01",
+      asOf: "2026-01-31",
+    }, client);
+    if (cashFlow.currency !== "PGK" || cashFlow.totals.closingCash !== 100 || !cashFlow.control.balanced) {
+      throw new Error(
+        `Cash-flow base-currency control failed: ${cashFlow.currency}/${cashFlow.totals.closingCash}/${cashFlow.control.difference}`,
+      );
+    }
+
     await journal({
       code: `UAT8-JRN-BACKDATED-${suffix}`,
       date: "2026-01-25",
@@ -511,6 +522,12 @@ async function main() {
         reconciliationDriftBefore: clean.banking.reconciliationDrift,
         reconciliationDriftAfterBackdatedEntry: drifted.banking.reconciliationDrift,
         backdatedEntryDetected: !drifted.controls.bankReconciliationsMatched,
+      },
+      cashFlow: {
+        currency: cashFlow.currency,
+        closingCash: cashFlow.totals.closingCash,
+        ledgerClosingCash: cashFlow.control.ledgerClosingCash,
+        difference: cashFlow.control.difference,
       },
       cleanMigrationReady: clean.controls.migrationReady,
       driftedMigrationReady: drifted.controls.migrationReady,
