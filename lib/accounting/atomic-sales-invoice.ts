@@ -9,6 +9,7 @@ import {
 } from "@/lib/accounting/payment-schedule-store";
 import { prisma } from "@/src/lib/prisma";
 import { resolveWarehouse, syncWarehouseBalance, warehouseInventoryState } from "@/lib/accounting/warehouse-stock";
+import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 export type AtomicSalesInvoiceRevenueLine = {
   accountId: string;
@@ -58,6 +59,18 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       where: { OR: [{ id: input.invoiceId }, { code: input.invoiceId }] },
     });
     if (!invoice) throw new Error("Sales Invoice not found");
+
+    const fx = await resolveDocumentExchangeRate(tx, {
+      currency: invoice.currency,
+      exchangeRate: Number(invoice.exchangeRate || 0) || undefined,
+      postingDate: input.postingDate,
+    });
+    const baseSubtotal = toBaseAmount(Number(invoice.subtotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseTaxTotal = toBaseAmount(Number(invoice.taxTotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseDiscountTotal = toBaseAmount(Number(invoice.discountTotal || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseTotal = toBaseAmount(Number(invoice.total || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseAmountPaid = toBaseAmount(Number(invoice.amountPaid || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
+    const baseOutstanding = toBaseAmount(Number(invoice.outstanding || 0), fx.currency, fx.baseCurrency, fx.exchangeRate);
 
     if (invoice.glPosted && invoice.journalId) {
       return {
@@ -201,6 +214,9 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       receivableAccountId: input.receivableAccountId,
       deferredRevenueAccountId: input.deferredRevenueAccountId,
       inventoryAccountId: input.inventoryAccountId,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
     });
 
     // Journal creation occurs after stock and schedule mutations intentionally:
@@ -212,6 +228,9 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       documentNumber: input.documentNumber,
       reference: input.reference || `Sales invoice ${input.documentNumber}`,
       projectId: input.projectId,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
       createdBy: input.createdBy || "sales-invoice-posting",
       approvedBy: input.approvedBy || "Finance Controller",
       lines,
@@ -230,6 +249,13 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
         status: "SENT",
         glPosted: true,
         journalId: journal.journalId,
+        exchangeRate: fx.exchangeRate,
+        baseSubtotal,
+        baseTaxTotal,
+        baseDiscountTotal,
+        baseTotal,
+        baseAmountPaid,
+        baseOutstanding,
         approvedBy: input.approvedBy || invoice.approvedBy || "Finance Controller",
         approvedAt: invoice.approvedAt || new Date(),
       },
@@ -243,6 +269,11 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       stockSource: stockAlreadyIssuedByDeliveryNote ? "DELIVERY_NOTE" as const : "INVOICE" as const,
       deferredSchedules: existingSchedules.length + insertedScheduleCount,
       alreadyPosted: false,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
+      baseTotal,
+      baseOutstanding,
     };
   });
 }
