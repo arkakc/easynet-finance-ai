@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
+import { ensureDefaultWarehouse } from "@/lib/accounting/warehouse-stock";
 
 export async function GET() {
   try {
     await requirePermission("dashboard.read");
+    await prisma.$transaction(async (tx) => { await ensureDefaultWarehouse(tx); });
     const warehouses = await prisma.warehouse.findMany({
       where: { isActive: true },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }],
