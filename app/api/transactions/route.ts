@@ -63,6 +63,8 @@ const commercialSchema = z.object({
   gstRate: z.coerce.number().finite().min(0).max(1).default(0),
   accountId: optionalText,
   poId: optionalText,
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
+  exchangeRate: z.coerce.number().finite().positive().optional(),
   lines: z.array(lineSchema).min(1),
 });
 
@@ -79,6 +81,8 @@ const paymentSchema = z.object({
   reference: optionalText,
   againstDocumentType: optionalText,
   againstDocumentId: optionalText,
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
+  exchangeRate: z.coerce.number().finite().positive().optional(),
 });
 
 const expenseSchema = z.object({
@@ -132,8 +136,9 @@ async function gstStatus() {
 }
 
 async function assertParty(table: "Customers" | "Suppliers", idField: "customerId" | "supplierId", value: string) {
-  const result = await findRecords(table, { [idField]: value }, 1);
+  const result = await findRecords<any>(table, { [idField]: value }, 1);
   if (!result.rows.length) throw new Error(`${table === "Customers" ? "Customer" : "Supplier"} does not exist`);
+  return result.rows[0];
 }
 
 async function assertProject(projectId: string) {
@@ -155,9 +160,11 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
   const parsed = commercialSchema.parse(raw);
   const isSales = type === "quote" || type === "invoice";
 
-  await assertParty(isSales ? "Customers" : "Suppliers", isSales ? "customerId" : "supplierId", parsed.partyId);
+  const party = await assertParty(isSales ? "Customers" : "Suppliers", isSales ? "customerId" : "supplierId", parsed.partyId);
   await assertProject(parsed.projectId);
 
+  const currency = parsed.currency || String(party.currency || "PGK").toUpperCase();
+  const exchangeRate = parsed.exchangeRate;
   const t = totals(parsed.lines, parsed.gstRate);
   const items = type === "invoice" || type === "supplierBill" ? await itemMasterMap() : new Map<string, any>();
 
@@ -167,6 +174,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
     await appendRecord("Quotes", {
       quoteId, quoteNumber, customerId: parsed.partyId, projectId: parsed.projectId,
       quoteDate: parsed.documentDate, expiryDate: parsed.expiryDate,
+      currency, exchangeRate,
       netAmount: t.net, gstAmount: t.gst, totalAmount: t.total, status: "DRAFT", sourceDocumentId: "",
     }, "transaction-ui");
     await batchAppend("QuoteLines", t.lines.map((line) => ({
@@ -180,7 +188,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
     const poNumber = parsed.documentNumber || poId;
     await appendRecord("PurchaseOrders", {
       poId, poNumber, supplierId: parsed.partyId, projectId: parsed.projectId,
-      poDate: parsed.documentDate, netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
+      poDate: parsed.documentDate, currency, exchangeRate, netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
       status: "DRAFT", sourceDocumentId: "",
     }, "transaction-ui");
     await batchAppend("POLines", t.lines.map((line) => ({
@@ -196,6 +204,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
     await appendRecord("Invoices", {
       invoiceId, invoiceNumber, customerId: parsed.partyId, projectId: parsed.projectId,
       invoiceDate: parsed.documentDate, dueDate: parsed.dueDate,
+      currency, exchangeRate,
       netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
       paidAmount: 0, outstandingAmount: t.total, status: "DRAFT", sourceDocumentId: "", journalId: "",
     }, "transaction-ui");
@@ -216,6 +225,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
   await appendRecord("SupplierBills", {
     billId, billNumber, supplierId: parsed.partyId, projectId: parsed.projectId,
     billDate: parsed.documentDate, dueDate: parsed.dueDate, poId: parsed.poId,
+    currency, exchangeRate,
     netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
     paidAmount: 0, outstandingAmount: t.total, status: "DRAFT", sourceDocumentId: "", journalId: "",
   }, "transaction-ui");
@@ -234,11 +244,19 @@ async function createPayment(raw: unknown) {
   const parsed = paymentSchema.parse(raw);
   if (parsed.paymentType === "RECEIVE" && parsed.partyType !== "Customer") throw new Error("Receive payments must use a Customer");
   if (parsed.paymentType === "PAY" && parsed.partyType !== "Supplier") throw new Error("Supplier payments must use a Supplier");
-  await assertParty(parsed.partyType === "Customer" ? "Customers" : "Suppliers", parsed.partyType === "Customer" ? "customerId" : "supplierId", parsed.partyId);
+  const party = await assertParty(parsed.partyType === "Customer" ? "Customers" : "Suppliers", parsed.partyType === "Customer" ? "customerId" : "supplierId", parsed.partyId);
   await assertProject(parsed.projectId);
   const paymentId = id("PAY");
   const paymentNumber = parsed.paymentNumber || paymentId;
-  await appendRecord("Payments", { ...parsed, paymentId, paymentNumber, sourceDocumentId: "", journalId: "", status: "DRAFT" }, "transaction-ui");
+  await appendRecord("Payments", {
+    ...parsed,
+    currency: parsed.currency || String(party.currency || "PGK").toUpperCase(),
+    paymentId,
+    paymentNumber,
+    sourceDocumentId: "",
+    journalId: "",
+    status: "DRAFT",
+  }, "transaction-ui");
   return { type: "payment", recordId: paymentId, documentNumber: paymentNumber, status: "DRAFT", advance: !parsed.againstDocumentId };
 }
 
@@ -441,6 +459,8 @@ async function postPayment(row: any) {
     lines,
     againstInvoiceId: !advance && receive ? String(row.againstDocumentId) : undefined,
     againstBillId: !advance && !receive ? String(row.againstDocumentId) : undefined,
+    exchangeGainAccountId: defaults.exchangeGainAccount,
+    exchangeLossAccountId: defaults.exchangeLossAccount,
     createdBy: "payment-posting",
     approvedBy: "Finance Controller",
   });
