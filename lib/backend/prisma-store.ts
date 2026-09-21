@@ -9,8 +9,11 @@ export function generatedCode(prefix: string) {
 }
 
 async function draftCurrencyValues(record: Record<string, unknown>, fallbackCurrency = "PGK") {
-  const baseSetting = await prisma.globalSettings.findUnique({ where: { key: "currency" } });
-  const baseCurrency = normalizeCurrency(baseSetting?.value || "PGK");
+  const [baseSetting, legacyBaseSetting] = await Promise.all([
+    prisma.globalSettings.findUnique({ where: { key: "currency" } }),
+    prisma.globalSettings.findUnique({ where: { key: "base_currency" } }),
+  ]);
+  const baseCurrency = normalizeCurrency(baseSetting?.value || legacyBaseSetting?.value || "PGK");
   const currency = normalizeCurrency(record.currency || fallbackCurrency || baseCurrency);
   const explicitRate = Number(record.exchangeRate || 0);
   const exchangeRate = currency === baseCurrency ? 1 : explicitRate > 0 ? explicitRate : null;
