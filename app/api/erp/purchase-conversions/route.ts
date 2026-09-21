@@ -131,7 +131,8 @@ async function purchaseOrderToSupplierInvoice(purchaseOrderId: string) {
     dueDate: "",
     poId: purchaseOrderId,
     currency: String(source.currency || "PGK"),
-    exchangeRate: Number(source.exchangeRate || 0) || undefined,
+    // Purchase Order FX is planning information. Supplier Invoice resolves
+    // its accounting rate independently at bill/posting date.
     netAmount: source.netAmount,
     gstAmount: source.gstAmount,
     totalAmount: source.totalAmount,
