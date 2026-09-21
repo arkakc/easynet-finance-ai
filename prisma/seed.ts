@@ -839,14 +839,14 @@ async function main() {
         { code: '1123', debit: 50000, credit: 0, description: 'Westpac PNG Project Account opening balance' },
         { code: '1124', debit: 57750, credit: 0, description: 'BSP USD Vendor Account (USD $15,000 @ 3.85)' },
         { code: '1111', debit: 2500, credit: 0, description: 'Port Moresby 8 Mile Office petty cash float' },
-        { code: '1131', debit: 45000, credit: 0, description: 'Opening trade receivables from enterprise clients' },
+        { code: '1130', debit: 45000, credit: 0, description: 'Opening trade receivables from enterprise clients' },
         { code: '1141', debit: 38000, credit: 0, description: 'Opening stock - Dell OptiPlex & Lenovo laptops' },
         { code: '1142', debit: 22500, credit: 0, description: 'Opening stock - Ubiquiti UniFi switches & APs' },
         { code: '1144', debit: 18400, credit: 0, description: 'Opening stock - Hikvision 4K cameras & NVRs' },
         { code: '1145', debit: 16500, credit: 0, description: 'Opening stock - Starlink High-Performance kits' },
         { code: '1212', debit: 85000, credit: 0, description: 'Field service support vehicles (Toyota Hilux fleet)' },
         { code: '1211', debit: 35000, credit: 0, description: 'Internal IT infrastructure & staging servers' },
-        { code: '2111', debit: 0, credit: 42500, description: 'Opening trade payables to hardware suppliers' },
+        { code: '2110', debit: 0, credit: 42500, description: 'Opening trade payables to hardware suppliers' },
         { code: '2121', debit: 0, credit: 7000, description: 'Net IRC GST opening liability' },
         { code: '3100', debit: 0, credit: 200000, description: 'Shareholder paid-up equity capital' },
         { code: '3200', debit: 0, credit: 281150, description: 'Retained earnings carried forward' },
@@ -864,7 +864,7 @@ async function main() {
       approvedBy: 'willie.batia@easynet.com.pg',
       postedAt: new Date('2026-08-15T14:00:00Z'),
       lines: [
-        { code: '1131', debit: 46750, credit: 0, description: 'Kumul Transport & Logistics Ltd - Total Due' },
+        { code: '1130', debit: 46750, credit: 0, description: 'Kumul Transport & Logistics Ltd - Total Due' },
         { code: '4220', debit: 0, credit: 35000, description: 'Structured Cat6 Cabling & Wi-Fi setup' },
         { code: '4240', debit: 0, credit: 7500, description: '4K CCTV cameras & NVR installation' },
         { code: '2121', debit: 0, credit: 4250, description: 'IRC 10% GST Output Tax' },
@@ -882,7 +882,7 @@ async function main() {
       approvedBy: 'willie.batia@easynet.com.pg',
       postedAt: new Date('2026-09-01T10:00:00Z'),
       lines: [
-        { code: '1131', debit: 22000, credit: 0, description: 'Highlands Fresh Agriculture Group - Total Due' },
+        { code: '1130', debit: 22000, credit: 0, description: 'Highlands Fresh Agriculture Group - Total Due' },
         { code: '4140', debit: 0, credit: 20000, description: 'ERP deployment, inventory & accounts setup' },
         { code: '2121', debit: 0, credit: 2000, description: 'IRC 10% GST Output Tax' },
       ],
@@ -900,7 +900,7 @@ async function main() {
       postedAt: new Date('2026-08-28T16:30:00Z'),
       lines: [
         { code: '1121', debit: 46750, credit: 0, description: 'Funds deposited to BSP Operating Account' },
-        { code: '1131', debit: 0, credit: 46750, description: 'Clear Kumul Logistics receivable INV-2026-0001' },
+        { code: '1130', debit: 0, credit: 46750, description: 'Clear Kumul Logistics receivable INV-2026-0001' },
       ],
     },
     // 5. Vendor Bill: South Pacific IT Distributors
@@ -917,7 +917,7 @@ async function main() {
       lines: [
         { code: '1142', debit: 15000, credit: 0, description: 'UniFi switches & AP stock inventory' },
         { code: '2122', debit: 1500, credit: 0, description: 'IRC 10% GST Input Tax Credit' },
-        { code: '2111', debit: 0, credit: 16500, description: 'Payable to South Pacific IT Distributors' },
+        { code: '2110', debit: 0, credit: 16500, description: 'Payable to South Pacific IT Distributors' },
       ],
     },
     // 6. Vendor Settlement: South Pacific IT Distributors
@@ -932,7 +932,7 @@ async function main() {
       approvedBy: 'willie.batia@easynet.com.pg',
       postedAt: new Date('2026-09-02T15:00:00Z'),
       lines: [
-        { code: '2111', debit: 16500, credit: 0, description: 'Clear vendor bill BILL-2026-0001' },
+        { code: '2110', debit: 16500, credit: 0, description: 'Clear vendor bill BILL-2026-0001' },
         { code: '1121', debit: 0, credit: 16500, description: 'Disbursement from BSP Operating Account' },
       ],
     },
