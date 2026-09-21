@@ -271,6 +271,12 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
                   <strong>Total</strong>
                   <strong style={{ color: "#0f172a" }}>{transactionMoney(docTotal)}</strong>
                 </div>
+                {transactionCurrency !== baseCurrency && n(record.baseTotalAmount) > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 2px", marginTop: 6, color: "#475569", fontSize: "0.9rem" }}>
+                    <span>Base Total</span>
+                    <strong>{baseMoney(record.baseTotalAmount)}</strong>
+                  </div>
+                )}
               </div>
             </div>
           );
