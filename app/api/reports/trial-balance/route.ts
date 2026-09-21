@@ -2,15 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
 
-function dateAtStart(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
+const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-([12]\d|3[01]|0[1-9])$/;
 
-function dateAtEnd(value: string) {
-  const date = dateAtStart(value);
-  if (date) date.setHours(23, 59, 59, 999);
-  return date;
+function accountingDate(value: string, endOfDay = false) {
+  if (!DATE_PATTERN.test(value)) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+10:00`);
+  const normalized = Number.isNaN(date.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Pacific/Port_Moresby",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date);
+  return normalized === value ? date : null;
 }
 
 /** A posted-ledger trial balance; only real persisted journals are included. */
@@ -18,12 +23,21 @@ export async function GET(request: NextRequest) {
   try {
     await requirePermission("reports.read");
     const { searchParams } = new URL(request.url);
-    const asOf = dateAtEnd(searchParams.get("asOf") || new Date().toISOString().slice(0, 10));
-    const startDate = searchParams.get("startDate") ? dateAtStart(searchParams.get("startDate")!) : null;
+    const pngToday = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Pacific/Port_Moresby",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const asOfText = searchParams.get("asOf") || pngToday;
+    const startDateText = searchParams.get("startDate") || "";
+    const asOf = accountingDate(asOfText, true);
+    const startDate = startDateText ? accountingDate(startDateText) : null;
     if (!asOf) return NextResponse.json({ ok: false, error: "Invalid asOf date" }, { status: 400 });
     if (startDate && startDate > asOf) return NextResponse.json({ ok: false, error: "startDate must be on or before asOf" }, { status: 400 });
 
-    const lines = await prisma.journalLine.findMany({
+    const [lines, currencySettings] = await Promise.all([
+      prisma.journalLine.findMany({
       where: {
         journal: {
           status: "POSTED",
@@ -31,8 +45,18 @@ export async function GET(request: NextRequest) {
         },
       },
       include: { account: true },
-      orderBy: { account: { code: "asc" } },
-    });
+        orderBy: { account: { code: "asc" } },
+      }),
+      prisma.globalSettings.findMany({
+        where: { key: { in: ["currency", "base_currency"] } },
+        select: { key: true, value: true },
+      }),
+    ]);
+    const baseCurrency = String(
+      currencySettings.find((row) => row.key === "currency")?.value
+      || currencySettings.find((row) => row.key === "base_currency")?.value
+      || "PGK",
+    ).trim().toUpperCase() || "PGK";
 
     const balances = new Map<string, { accountCode: string; accountName: string; accountType: string; debit: number; credit: number }>();
     for (const line of lines) {
@@ -56,13 +80,19 @@ export async function GET(request: NextRequest) {
     }));
     const totalDebit = Math.round(accounts.reduce((sum, row) => sum + row.debit, 0) * 100) / 100;
     const totalCredit = Math.round(accounts.reduce((sum, row) => sum + row.credit, 0) * 100) / 100;
+    const difference = Math.round((totalDebit - totalCredit) * 100) / 100;
 
     return NextResponse.json({
       ok: true,
-      currency: "PGK",
-      period: { startDate: startDate?.toISOString().slice(0, 10) || null, asOf: asOf.toISOString().slice(0, 10) },
+      currency: baseCurrency,
+      period: { startDate: startDateText || null, asOf: asOfText },
       accounts,
-      totals: { debit: totalDebit, credit: totalCredit, balanced: totalDebit === totalCredit },
+      totals: {
+        debit: totalDebit,
+        credit: totalCredit,
+        difference,
+        balanced: Math.abs(difference) < 0.01,
+      },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not build trial balance";
