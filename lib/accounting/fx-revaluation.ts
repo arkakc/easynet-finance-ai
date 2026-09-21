@@ -125,15 +125,46 @@ export async function postFxRevaluationAtomic(input: {
           status: { notIn: ["CANCELLED", "VOID"] },
         },
         select: {
+          id: true,
           sourceDocId: true,
           total: true,
           baseTotal: true,
+          journalId: true,
         },
       }),
     ]);
 
+    const sourceJournalCodes = [
+      ...invoices.map((row) => String(row.journalId || "")).filter(Boolean),
+      ...bills.map((row) => String(row.journalId || "")).filter(Boolean),
+      ...postedInvoiceCredits.map((row) => String(row.journalId || "")).filter(Boolean),
+    ];
+    const sourceJournals = sourceJournalCodes.length
+      ? await tx.journalHeader.findMany({
+          where: { code: { in: [...new Set(sourceJournalCodes)] } },
+          select: { id: true, code: true },
+        })
+      : [];
+    const sourceJournalById = new Map(sourceJournals.map((row) => [row.id, row.code]));
+    const reversalsAsOf = sourceJournals.length
+      ? await tx.journalHeader.findMany({
+          where: {
+            reversalOfJournalId: { in: sourceJournals.map((row) => row.id) },
+            status: "POSTED",
+            date: { lte: revaluationDateValue },
+          },
+          select: { reversalOfJournalId: true },
+        })
+      : [];
+    const reversedSourceCodesAsOf = new Set(
+      reversalsAsOf
+        .map((row) => row.reversalOfJournalId ? sourceJournalById.get(row.reversalOfJournalId) : "")
+        .filter((code): code is string => Boolean(code)),
+    );
+
     const creditInvoiceByOriginal = new Map<string, { transaction: number; base: number }>();
     for (const credit of postedInvoiceCredits) {
+      if (credit.journalId && reversedSourceCodesAsOf.has(credit.journalId)) continue;
       const key = String(credit.sourceDocId || "");
       if (!key) continue;
       const current = creditInvoiceByOriginal.get(key) || { transaction: 0, base: 0 };
@@ -164,6 +195,7 @@ export async function postFxRevaluationAtomic(input: {
     let totalLoss = 0;
 
     for (const invoice of invoices) {
+      if (invoice.journalId && reversedSourceCodesAsOf.has(invoice.journalId)) continue;
       const documentFx = await resolveDocumentExchangeRate(tx, {
         currency: invoice.currency,
         exchangeRate: Number(invoice.exchangeRate || 0) || undefined,
@@ -287,6 +319,7 @@ export async function postFxRevaluationAtomic(input: {
     }
 
     for (const bill of bills) {
+      if (bill.journalId && reversedSourceCodesAsOf.has(bill.journalId)) continue;
       const documentFx = await resolveDocumentExchangeRate(tx, {
         currency: bill.currency,
         exchangeRate: Number(bill.exchangeRate || 0) || undefined,
