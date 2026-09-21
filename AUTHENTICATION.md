@@ -1,4 +1,4 @@
-# Authentication & Authorization Architecture — v0.3.0
+# Authentication, Authorization & Audit Architecture — Phase 9
 
 ## Why this changed
 
@@ -12,18 +12,18 @@ v0.3.0 introduces a first production-oriented authentication layer inspired by E
 Collects email and password and POSTs them to `/api/auth/login`. The password is never stored in browser state beyond the form/request and is never written to Google Sheets.
 
 ### 2. Login API — `app/api/auth/login/route.ts`
-Validates input, loads the configured user, verifies the password using scrypt, creates a signed session payload, and sends it as an HttpOnly cookie.
+Validates input, loads the configured user, verifies the password using bcrypt (cost factor 12), creates a signed session payload, and sends it as an HttpOnly cookie.
 
 Cookie controls:
 - HttpOnly — client JavaScript cannot read the session token.
-- SameSite=Lax — reduces cross-site request risk.
+- SameSite=Strict — reduces cross-site request risk.
 - Secure in production — browser sends it only over HTTPS.
-- 12-hour expiry.
+- 8-hour expiry.
 
 ### 3. Auth core — `lib/auth.ts`
 Provides:
 - user configuration parsing;
-- scrypt password verification;
+- bcrypt password verification (cost factor 12);
 - role → permission expansion;
 - HMAC-SHA256 signed session creation/verification;
 - current-user lookup;
@@ -60,7 +60,7 @@ Browser
   │ POST /api/auth/login {email,password}
   ▼
 Next.js Login API
-  │  verify scrypt password hash
+  │  verify bcrypt password hash
   │  issue signed HttpOnly easynet_session cookie
   ▼
 Browser session
@@ -88,13 +88,7 @@ Google Apps Script Web App
 ## Credentials and tokens
 
 ### User passwords
-Passwords are never committed to GitHub and should not be stored as plain text. Generate a scrypt hash with:
-
-```bash
-npm run hash-password -- 'A-strong-password'
-```
-
-Only the resulting `scrypt$<salt>$<hash>` value goes into `ERP_USERS_JSON` in the deployment environment.
+Passwords are never committed to GitHub and should not be stored as plain text. Passwords are provisioned into the database only as bcrypt hashes. Plain-text passwords must never be stored in environment variables, Sheets, audit logs, browser storage, or Git.
 
 ### `SESSION_SECRET`
 A high-entropy server-only secret (minimum 32 characters) used to HMAC-sign session payloads. It must be configured in Vercel/hosting environment variables and never exposed with a `NEXT_PUBLIC_` prefix.
@@ -114,7 +108,7 @@ The Apps Script project can rotate this token with `rotateApiToken()`. After rot
 
 ```text
 SESSION_SECRET=<high-entropy-secret-at-least-32-characters>
-ERP_USERS_JSON=[{"email":"admin@example.com","name":"System Administrator","passwordHash":"scrypt$...$...","roles":["System Manager"]}]
+AUDIT_LOG_SECRET=<different-high-entropy-secret-at-least-32-characters>
 APP_SECRET=<legacy-internal-write-secret>
 APPS_SCRIPT_WEB_APP_URL=<apps-script-exec-url>
 APPS_SCRIPT_API_TOKEN=<machine-token>
@@ -126,6 +120,10 @@ OPENAI_MODEL=gpt-5-mini
 
 Menu hiding is convenience, not security. Permission checks exist at the proxy and again at sensitive ERP gateways. The Google Apps Script token remains a separate machine credential, so a valid user session does not reveal or replace the backend token.
 
-## Next hardening step
+## Phase 9 hardening
 
-The current user directory is environment-backed to avoid putting password material in Sheets. When the persistence layer moves to PostgreSQL/Supabase or another transactional database, migrate Users, Roles, User Permissions, password reset, login-attempt throttling, session revocation and optional MFA into database-backed tables/services. Do not store password hashes in the existing generic Google Sheets business tables.
+Phase 9 moves authentication controls into the transactional database and adds persistent failed-login lockout, IP/identity throttling, DB-validated session revocation through sessionVersion, SameSite=Strict session cookies, same-origin mutation checks, centralized security headers, a System Manager security control centre, and HMAC-sealed audit events.
+
+Use a dedicated AUDIT_LOG_SECRET in production. It must be a different high-entropy secret from SESSION_SECRET. Legacy audit rows remain readable as unsealed records; Phase 9 security and privileged-control events are integrity-sealed.
+
+Future optional hardening can add MFA/WebAuthn, SSO/identity-provider integration and SIEM export without changing the current accounting authorization model.
