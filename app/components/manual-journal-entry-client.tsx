@@ -96,45 +96,20 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
       return;
     }
     try {
-      const raw = window.localStorage.getItem(DRAFT_KEY);
-      if (raw) {
-        const draft = JSON.parse(raw) as Partial<{
-          entryType: string;
-          journalType: string;
-          postingDate: string;
-          remarks: string;
-          lines: JournalLine[];
-        }>;
-        if (draft.entryType) setEntryType(draft.entryType);
-        if (draft.journalType) setJournalType(draft.journalType);
-        if (draft.postingDate) setPostingDate(draft.postingDate);
-        if (typeof draft.remarks === "string") setRemarks(draft.remarks);
-        if (Array.isArray(draft.lines) && draft.lines.length) setLines(draft.lines);
-        setMessage("Local draft restored. You can continue without re-entering the journal.");
-      }
+      window.localStorage.removeItem(DRAFT_KEY);
     } catch {
-      // Ignore corrupt local drafts.
+      // Ignore storage failures.
     } finally {
+      setEntryType("JOURNAL_ENTRY");
+      setJournalType("GENERAL_JOURNAL");
+      setPostingDate(defaultPostingDate);
+      setRemarks("");
+      setLines([blankLine("Debit line"), blankLine("Credit line")]);
+      setMessage("");
       setDraftReady(true);
     }
   }, [defaultPostingDate, editJournal]);
 
-  useEffect(() => {
-    if (!draftReady || busy) return;
-    const hasDraft = remarks.trim().length > 0 || lines.some((line) => {
-      const defaultDescription = ["Debit line", "Credit line", "Journal line"].includes(line.description.trim());
-      return line.accountId || line.debit || line.credit || (!defaultDescription && line.description.trim());
-    });
-    try {
-      if (!hasDraft) {
-        window.localStorage.removeItem(DRAFT_KEY);
-        return;
-      }
-      window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ entryType, journalType, postingDate, remarks, lines, updatedAt: new Date().toISOString() }));
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [draftReady, busy, entryType, journalType, postingDate, remarks, lines]);
 
   const postingAccounts = useMemo(
     () => accounts.filter((account) => account.active !== false && !account.isGroup),
