@@ -177,8 +177,8 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
         movement.itemId,
         (priorReturnedByItem.get(movement.itemId) || 0) + Number(movement.quantity || 0),
       );
-      const warehouseKey = movement.warehouseId || "__DEFAULT__";
-      const key = `${movement.itemId}|${warehouseKey}`;
+      const warehouse = await resolveWarehouse(tx, movement.warehouseId);
+      const key = `${movement.itemId}|${warehouse.id}`;
       priorReturnedByWarehouse.set(
         key,
         (priorReturnedByWarehouse.get(key) || 0) + Number(movement.quantity || 0),
@@ -220,14 +220,14 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       }
 
       const issueGroups = new Map<string, {
-        warehouseId: string | null;
+        warehouseId: string;
         qty: number;
         value: number;
       }>();
       for (const movement of itemIssues) {
-        const warehouseKey = movement.warehouseId || "__DEFAULT__";
-        const group = issueGroups.get(warehouseKey) || {
-          warehouseId: movement.warehouseId || null,
+        const warehouse = await resolveWarehouse(tx, movement.warehouseId);
+        const group = issueGroups.get(warehouse.id) || {
+          warehouseId: warehouse.id,
           qty: 0,
           value: 0,
         };
@@ -236,7 +236,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
           movement.totalCost
           ?? (Number(movement.quantity || 0) * Number(movement.unitCost || 0)),
         ));
-        issueGroups.set(warehouseKey, group);
+        issueGroups.set(warehouse.id, group);
       }
 
       let remainingReturn = returnQty;
@@ -266,7 +266,6 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
           line.item.id,
           warehouse.id,
           Number(line.item.purchasePrice || 0),
-          group.warehouseId === null,
         );
 
         fragment += 1;
