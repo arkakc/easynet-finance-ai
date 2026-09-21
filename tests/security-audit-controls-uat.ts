@@ -19,6 +19,8 @@ import {
   appendAuditEvent,
   verifyAuditIntegrity,
 } from "../lib/security/audit";
+import { deleteCompanyMasterData } from "../lib/company/delete-master-data";
+import { deleteCompanyTransactions } from "../lib/company/delete-transactions";
 import { proxy } from "../proxy";
 
 async function main() {
@@ -150,12 +152,45 @@ async function main() {
       throw new Error("Audit integrity was invalid before user deletion test");
     }
     await client.user.delete({ where: { id: lockedUser.id } });
-    const cleanIntegrity = await verifyAuditIntegrity(client);
+    let cleanIntegrity = await verifyAuditIntegrity(client);
     if (!cleanIntegrity.valid) {
       throw new Error("Audit seal changed when the linked actor user was deleted");
     }
-    if (!cleanIntegrity.valid || cleanIntegrity.sealedEntries < 2 || !cleanIntegrity.headHash) {
-      throw new Error("Fresh sealed audit chain did not verify");
+    if (cleanIntegrity.sealedEntries < 2 || !cleanIntegrity.headHash) {
+      throw new Error("Fresh sealed audit records did not verify");
+    }
+
+    const transactionReset = await client.$transaction((tx) => deleteCompanyTransactions({
+      adminUserId: manager.id,
+      adminEmail: manager.email,
+      adminName: manager.name,
+      requestId: `phase9-transaction-reset-${suffix}`,
+      transactionClient: tx,
+    }));
+    const transactionResetAudit = await client.auditLog.findUnique({ where: { id: transactionReset.auditId } });
+    if (!transactionResetAudit?.integrityHash) {
+      throw new Error("Transaction reset did not create a sealed audit event");
+    }
+    cleanIntegrity = await verifyAuditIntegrity(client);
+    if (!cleanIntegrity.valid) {
+      throw new Error("Transaction reset broke audit integrity");
+    }
+
+    const masterReset = await deleteCompanyMasterData({
+      adminUserId: manager.id,
+      adminEmail: manager.email,
+      adminName: manager.name,
+      preserveAdminUser: true,
+      requestId: `phase9-master-reset-${suffix}`,
+      database: client,
+    });
+    const masterResetAudit = await client.auditLog.findUnique({ where: { id: masterReset.auditId } });
+    if (!masterResetAudit?.integrityHash) {
+      throw new Error("Master-data reset did not create a sealed audit event");
+    }
+    cleanIntegrity = await verifyAuditIntegrity(client);
+    if (!cleanIntegrity.valid) {
+      throw new Error("Master-data reset broke audit integrity");
     }
 
     const firstSealed = await client.auditLog.findFirst({
@@ -236,7 +271,10 @@ async function main() {
       auditIntegrity: {
         cleanValid: cleanIntegrity.valid,
         sealedEntries: cleanIntegrity.sealedEntries,
-        survivesActorUserDeletion: cleanIntegrity.valid && integrityBeforeUserDelete.valid,
+        survivesActorUserDeletion: integrityBeforeUserDelete.valid,
+        transactionResetSealed: Boolean(transactionResetAudit.integrityHash),
+        masterResetSealed: Boolean(masterResetAudit.integrityHash),
+        survivesFactoryReset: cleanIntegrity.valid,
         tamperDetected: !tamperedIntegrity.valid,
         brokenAtId: tamperedIntegrity.brokenAtId,
       },
