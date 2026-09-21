@@ -3,6 +3,19 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
+type RevaluationRow = {
+  revaluationId: string;
+  revaluationCode: string;
+  revaluationDate: string;
+  reversalDate: string;
+  baseCurrency: string;
+  totalGain: number;
+  totalLoss: number;
+  journalId: string;
+  reversalJournalId: string;
+  lineCount: number;
+};
+
 type RateRow = {
   rateId: string;
   rateDate: string;
@@ -29,6 +42,7 @@ function localDate() {
 export default function ExchangeRatesClient() {
   const [baseCurrency, setBaseCurrency] = useState("PGK");
   const [rates, setRates] = useState<RateRow[]>([]);
+  const [revaluations, setRevaluations] = useState<RevaluationRow[]>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,11 +50,19 @@ export default function ExchangeRatesClient() {
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch("/api/erp/exchange-rates", { cache: "no-store" });
-      const body = await response.json();
+      const [response, revaluationResponse] = await Promise.all([
+        fetch("/api/erp/exchange-rates", { cache: "no-store" }),
+        fetch("/api/erp/fx-revaluation", { cache: "no-store" }),
+      ]);
+      const [body, revaluationBody] = await Promise.all([
+        response.json(),
+        revaluationResponse.json(),
+      ]);
       if (!response.ok || !body.ok) throw new Error(body.error || "Exchange rates could not be loaded");
+      if (!revaluationResponse.ok || !revaluationBody.ok) throw new Error(revaluationBody.error || "FX revaluation history could not be loaded");
       setBaseCurrency(body.baseCurrency || "PGK");
       setRates(body.rates || []);
+      setRevaluations(revaluationBody.revaluations || []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Exchange rates could not be loaded");
     } finally {
@@ -78,6 +100,38 @@ export default function ExchangeRatesClient() {
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Exchange rate save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  async function postRevaluation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving) return;
+    const data = new FormData(event.currentTarget);
+    const date = String(data.get("revaluationDate") || "");
+    if (!window.confirm(`Post foreign currency revaluation for ${date}? The system will also create an automatic reversal dated the following day.`)) return;
+    setSaving(true);
+    setMessage("Posting foreign currency revaluation…");
+    try {
+      const response = await fetch("/api/erp/fx-revaluation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revaluationDate: date }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "FX revaluation failed");
+      if (body.result.noAdjustmentRequired) {
+        setMessage("No foreign currency revaluation adjustment was required for that date.");
+      } else {
+        setMessage(
+          `FX revaluation ${body.result.revaluationCode} posted · Gain ${body.result.totalGain.toFixed(2)} ${body.result.baseCurrency} · Loss ${body.result.totalLoss.toFixed(2)} ${body.result.baseCurrency} · reversal ${body.result.reversalDate}`,
+        );
+      }
+      await load();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "FX revaluation failed");
     } finally {
       setSaving(false);
     }
@@ -140,6 +194,45 @@ export default function ExchangeRatesClient() {
             <td>1 {row.fromCurrency} = {row.rate} {row.toCurrency}</td>
             <td>{row.source || "MANUAL"}</td>
             <td>{row.notes || "—"}</td>
+          </tr>)}
+        </tbody>
+      </table>
+    </section>
+
+    <form className="panel form-grid" onSubmit={postRevaluation} style={{ marginTop: 16 }}>
+      <div className="form-wide form-title-row">
+        <div>
+          <h3>Period-End FX Revaluation</h3>
+          <p className="small">
+            Remeasure open foreign-currency receivables and payables at the closing rate. The system posts unrealized FX gain/loss in base currency and creates an automatic reversal on the next day.
+          </p>
+        </div>
+        <span className="auto-badge">CONTROLLER POSTING</span>
+      </div>
+      <label>Closing Date<input name="revaluationDate" type="date" defaultValue={localDate()} required disabled={saving} /></label>
+      <div className="form-wide">
+        <button type="submit" disabled={saving}>{saving ? "Posting…" : "Post FX Revaluation + Auto Reversal"}</button>
+      </div>
+    </form>
+
+    <section className="panel table-wrap" style={{ marginTop: 16 }}>
+      <div className="form-title-row">
+        <div><h3>FX Revaluation History</h3><p className="small">Both closing journal and automatic next-day reversal remain auditable.</p></div>
+        <span className="auto-badge">{revaluations.length} Batches</span>
+      </div>
+      <table className="data-table" style={{ minWidth: 1050 }}>
+        <thead><tr><th>Batch</th><th>Closing Date</th><th>Reversal Date</th><th>Documents</th><th>Gain</th><th>Loss</th><th>Closing Journal</th><th>Reversal Journal</th></tr></thead>
+        <tbody>
+          {!revaluations.length && <tr><td colSpan={8}>No FX revaluation batches posted.</td></tr>}
+          {revaluations.map((row) => <tr key={row.revaluationId}>
+            <td><strong>{row.revaluationCode}</strong></td>
+            <td>{row.revaluationDate}</td>
+            <td>{row.reversalDate}</td>
+            <td>{row.lineCount}</td>
+            <td>{row.totalGain.toFixed(2)} {row.baseCurrency}</td>
+            <td>{row.totalLoss.toFixed(2)} {row.baseCurrency}</td>
+            <td><Link href={`/journals/${encodeURIComponent(row.journalId)}`}>{row.journalId}</Link></td>
+            <td><Link href={`/journals/${encodeURIComponent(row.reversalJournalId)}`}>{row.reversalJournalId}</Link></td>
           </tr>)}
         </tbody>
       </table>
