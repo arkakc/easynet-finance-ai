@@ -392,40 +392,6 @@ export async function allocateAdvancePaymentAtomic(input: {
     const projectRef = payment.project?.code || payment.projectId || "";
     const amount = round2(input.amount);
 
-    const journalLines = customer
-      ? [
-          {
-            accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
-            debit: amount,
-            customerId: partyRef,
-            projectId: projectRef,
-            description: "Apply customer advance",
-          },
-          {
-            accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
-            credit: amount,
-            customerId: partyRef,
-            projectId: projectRef,
-            description: "Settle Accounts Receivable from advance",
-          },
-        ]
-      : [
-          {
-            accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
-            debit: amount,
-            supplierId: partyRef,
-            projectId: projectRef,
-            description: "Settle Accounts Payable from advance",
-          },
-          {
-            accountId: INITIAL_ACCOUNT_IDS.supplierAdvances,
-            credit: amount,
-            supplierId: partyRef,
-            projectId: projectRef,
-            description: "Apply supplier advance",
-          },
-        ];
-
     const allocation = await createPaymentAllocationInTransaction(tx, {
       paymentId: payment.id,
       againstDocumentType: input.againstDocumentType,
@@ -450,6 +416,76 @@ export async function allocateAdvancePaymentAtomic(input: {
       };
     }
 
+    const transactionAudit = (side: "debit" | "credit", rate: number) => ({
+      transactionCurrency: allocation.currency,
+      exchangeRate: rate,
+      transactionDebit: side === "debit" ? amount : 0,
+      transactionCredit: side === "credit" ? amount : 0,
+    });
+    const zeroFxAudit = {
+      transactionCurrency: allocation.baseCurrency,
+      exchangeRate: 1,
+      transactionDebit: 0,
+      transactionCredit: 0,
+    };
+
+    const journalLines = customer
+      ? [
+          {
+            accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
+            debit: allocation.settlementBaseAmount,
+            ...transactionAudit("debit", allocation.settlementExchangeRate),
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Apply customer advance",
+          },
+          {
+            accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
+            credit: allocation.documentBaseAmount,
+            ...transactionAudit("credit", allocation.documentExchangeRate),
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Receivable from advance",
+          },
+        ]
+      : [
+          {
+            accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
+            debit: allocation.documentBaseAmount,
+            ...transactionAudit("debit", allocation.documentExchangeRate),
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Payable from advance",
+          },
+          {
+            accountId: INITIAL_ACCOUNT_IDS.supplierAdvances,
+            credit: allocation.settlementBaseAmount,
+            ...transactionAudit("credit", allocation.settlementExchangeRate),
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Apply supplier advance",
+          },
+        ];
+
+    if (allocation.realizedGain > 0) {
+      journalLines.push({
+        accountId: INITIAL_ACCOUNT_IDS.exchangeGain,
+        credit: allocation.realizedGain,
+        ...zeroFxAudit,
+        projectId: projectRef,
+        description: "Realized foreign exchange gain on advance allocation",
+      } as any);
+    }
+    if (allocation.realizedLoss > 0) {
+      journalLines.push({
+        accountId: INITIAL_ACCOUNT_IDS.exchangeLoss,
+        debit: allocation.realizedLoss,
+        ...zeroFxAudit,
+        projectId: projectRef,
+        description: "Realized foreign exchange loss on advance allocation",
+      } as any);
+    }
+
     const journal = await postJournal({
       postingDate: input.allocationDate,
       documentType: customer
@@ -459,6 +495,9 @@ export async function allocateAdvancePaymentAtomic(input: {
       documentNumber: allocation.allocation.code,
       reference: `Allocate ${payment.code} to ${input.againstDocumentId}`,
       projectId: projectRef,
+      currency: allocation.currency,
+      baseCurrency: allocation.baseCurrency,
+      exchangeRate: allocation.settlementExchangeRate,
       createdBy: input.createdBy || "advance-allocation",
       approvedBy: input.approvedBy || "Finance Controller",
       lines: journalLines,
@@ -477,6 +516,11 @@ export async function allocateAdvancePaymentAtomic(input: {
       allocatedAmount: amount,
       remainingAdvance: allocation.remainingPayment,
       documentOutstanding: allocation.documentOutstanding,
+      currency: allocation.currency,
+      baseCurrency: allocation.baseCurrency,
+      realizedFx: allocation.realizedFx,
+      realizedGain: allocation.realizedGain,
+      realizedLoss: allocation.realizedLoss,
       alreadyAllocated: false,
     };
   });
