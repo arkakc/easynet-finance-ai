@@ -25,6 +25,13 @@ type Props = {
   accounts: ManualJournalAccount[];
   baseCurrency: string;
   defaultPostingDate: string;
+  editJournal?: {
+    journalId: string;
+    entryType: string;
+    postingDate: string;
+    remarks: string;
+    lines: JournalLine[];
+  } | null;
 };
 
 const blankLine = (description = ""): JournalLine => ({ accountId: "", debit: "", credit: "", description });
@@ -62,7 +69,7 @@ function optionLabel(options: readonly (readonly [string, string])[], value: str
   return options.find(([optionValue]) => optionValue === value)?.[1] || value;
 }
 
-export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostingDate }: Props) {
+export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostingDate, editJournal }: Props) {
   const router = useRouter();
   const [entryType, setEntryType] = useState("JOURNAL_ENTRY");
   const [journalType, setJournalType] = useState("GENERAL_JOURNAL");
@@ -77,6 +84,15 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
   const [draftReady, setDraftReady] = useState(false);
 
   useEffect(() => {
+    if (editJournal) {
+      setEntryType(editJournal.entryType || "JOURNAL_ENTRY");
+      setPostingDate(editJournal.postingDate || defaultPostingDate);
+      setRemarks(editJournal.remarks || "");
+      setLines(editJournal.lines?.length ? editJournal.lines : [blankLine("Debit line"), blankLine("Credit line")]);
+      setMessage("Editing unapproved journal. Save changes before approval.");
+      setDraftReady(true);
+      return;
+    }
     try {
       const raw = window.localStorage.getItem(DRAFT_KEY);
       if (raw) {
@@ -99,7 +115,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
     } finally {
       setDraftReady(true);
     }
-  }, []);
+  }, [defaultPostingDate, editJournal]);
 
   useEffect(() => {
     if (!draftReady || busy) return;
@@ -156,13 +172,13 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
     setMessage("Submitting manual journal for checker approval…");
     try {
       const response = await fetch("/api/journals/manual", {
-        method: "POST",
+        method: editJournal ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entryType, journalType, postingDate, reference, remarks, lines }),
+        body: JSON.stringify({ journalId: editJournal?.journalId, entryType, journalType, postingDate, reference, remarks, lines }),
       });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Manual journal submission failed");
-      setMessage(`Successfully drafted with Document ID ${body.manualId || body.journalId}.`);
+      setMessage(editJournal ? `Journal ${body.journalId} updated successfully.` : `Successfully drafted with Document ID ${body.manualId || body.journalId}.`);
       setLines([blankLine("Debit line"), blankLine("Credit line")]);
       setRemarks("");
       try {
