@@ -4,7 +4,7 @@ import { prisma } from "@/src/lib/prisma";
 const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const round = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-export type CashFlowCategory = "Operating" | "Investing" | "Financing";
+export type CashFlowCategory = "Operating" | "Investing" | "Financing" | "Exchange Rate Effect";
 
 export type CashFlowRow = {
   journalId: string;
@@ -18,12 +18,21 @@ export type CashFlowRow = {
 };
 
 export type CashFlowStatement = {
-  currency: "PGK";
+  currency: string;
   period: { from: string; asOf: string };
   generatedAt: string;
   rows: CashFlowRow[];
   cashAccounts: Array<{ code: string; name: string }>;
-  totals: { openingCash: number; operating: number; investing: number; financing: number; netChange: number; closingCash: number };
+  totals: {
+    openingCash: number;
+    operating: number;
+    investing: number;
+    financing: number;
+    netCashFlow: number;
+    exchangeRateEffect: number;
+    netChange: number;
+    closingCash: number;
+  };
   control: { ledgerClosingCash: number; difference: number; balanced: boolean };
 };
 
@@ -36,9 +45,19 @@ function accountingDate(value: string, endOfDay = false) {
 
 function categoryFor(value: string | null): CashFlowCategory {
   const type = String(value || "JOURNAL").trim().toUpperCase();
+  if (["FX_REVALUATION", "FX_REVALUATION_REVERSAL"].includes(type)) return "Exchange Rate Effect";
   if (["ASSET_PURCHASE", "ASSET_DISPOSAL", "FIXED_ASSET_PURCHASE", "FIXED_ASSET_DISPOSAL"].includes(type)) return "Investing";
   if (["FUNDING_LOAN", "LOAN_REPAYMENT", "OWNER_CONTRIBUTION", "OWNER_DRAWING", "EQUITY", "DIVIDEND"].includes(type)) return "Financing";
   return "Operating";
+}
+
+function pngDateText(value: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Pacific/Port_Moresby",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
 }
 
 export async function buildCashFlowStatement(input: { from: string; asOf: string }, client: PrismaClient = prisma): Promise<CashFlowStatement> {
@@ -46,10 +65,19 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const asOfDate = accountingDate(input.asOf, true);
   if (fromDate > asOfDate) throw new Error("from must be on or before asOf");
 
-  const [accounts, mappedBanks] = await Promise.all([
+  const [accounts, mappedBanks, currencySettings] = await Promise.all([
     client.chartOfAccounts.findMany({ select: { id: true, code: true, name: true, parentId: true } }),
     client.bankAccount.findMany({ where: { isActive: true, chartOfAccountsId: { not: null } }, select: { chartOfAccountsId: true } }),
+    client.globalSettings.findMany({
+      where: { key: { in: ["currency", "base_currency"] } },
+      select: { key: true, value: true },
+    }),
   ]);
+  const baseCurrency = String(
+    currencySettings.find((row) => row.key === "currency")?.value
+    || currencySettings.find((row) => row.key === "base_currency")?.value
+    || "PGK",
+  ).trim().toUpperCase() || "PGK";
   const children = new Map<string, string[]>();
   for (const account of accounts) if (account.parentId) children.set(account.parentId, [...(children.get(account.parentId) || []), account.id]);
   const cashIds = new Set(accounts.filter((account) => /^(111|112)/.test(account.code)).map((account) => account.id));
@@ -74,7 +102,8 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const movements = new Map<string, CashFlowRow>();
   for (const line of lines) {
     const movement = Number(line.debit || 0) - Number(line.credit || 0);
-    const openingEntry = line.journal.date < fromDate || String(line.journal.sourceDocType || "").toUpperCase() === "OPENING";
+    const sourceType = String(line.journal.sourceDocType || "").toUpperCase();
+    const openingEntry = line.journal.date < fromDate || (sourceType === "OPENING" && line.journal.date <= fromDate);
     if (openingEntry) {
       openingCash += movement;
       continue;
@@ -82,7 +111,7 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
     const current = movements.get(line.journal.id) || {
       journalId: line.journal.id,
       journalCode: line.journal.code,
-      date: line.journal.date.toISOString().slice(0, 10),
+      date: pngDateText(line.journal.date),
       category: categoryFor(line.journal.sourceDocType),
       documentType: line.journal.sourceDocType || "JOURNAL",
       reference: line.journal.reference || "",
@@ -97,7 +126,9 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const operating = categoryTotal("Operating");
   const investing = categoryTotal("Investing");
   const financing = categoryTotal("Financing");
-  const netChange = round(operating + investing + financing);
+  const exchangeRateEffect = categoryTotal("Exchange Rate Effect");
+  const netCashFlow = round(operating + investing + financing);
+  const netChange = round(netCashFlow + exchangeRateEffect);
   openingCash = round(openingCash);
   const closingCash = round(openingCash + netChange);
   const ledgerClosingCash = round(lines.reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0));
@@ -105,12 +136,21 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
   const accountById = new Map(accounts.map((account) => [account.id, account]));
 
   return {
-    currency: "PGK",
+    currency: baseCurrency,
     period: input,
     generatedAt: new Date().toISOString(),
     rows,
     cashAccounts: [...cashIds].map((id) => accountById.get(id)).filter((account): account is NonNullable<typeof account> => Boolean(account)).sort((a, b) => a.code.localeCompare(b.code)).map(({ code, name }) => ({ code, name })),
-    totals: { openingCash, operating, investing, financing, netChange, closingCash },
+    totals: {
+      openingCash,
+      operating,
+      investing,
+      financing,
+      netCashFlow,
+      exchangeRateEffect,
+      netChange,
+      closingCash,
+    },
     control: { ledgerClosingCash, difference, balanced: Math.abs(difference) < 0.01 },
   };
 }
