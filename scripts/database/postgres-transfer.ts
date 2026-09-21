@@ -13,7 +13,7 @@ import {
   type FinancialReconciliationSnapshot,
   type SnapshotComparison,
 } from "../../lib/system/financial-reconciliation";
-import { prisma } from "../../src/lib/prisma";
+import { databaseRuntimeInfo, prisma } from "../../src/lib/prisma";
 
 type FieldMeta = {
   name: string;
@@ -230,7 +230,14 @@ async function saveMigrationReport(input: {
   return { fileName, report };
 }
 
+function assertSqliteSourceRuntime() {
+  if (databaseRuntimeInfo().provider !== "sqlite") {
+    throw new Error("PostgreSQL migration must run with DATABASE_PROVIDER=sqlite so the source remains the local SQLite database until cutover.");
+  }
+}
+
 async function preflight() {
+  assertSqliteSourceRuntime();
   await verifyLiveDatabase();
   const plan = createTransferPlan();
   const snapshots = await listFinancialReconciliationSnapshots();
@@ -260,6 +267,7 @@ async function preflight() {
 }
 
 async function transfer() {
+  assertSqliteSourceRuntime();
   if (argument("confirm") !== "TRANSFER_TO_EMPTY_POSTGRES") {
     throw new Error("Transfer requires --confirm=TRANSFER_TO_EMPTY_POSTGRES");
   }
