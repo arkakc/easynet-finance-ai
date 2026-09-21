@@ -1,24 +1,38 @@
-# Easynet Finance AI — Go-Live Runbook
+# Easynet Finance AI — Production Go-Live Runbook
 
-The application must show **READY** at `/go-live` before production cutover. The page is the authoritative release gate and checks the current local Prisma database without posting or changing financial transactions.
+Production cutover is blocked until the application itself is running on PostgreSQL and the accounting controls are reconciled.
 
-## Required sequence
+## Required production configuration
 
-1. Create and verify a fresh backup: `npm run db:backup`.
-2. Generate a dated reconciliation snapshot: `npm run db:reconcile:snapshot -- --as-of=YYYY-MM-DD`.
-3. Import the signed opening AR and AP aged schedules from `/migration/opening-subledger`. Use the supplied template, preview first, then confirm only after the verified backup check passes.
-4. Reconcile the historical payroll journal shown in `/payroll` (`PAY-2026-0003`) to a controlled payroll register/source note. Do not repost or reverse it automatically.
-5. Configure production secrets and database URL outside source control:
-   - `DATABASE_URL_POSTGRES` (TLS, private database, PITR and encrypted backups)
-   - `AUTH_SECRET` (at least 32 random characters)
-   - `SESSION_SECRET` (at least 32 random characters)
-   - `APP_SECRET` (at least 32 random characters when compatibility/Apps Script routes are enabled)
-6. Run `npm run db:postgres:validate`, then `npm run db:postgres:preflight`. The preflight must use the latest migration-ready snapshot.
-7. Rehearse transfer into a new empty PostgreSQL schema with `npm run db:postgres:transfer -- --confirm=TRANSFER_TO_EMPTY_POSTGRES` and review the fingerprinted report.
-8. Obtain Finance Controller approval for AR/AP, payroll, GST/SWT and the final backup. Repeat the transfer during the maintenance window, then switch the application datasource.
+```text
+DATABASE_PROVIDER=postgresql
+DATABASE_URL_POSTGRES=<private TLS PostgreSQL URL>
+APP_ENV=production
+AUTH_SECRET=<32+ random characters>
+SESSION_SECRET=<32+ random characters>
+AUDIT_LOG_SECRET=<separate stable 32+ random characters>
+APP_SECRET=<32+ random characters>
+```
 
-## Release checks
+Never commit production credentials or secrets. Keep `AUDIT_LOG_SECRET` stable for a database whose audit chain has already been sealed.
 
-Run `npm run typecheck`, `npm run lint`, `npm run build`, and the UAT scripts in `package.json`. Lint warnings in legacy components are non-blocking; lint errors, failed UATs, an unbalanced ledger, or any `/go-live` blocking check stop the release.
+## Release sequence
 
-Never resolve a reconciliation exception by editing or deleting posted journals. Use the controlled opening import, reversal workflow, or documented migration correction with audit evidence.
+1. Stop writes and take a verified backup: `npm run db:backup`.
+2. Create the final reconciliation snapshot: `npm run db:reconcile:snapshot -- --as-of=YYYY-MM-DD`.
+3. Resolve all blocking AR, AP, inventory, bank, payroll and ledger reconciliation exceptions.
+4. Validate PostgreSQL tooling: `npm run db:postgres:validate`.
+5. Run preflight: `npm run db:postgres:preflight`.
+6. Transfer to a new empty PostgreSQL target:
+   ```powershell
+   npm run db:postgres:transfer -- --confirm=TRANSFER_TO_EMPTY_POSTGRES
+   ```
+7. Review the migration report and approve the reconciliations.
+8. Configure the production variables above.
+9. Run `npm run typecheck` and `npm run build`.
+10. Deploy/restart.
+11. Verify `/api/health` reports PostgreSQL and a reachable database.
+12. Verify `/go-live` reports READY.
+13. Reopen application writes.
+
+Never repair a production reconciliation difference by editing or deleting a posted journal. Use controlled reversal, opening-subledger recovery/import, or a documented migration correction.
