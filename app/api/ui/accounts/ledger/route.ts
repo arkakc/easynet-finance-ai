@@ -3,6 +3,22 @@ import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
 import { NormalBalance } from "@prisma/client";
 
+const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-([12]\d|3[01]|0[1-9])$/;
+
+function pngAccountingDate(value: string, endOfDay = false) {
+  if (!DATE_PATTERN.test(value)) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+10:00`);
+  const normalized = Number.isNaN(date.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Pacific/Port_Moresby",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(date);
+  return normalized === value ? date : null;
+}
+
 export async function GET(req: NextRequest) {
   try {
     await requirePermission("accounts.read");
@@ -36,19 +52,25 @@ export async function GET(req: NextRequest) {
       targetAccountIds.push(...descendants);
     }
 
-    // Build date filter
-    const dateFilter: { gte?: Date; lte?: Date } = {};
-    if (startDate) {
-      dateFilter.gte = new Date(startDate);
+    // Build strict PNG accounting-date filters.
+    const parsedStart = startDate ? pngAccountingDate(startDate) : null;
+    const parsedEnd = endDate ? pngAccountingDate(endDate, true) : null;
+    if (startDate && !parsedStart) {
+      return NextResponse.json({ ok: false, error: "Invalid startDate" }, { status: 400 });
     }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      dateFilter.lte = end;
+    if (endDate && !parsedEnd) {
+      return NextResponse.json({ ok: false, error: "Invalid endDate" }, { status: 400 });
+    }
+    if (parsedStart && parsedEnd && parsedStart > parsedEnd) {
+      return NextResponse.json({ ok: false, error: "startDate must be on or before endDate" }, { status: 400 });
     }
 
-    // Fetch journal lines
-    const rawLines = await prisma.journalLine.findMany({
+    const dateFilter: { gte?: Date; lte?: Date } = {};
+    if (parsedStart) dateFilter.gte = parsedStart;
+    if (parsedEnd) dateFilter.lte = parsedEnd;
+
+    const [rawLines, openingLines, currencySettings] = await Promise.all([
+      prisma.journalLine.findMany({
       where: {
         accountId: { in: targetAccountIds },
         journal: {
@@ -60,16 +82,41 @@ export async function GET(req: NextRequest) {
         journal: true,
         account: { select: { code: true, name: true } },
       },
-      orderBy: [
-        { journal: { date: "asc" } },
-        { journal: { createdAt: "asc" } },
-        { lineNo: "asc" },
-      ],
-    });
+        orderBy: [
+          { journal: { date: "asc" } },
+          { journal: { createdAt: "asc" } },
+          { lineNo: "asc" },
+        ],
+      }),
+      parsedStart
+        ? prisma.journalLine.findMany({
+            where: {
+              accountId: { in: targetAccountIds },
+              journal: { status: "POSTED", date: { lt: parsedStart } },
+            },
+            select: { debit: true, credit: true },
+          })
+        : Promise.resolve([]),
+      prisma.globalSettings.findMany({
+        where: { key: { in: ["currency", "base_currency"] } },
+        select: { key: true, value: true },
+      }),
+    ]);
 
-    // Calculate running balance
+    const baseCurrency = String(
+      currencySettings.find((row) => row.key === "currency")?.value
+      || currencySettings.find((row) => row.key === "base_currency")?.value
+      || "PGK",
+    ).trim().toUpperCase() || "PGK";
+
+    // Calculate opening and running balance in company base currency.
     const isCreditNormal = account.normalBalance === NormalBalance.CREDIT;
-    let runningBalance = 0;
+    const openingDebit = openingLines.reduce((sum, line) => sum + Number(line.debit || 0), 0);
+    const openingCredit = openingLines.reduce((sum, line) => sum + Number(line.credit || 0), 0);
+    const openingBalance = isCreditNormal
+      ? openingCredit - openingDebit
+      : openingDebit - openingCredit;
+    let runningBalance = openingBalance;
     let totalDebit = 0;
     let totalCredit = 0;
 
@@ -96,6 +143,10 @@ export async function GET(req: NextRequest) {
         description: line.description || line.journal.description,
         debit,
         credit,
+        transactionCurrency: line.transactionCurrency || line.currency || baseCurrency,
+        transactionDebit: Number(line.transactionDebit || 0),
+        transactionCredit: Number(line.transactionCredit || 0),
+        exchangeRate: Number(line.exchangeRate || 1),
         runningBalance,
       };
     });
@@ -120,16 +171,19 @@ export async function GET(req: NextRequest) {
         accountCode: account.code,
         accountName: account.name,
         accountType: account.type,
-        currency: account.currency || "PGK",
+        currency: baseCurrency,
+        accountCurrency: account.currency || baseCurrency,
         normalBalance: account.normalBalance,
         isGroup: account._count.children > 0,
         childCount: account._count.children,
         parentAccount: account.parent ? `${account.parent.code} — ${account.parent.name}` : "",
       },
       summary: {
+        openingBalance,
         totalDebit,
         totalCredit,
-        netBalance: isCreditNormal ? totalCredit - totalDebit : totalDebit - totalCredit,
+        periodMovement: isCreditNormal ? totalCredit - totalDebit : totalDebit - totalCredit,
+        netBalance: runningBalance,
         entryCount: entries.length,
       },
       entries: filteredEntries,
