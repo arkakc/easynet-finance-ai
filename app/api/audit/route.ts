@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
           userAgent: true,
           requestId: true,
           previousHash: true,
+          sequence: true,
           integrityHash: true,
         },
       }),
