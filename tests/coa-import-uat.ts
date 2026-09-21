@@ -147,9 +147,6 @@ async function main() {
       dbValidatedRbac: true,
     }, null, 2));
   } finally {
-    await prisma.authThrottle.deleteMany({
-      where: { keyHash: { contains: "" } },
-    }).catch(() => undefined);
     await prisma.user.delete({ where: { id: readonly.id } }).catch(() => undefined);
     await prisma.$disconnect();
   }
