@@ -1,4 +1,5 @@
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { normalizeCurrency, requireExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 export type PostingLine = {
   accountId: string;
@@ -10,10 +11,58 @@ export type PostingLine = {
   taxCode?: string;
   costCenter?: string;
   description?: string;
+  transactionCurrency?: string;
+  transactionDebit?: number;
+  transactionCredit?: number;
+  exchangeRate?: number;
 };
 
 export const roundPostingAmount = (value: number) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+type CurrencyPostingContext = {
+  currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
+};
+
+function currencyContext(input: CurrencyPostingContext) {
+  const baseCurrency = normalizeCurrency(input.baseCurrency || "PGK");
+  const currency = normalizeCurrency(input.currency || baseCurrency);
+  const exchangeRate = requireExchangeRate(currency, baseCurrency, input.exchangeRate);
+  return {
+    currency,
+    baseCurrency,
+    exchangeRate,
+    toBase: (amount: number) => toBaseAmount(amount, currency, baseCurrency, exchangeRate),
+  };
+}
+
+function transactionAudit(
+  ctx: ReturnType<typeof currencyContext>,
+  side: "debit" | "credit",
+  amount: number,
+) {
+  return {
+    transactionCurrency: ctx.currency,
+    exchangeRate: ctx.exchangeRate,
+    transactionDebit: side === "debit" ? roundPostingAmount(amount) : 0,
+    transactionCredit: side === "credit" ? roundPostingAmount(amount) : 0,
+  };
+}
+
+function baseAudit(
+  ctx: ReturnType<typeof currencyContext>,
+  side: "debit" | "credit",
+  amount: number,
+) {
+  return {
+    transactionCurrency: ctx.baseCurrency,
+    exchangeRate: 1,
+    transactionDebit: side === "debit" ? roundPostingAmount(amount) : 0,
+    transactionCredit: side === "credit" ? roundPostingAmount(amount) : 0,
+  };
+}
 
 export function validateBalancedPosting(lines: PostingLine[]) {
   if (!Array.isArray(lines) || lines.length < 2) throw new Error("A journal requires at least two lines");
@@ -48,11 +97,16 @@ export function salesInvoicePostingByLines(input: {
   receivableAccountId?: string;
   deferredRevenueAccountId?: string;
   inventoryAccountId?: string;
+  currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
 }) {
+  const fx = currencyContext(input);
   const lines: PostingLine[] = [
     {
       accountId: input.receivableAccountId || INITIAL_ACCOUNT_IDS.accountsReceivable,
-      debit: input.total,
+      debit: fx.toBase(input.total),
+      ...transactionAudit(fx, "debit", input.total),
       customerId: input.customerId,
       projectId: input.projectId,
       description: "Accounts receivable",
@@ -77,7 +131,8 @@ export function salesInvoicePostingByLines(input: {
   for (const [accountId, amount] of immediateRevenue.entries()) {
     lines.push({
       accountId,
-      credit: amount,
+      credit: fx.toBase(amount),
+      ...transactionAudit(fx, "credit", amount),
       customerId: input.customerId,
       projectId: input.projectId,
       description: "Sales revenue",
@@ -87,7 +142,8 @@ export function salesInvoicePostingByLines(input: {
   if (deferredRevenue > 0) {
     lines.push({
       accountId: input.deferredRevenueAccountId || INITIAL_ACCOUNT_IDS.customerAdvances,
-      credit: deferredRevenue,
+      credit: fx.toBase(deferredRevenue),
+      ...transactionAudit(fx, "credit", deferredRevenue),
       customerId: input.customerId,
       projectId: input.projectId,
       description: "Deferred revenue / contract liability",
@@ -97,7 +153,8 @@ export function salesInvoicePostingByLines(input: {
   if (input.gst) {
     lines.push({
       accountId: INITIAL_ACCOUNT_IDS.gstPayable,
-      credit: input.gst,
+      credit: fx.toBase(input.gst),
+      ...transactionAudit(fx, "credit", input.gst),
       customerId: input.customerId,
       projectId: input.projectId,
       taxCode: "GST",
@@ -122,6 +179,7 @@ export function salesInvoicePostingByLines(input: {
     lines.push({
       accountId,
       debit: amount,
+      ...baseAudit(fx, "debit", amount),
       customerId: input.customerId,
       projectId: input.projectId,
       description: "Cost of goods sold",
@@ -132,6 +190,7 @@ export function salesInvoicePostingByLines(input: {
     lines.push({
       accountId: input.inventoryAccountId || INITIAL_ACCOUNT_IDS.inventory,
       credit: totalCogs,
+      ...baseAudit(fx, "credit", totalCogs),
       customerId: input.customerId,
       projectId: input.projectId,
       description: "Inventory issued to customer",
@@ -150,7 +209,11 @@ export function supplierBillPostingByLines(input: {
   projectId?: string;
   costLines: Array<{ accountId: string; amount: number; description?: string }>;
   payableAccountId?: string;
+  currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
 }) {
+  const fx = currencyContext(input);
   const lines: PostingLine[] = [];
   const grouped = new Map<string, number>();
   for (const line of input.costLines) {
@@ -166,7 +229,8 @@ export function supplierBillPostingByLines(input: {
   for (const [accountId, amount] of grouped.entries()) {
     lines.push({
       accountId,
-      debit: amount,
+      debit: fx.toBase(amount),
+      ...transactionAudit(fx, "debit", amount),
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Supplier cost",
@@ -176,7 +240,8 @@ export function supplierBillPostingByLines(input: {
   if (input.gst) {
     lines.push({
       accountId: INITIAL_ACCOUNT_IDS.inputGst,
-      debit: input.gst,
+      debit: fx.toBase(input.gst),
+      ...transactionAudit(fx, "debit", input.gst),
       supplierId: input.supplierId,
       projectId: input.projectId,
       taxCode: "GST",
@@ -186,7 +251,8 @@ export function supplierBillPostingByLines(input: {
 
   lines.push({
     accountId: input.payableAccountId || INITIAL_ACCOUNT_IDS.accountsPayable,
-    credit: input.total,
+    credit: fx.toBase(input.total),
+    ...transactionAudit(fx, "credit", input.total),
     supplierId: input.supplierId,
     projectId: input.projectId,
     description: "Accounts payable",
@@ -206,7 +272,11 @@ export function supplierBillPostingMixed(input: {
   payableAccountId?: string;
   stockReceivedButNotBilledAccountId?: string;
   purchasePriceVarianceAccountId?: string;
+  currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
 }) {
+  const fx = currencyContext(input);
   const lines: PostingLine[] = [];
   const serviceGrouped = new Map<string, number>();
 
@@ -223,7 +293,8 @@ export function supplierBillPostingMixed(input: {
   for (const [accountId, amount] of serviceGrouped.entries()) {
     lines.push({
       accountId,
-      debit: amount,
+      debit: fx.toBase(amount),
+      ...transactionAudit(fx, "debit", amount),
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Service / non-stock purchase cost",
@@ -233,14 +304,16 @@ export function supplierBillPostingMixed(input: {
   const receiptValue = roundPostingAmount(
     input.stockLines.reduce((sum, line) => sum + Number(line.receiptValue || 0), 0),
   );
-  const stockInvoiceValue = roundPostingAmount(
+  const stockInvoiceTransactionValue = roundPostingAmount(
     input.stockLines.reduce((sum, line) => sum + Number(line.invoiceAmount || 0), 0),
   );
+  const stockInvoiceValue = fx.toBase(stockInvoiceTransactionValue);
 
   if (receiptValue > 0) {
     lines.push({
       accountId: input.stockReceivedButNotBilledAccountId || INITIAL_ACCOUNT_IDS.grni,
       debit: receiptValue,
+      ...transactionAudit(fx, "debit", roundPostingAmount(receiptValue / fx.exchangeRate)),
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Clear stock received but not billed",
@@ -248,12 +321,16 @@ export function supplierBillPostingMixed(input: {
   }
 
   const purchasePriceVariance = roundPostingAmount(stockInvoiceValue - receiptValue);
+  const ppvTransactionEquivalent = roundPostingAmount(
+    stockInvoiceTransactionValue - roundPostingAmount(receiptValue / fx.exchangeRate),
+  );
   const ppvAccount = input.purchasePriceVarianceAccountId || INITIAL_ACCOUNT_IDS.purchasePriceVariance;
 
   if (purchasePriceVariance > 0) {
     lines.push({
       accountId: ppvAccount,
       debit: purchasePriceVariance,
+      ...transactionAudit(fx, "debit", Math.max(0, ppvTransactionEquivalent)),
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Purchase price variance",
@@ -262,6 +339,7 @@ export function supplierBillPostingMixed(input: {
     lines.push({
       accountId: ppvAccount,
       credit: Math.abs(purchasePriceVariance),
+      ...transactionAudit(fx, "credit", Math.abs(Math.min(0, ppvTransactionEquivalent))),
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Purchase price variance",
@@ -271,7 +349,8 @@ export function supplierBillPostingMixed(input: {
   if (input.gst) {
     lines.push({
       accountId: INITIAL_ACCOUNT_IDS.inputGst,
-      debit: input.gst,
+      debit: fx.toBase(input.gst),
+      ...transactionAudit(fx, "debit", input.gst),
       supplierId: input.supplierId,
       projectId: input.projectId,
       taxCode: "GST",
@@ -281,7 +360,8 @@ export function supplierBillPostingMixed(input: {
 
   lines.push({
     accountId: input.payableAccountId || INITIAL_ACCOUNT_IDS.accountsPayable,
-    credit: input.total,
+    credit: fx.toBase(input.total),
+    ...transactionAudit(fx, "credit", input.total),
     supplierId: input.supplierId,
     projectId: input.projectId,
     description: "Accounts payable",
