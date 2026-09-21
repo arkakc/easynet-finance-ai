@@ -204,6 +204,8 @@ export async function POST(request: Request) {
       projectId: quote.projectId,
       invoiceDate: input.invoiceDate,
       dueDate,
+      currency: String(quote.currency || "PGK"),
+      exchangeRate: Number(quote.exchangeRate || 0) || undefined,
       netAmount,
       gstAmount,
       totalAmount,
