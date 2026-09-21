@@ -268,10 +268,12 @@ export function supplierBillPostingMixed(input: {
   supplierId: string;
   projectId?: string;
   serviceCostLines: Array<{ accountId: string; amount: number; description?: string }>;
-  stockLines: Array<{ invoiceAmount: number; receiptValue: number; description?: string }>;
+  stockLines: Array<{ invoiceAmount: number; poAmount: number; receiptValue: number; description?: string }>;
   payableAccountId?: string;
   stockReceivedButNotBilledAccountId?: string;
   purchasePriceVarianceAccountId?: string;
+  exchangeGainAccountId?: string;
+  exchangeLossAccountId?: string;
   currency?: string;
   baseCurrency?: string;
   exchangeRate?: number;
@@ -307,7 +309,11 @@ export function supplierBillPostingMixed(input: {
   const stockInvoiceTransactionValue = roundPostingAmount(
     input.stockLines.reduce((sum, line) => sum + Number(line.invoiceAmount || 0), 0),
   );
+  const stockPoTransactionValue = roundPostingAmount(
+    input.stockLines.reduce((sum, line) => sum + Number(line.poAmount || 0), 0),
+  );
   const stockInvoiceValue = fx.toBase(stockInvoiceTransactionValue);
+  const stockPoValueAtBillRate = fx.toBase(stockPoTransactionValue);
 
   if (receiptValue > 0) {
     lines.push({
@@ -320,9 +326,14 @@ export function supplierBillPostingMixed(input: {
     });
   }
 
-  const purchasePriceVariance = roundPostingAmount(stockInvoiceValue - receiptValue);
-  const ppvTransactionEquivalent = roundPostingAmount(
-    stockInvoiceTransactionValue - roundPostingAmount(receiptValue / fx.exchangeRate),
+  // Separate commercial price variance from currency movement between receipt
+  // and supplier-invoice recognition. This prevents FX changes from being
+  // hidden inside the Purchase Price Variance account.
+  const purchasePriceVariance = roundPostingAmount(stockInvoiceValue - stockPoValueAtBillRate);
+  const ppvTransactionEquivalent = roundPostingAmount(stockInvoiceTransactionValue - stockPoTransactionValue);
+  const exchangeVariance = roundPostingAmount(stockPoValueAtBillRate - receiptValue);
+  const fxTransactionEquivalent = roundPostingAmount(
+    stockPoTransactionValue - roundPostingAmount(receiptValue / fx.exchangeRate),
   );
   const ppvAccount = input.purchasePriceVarianceAccountId || INITIAL_ACCOUNT_IDS.purchasePriceVariance;
 
@@ -343,6 +354,26 @@ export function supplierBillPostingMixed(input: {
       supplierId: input.supplierId,
       projectId: input.projectId,
       description: "Purchase price variance",
+    });
+  }
+
+  if (exchangeVariance > 0) {
+    lines.push({
+      accountId: input.exchangeLossAccountId || INITIAL_ACCOUNT_IDS.exchangeLoss,
+      debit: exchangeVariance,
+      ...transactionAudit(fx, "debit", Math.max(0, fxTransactionEquivalent)),
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Foreign exchange loss between receipt and supplier invoice",
+    });
+  } else if (exchangeVariance < 0) {
+    lines.push({
+      accountId: input.exchangeGainAccountId || INITIAL_ACCOUNT_IDS.exchangeGain,
+      credit: Math.abs(exchangeVariance),
+      ...transactionAudit(fx, "credit", Math.abs(Math.min(0, fxTransactionEquivalent))),
+      supplierId: input.supplierId,
+      projectId: input.projectId,
+      description: "Foreign exchange gain between receipt and supplier invoice",
     });
   }
 
@@ -371,6 +402,7 @@ export function supplierBillPostingMixed(input: {
   return {
     lines,
     purchasePriceVariance,
+    exchangeVariance,
     receiptValue,
     stockInvoiceValue,
   };
