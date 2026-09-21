@@ -162,6 +162,12 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         });
       }
     } else if (directAllocation && !directAllocation.alreadyAllocated) {
+      const settlementBaseAmount = Number(settlementBaseAmount || 0);
+      const documentBaseAmount = Number(documentBaseAmount || 0);
+      const settlementExchangeRate = Number(settlementExchangeRate || fx.exchangeRate);
+      const documentExchangeRate = Number(documentExchangeRate || fx.exchangeRate);
+      const realizedGain = Number(realizedGain || 0);
+      const realizedLoss = Number(realizedLoss || 0);
       const cashAccount = input.cashBankAccountId;
       const settlementAccount = input.lines.find(
         (line) => String(line.accountId || "").toUpperCase() !== String(cashAccount || "").toUpperCase(),
@@ -189,16 +195,16 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         postingLines = [
           {
             accountId: cashAccount,
-            debit: directAllocation.settlementBaseAmount,
-            ...transactionAudit("debit", amount, directAllocation.settlementExchangeRate),
+            debit: settlementBaseAmount,
+            ...transactionAudit("debit", amount, settlementExchangeRate),
             customerId: partyRef,
             projectId: projectRef,
             description: "Customer receipt",
           },
           {
             accountId: settlementAccount,
-            credit: directAllocation.documentBaseAmount,
-            ...transactionAudit("credit", amount, directAllocation.documentExchangeRate),
+            credit: documentBaseAmount,
+            ...transactionAudit("credit", amount, documentExchangeRate),
             customerId: partyRef,
             projectId: projectRef,
             description: "Settle Accounts Receivable",
@@ -208,16 +214,16 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         postingLines = [
           {
             accountId: settlementAccount,
-            debit: directAllocation.documentBaseAmount,
-            ...transactionAudit("debit", amount, directAllocation.documentExchangeRate),
+            debit: documentBaseAmount,
+            ...transactionAudit("debit", amount, documentExchangeRate),
             supplierId: partyRef,
             projectId: projectRef,
             description: "Settle Accounts Payable",
           },
           {
             accountId: cashAccount,
-            credit: directAllocation.settlementBaseAmount,
-            ...transactionAudit("credit", amount, directAllocation.settlementExchangeRate),
+            credit: settlementBaseAmount,
+            ...transactionAudit("credit", amount, settlementExchangeRate),
             supplierId: partyRef,
             projectId: projectRef,
             description: "Supplier payment",
@@ -225,19 +231,19 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         ];
       }
 
-      if (directAllocation.realizedGain > 0) {
+      if (realizedGain > 0) {
         postingLines.push({
           accountId: input.exchangeGainAccountId || INITIAL_ACCOUNT_IDS.exchangeGain,
-          credit: directAllocation.realizedGain,
+          credit: realizedGain,
           ...zeroFxAudit,
           projectId: projectRef,
           description: "Realized foreign exchange gain",
         });
       }
-      if (directAllocation.realizedLoss > 0) {
+      if (realizedLoss > 0) {
         postingLines.push({
           accountId: input.exchangeLossAccountId || INITIAL_ACCOUNT_IDS.exchangeLoss,
-          debit: directAllocation.realizedLoss,
+          debit: realizedLoss,
           ...zeroFxAudit,
           projectId: projectRef,
           description: "Realized foreign exchange loss",
