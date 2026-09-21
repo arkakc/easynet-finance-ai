@@ -223,7 +223,7 @@ export async function verifyAuditIntegrity(
 
     const expected = hashPayload(auditPayload({
       id: row.id,
-      sequence: row.sequence,
+      sequence: Number(row.sequence),
       action: row.action,
       entityType: row.entityType,
       entityId: row.entityId,
