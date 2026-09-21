@@ -7,9 +7,6 @@ import { inventoryState } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
 
 const snapshotDirectory = path.join(process.cwd(), "backups", "reconciliation");
-const OPEN_INVOICE_STATUSES = ["SENT", "PARTIAL", "PAID", "OVERDUE"] as const;
-const OPEN_BILL_STATUSES = ["SENT", "PARTIAL", "PAID", "OVERDUE"] as const;
-
 type AccountBalance = {
   code: string;
   name: string;
@@ -106,11 +103,18 @@ export async function buildFinancialReconciliationSnapshot(options?: {
       orderBy: { code: "asc" },
     }),
     client.invoice.findMany({
-      where: { issuedDate: { lte: periodEnd }, status: { in: [...OPEN_INVOICE_STATUSES] } },
+      where: {
+        issuedDate: { lte: periodEnd },
+        code: { not: { startsWith: "CN-" } },
+        status: { notIn: ["CANCELLED", "VOID"] },
+      },
       select: { outstanding: true, taxTotal: true, glPosted: true },
     }),
     client.supplierBill.findMany({
-      where: { billDate: { lte: periodEnd }, status: { in: [...OPEN_BILL_STATUSES] } },
+      where: {
+        billDate: { lte: periodEnd },
+        status: { notIn: ["CANCELLED", "VOID"] },
+      },
       select: { outstanding: true, taxTotal: true, glPosted: true },
     }),
     client.stockMovement.findMany({
