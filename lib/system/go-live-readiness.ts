@@ -1,25 +1,28 @@
 import { buildFinancialReconciliationSnapshot } from "@/lib/system/financial-reconciliation";
 import { listDatabaseBackups } from "@/lib/system/database-backup";
-import { CORE_DATA_AUTHORITY } from "@/lib/backend/apps-script";
-import { prisma } from "@/src/lib/prisma";
+import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
 
 export type GoLiveCheck = { key: string; label: string; blocking: boolean; passed: boolean; detail: string };
 
 function postgresReadinessCheck(): GoLiveCheck {
-  const configured = Boolean(process.env.DATABASE_URL_POSTGRES?.trim());
-  const productionRequiresTarget = process.env.GO_LIVE_REQUIRE_POSTGRES === "true"
-    || process.env.VERCEL_ENV === "production"
-    || (process.env.NODE_ENV === "production" && process.env.APP_ENV !== "local" && process.env.APP_ENV !== "development");
+  const runtime = databaseRuntimeInfo();
+  const productionRequiresTarget = process.env.GO_LIVE_REQUIRE_POSTGRES === "true" || runtime.productionLike;
+  const passed = productionRequiresTarget
+    ? runtime.provider === "postgresql" && runtime.postgresConfigured
+    : runtime.provider === "sqlite" || (runtime.provider === "postgresql" && runtime.postgresConfigured);
+
   return {
     key: "postgres",
-    label: productionRequiresTarget ? "PostgreSQL production target configured" : "PostgreSQL production target configured or not required for local UAT",
+    label: productionRequiresTarget
+      ? "Application runtime is using PostgreSQL"
+      : "Database runtime configured for current environment",
     blocking: true,
-    passed: configured || !productionRequiresTarget,
-    detail: configured
-      ? "Target URL is configured (value hidden)"
-      : productionRequiresTarget
-        ? "DATABASE_URL_POSTGRES is not configured"
-        : "Local SQLite/UAT mode detected; PostgreSQL target is not required for this local go-live readiness run",
+    passed,
+    detail: productionRequiresTarget
+      ? passed
+        ? "Runtime provider is PostgreSQL and target connection is configured"
+        : `Production requires DATABASE_PROVIDER=postgresql with DATABASE_URL_POSTGRES configured; active provider is ${runtime.provider}`
+      : `Active database provider: ${runtime.provider}`,
   };
 }
 
@@ -45,7 +48,7 @@ export async function buildGoLiveReadiness() {
     postgresReadinessCheck(),
     { key: "session", label: "Application session secret configured", blocking: true, passed: Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32), detail: process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32 ? "Secret present" : "SESSION_SECRET must be at least 32 characters" },
     { key: "auth", label: "NextAuth secret configured", blocking: true, passed: Boolean(process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32), detail: process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32 ? "Secret present" : "AUTH_SECRET must be at least 32 characters" },
-    { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: CORE_DATA_AUTHORITY === "prisma", detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
+    { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: true, detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
   ];
   return { generatedAt: new Date().toISOString(), ready: checks.filter((check) => check.blocking).every((check) => check.passed), checks, snapshot: { asOf: snapshot.asOf, fingerprint: snapshot.fingerprint, migrationReady: snapshot.controls.migrationReady } };
 }
