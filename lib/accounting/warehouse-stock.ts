@@ -92,10 +92,15 @@ export async function warehouseInventoryState(
   fallbackRate = 0,
   includeLegacyUnassigned = false,
 ) {
+  const warehouse = await tx.warehouse.findUnique({
+    where: { id: warehouseId },
+    select: { isDefault: true },
+  });
+  const includeLegacy = includeLegacyUnassigned || warehouse?.isDefault === true;
   const rows = await tx.stockMovement.findMany({
     where: {
       itemId,
-      ...(includeLegacyUnassigned
+      ...(includeLegacy
         ? { OR: [{ warehouseId }, { warehouseId: null }] }
         : { warehouseId }),
     },
