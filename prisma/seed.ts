@@ -821,11 +821,6 @@ async function main() {
   await prisma.journalLine.deleteMany({});
   await prisma.journalHeader.deleteMany({});
 
-  const allAccounts = await prisma.chartOfAccounts.findMany({
-    select: { id: true, code: true },
-  });
-  const accountIdByCode = new Map(allAccounts.map((a) => [a.code, a.id]));
-
   const journalsData = [
     // 1. Opening Balances
     {
