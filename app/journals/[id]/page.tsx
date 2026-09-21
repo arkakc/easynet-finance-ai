@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { formatAccountingDate } from "@/lib/accounting/format-date";
 import { prisma } from "@/src/lib/prisma";
+import JournalApprovalButton from "@/app/components/journal-approval-button";
 
 const money = (value: unknown, currency: string) =>
   new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
@@ -55,7 +56,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
     <div className="document-page">
       <div className="document-toolbar no-print">
         <Link href="/journals">← Back to Journals</Link>
-        {canApprove ? <Link className="button-link" href="/approvals">Review & Approve</Link> : null}
+        {canApprove ? <JournalApprovalButton journalId={header.id} /> : null}
       </div>
 
       <section className="document-sheet">
@@ -65,7 +66,9 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
             <h1>Journal Entry</h1>
             <div className="document-number">{header.code}</div>
           </div>
-          <div className={`status-pill ${header.status === "POSTED" ? "status-posted" : ""}`}>{header.status || "POSTED"}</div>
+          <div className={`status-pill ${header.status === "POSTED" ? "status-posted" : ""}`}>
+            {header.status === "POSTED" ? "APPROVED" : header.status === "PENDING" ? "APPROVAL PENDING" : header.status || "—"}
+          </div>
         </header>
 
         <div className="document-meta">
