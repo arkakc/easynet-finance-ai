@@ -89,6 +89,7 @@ async function reverseAllocationSettlement(
   allocation: {
     id: string;
     amount: Prisma.Decimal;
+    baseAmount: Prisma.Decimal;
     invoiceId: string | null;
     billId: string | null;
     status: string;
@@ -106,11 +107,17 @@ async function reverseAllocationSettlement(
     if (!invoice) throw new Error("Allocated Sales Invoice was not found");
     const amountPaid = round2(Math.max(0, Number(invoice.amountPaid || 0) - amount));
     const outstanding = round2(Math.max(0, Number(invoice.total || 0) - amountPaid));
+    const baseAmount = round2(Number(allocation.baseAmount || 0));
+    const basePaid = round2(Math.max(0, Number(invoice.baseAmountPaid || 0) - baseAmount));
+    const baseTotal = Number(invoice.baseTotal || 0);
+    const baseOutstanding = round2(Math.max(0, baseTotal - basePaid));
     await tx.invoice.update({
       where: { id: invoice.id },
       data: {
         amountPaid,
         outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
         status: outstanding <= 0.001 ? "PAID" : amountPaid > 0.001 ? "PARTIAL" : "SENT",
       },
     });
@@ -121,11 +128,17 @@ async function reverseAllocationSettlement(
     if (!bill) throw new Error("Allocated Supplier Invoice was not found");
     const amountPaid = round2(Math.max(0, Number(bill.amountPaid || 0) - amount));
     const outstanding = round2(Math.max(0, Number(bill.total || 0) - amountPaid));
+    const baseAmount = round2(Number(allocation.baseAmount || 0));
+    const basePaid = round2(Math.max(0, Number(bill.baseAmountPaid || 0) - baseAmount));
+    const baseTotal = Number(bill.baseTotal || 0);
+    const baseOutstanding = round2(Math.max(0, baseTotal - basePaid));
     await tx.supplierBill.update({
       where: { id: bill.id },
       data: {
         amountPaid,
         outstanding,
+        baseAmountPaid: basePaid,
+        baseOutstanding,
         status: outstanding <= 0.001 ? "PAID" : amountPaid > 0.001 ? "PARTIAL" : "SENT",
       },
     });
@@ -168,7 +181,7 @@ async function synchronizeSourceAfterReversal(
     }
     await tx.invoice.update({
       where: { id: invoice.id },
-      data: { status: "VOID", outstanding: 0 },
+      data: { status: "VOID", outstanding: 0, baseOutstanding: 0 },
     });
     return;
   }
@@ -186,7 +199,7 @@ async function synchronizeSourceAfterReversal(
     }
     await tx.supplierBill.update({
       where: { id: bill.id },
-      data: { status: "VOID", outstanding: 0 },
+      data: { status: "VOID", outstanding: 0, baseOutstanding: 0 },
     });
     return;
   }
@@ -293,6 +306,11 @@ export async function reversePostedJournal(
       credit: line.debit,
       amount: line.amount,
       currency: line.currency,
+      transactionCurrency: line.transactionCurrency,
+      exchangeRate: line.exchangeRate,
+      transactionDebit: line.transactionCredit,
+      transactionCredit: line.transactionDebit,
+      transactionAmount: line.transactionAmount,
       projectId: line.projectId,
       customerId: line.customerId,
       supplierId: line.supplierId,
@@ -320,9 +338,12 @@ export async function reversePostedJournal(
         reversalOfJournalId: original.id,
         status: "POSTED",
         currency: original.currency,
+        baseCurrency: original.baseCurrency,
         exchangeRate: original.exchangeRate,
         totalDebit,
         totalCredit,
+        transactionTotalDebit: original.transactionTotalCredit,
+        transactionTotalCredit: original.transactionTotalDebit,
         isBalanced: true,
         createdBy: input.createdBy || "journal-reversal-ui",
         approvedBy: input.approvedBy || "Finance Controller",
