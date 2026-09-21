@@ -12,6 +12,7 @@ import {
   syncWarehouseBalance,
   warehouseInventoryState,
 } from "@/lib/accounting/warehouse-stock";
+import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 export async function postStockMovementAtomic(input:{
   movementId:string; postingDate:string; itemRef:string; projectRef?:string; warehouseRef?:string;
