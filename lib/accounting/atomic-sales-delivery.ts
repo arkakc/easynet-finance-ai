@@ -54,6 +54,23 @@ export async function postSalesDeliveryAtomic(input: {
       };
     }
 
+    const stockByItem = new Map<string, {
+      item: NonNullable<(typeof stockLines)[number]["item"]>;
+      quantity: number;
+      descriptions: string[];
+    }>();
+    for (const line of stockLines) {
+      if (!line.item) continue;
+      const current = stockByItem.get(line.item.id) || {
+        item: line.item,
+        quantity: 0,
+        descriptions: [],
+      };
+      current.quantity += Number(line.quantity || 0);
+      current.descriptions.push(String(line.description || line.item.name || line.item.code));
+      stockByItem.set(line.item.id, current);
+    }
+
     const glLines: PostingLine[] = [];
     const movementIds: string[] = [];
     const valuationUpdates: Array<{
@@ -63,12 +80,13 @@ export async function postSalesDeliveryAtomic(input: {
       rate: number;
     }> = [];
 
-    for (const [index, line] of stockLines.entries()) {
-      if (!line.item) continue;
-      const ordered = Number(line.quantity || 0);
+    let movementIndex = 0;
+    for (const group of stockByItem.values()) {
+      const item = group.item;
+      const ordered = round4(group.quantity);
       const delivered = await tx.stockMovement.aggregate({
         where: {
-          itemId: line.item.id,
+          itemId: item.id,
           type: "SALES_DELIVERY",
           referenceId: order.id,
         },
@@ -80,30 +98,31 @@ export async function postSalesDeliveryAtomic(input: {
 
       const current = await warehouseInventoryState(
         tx,
-        line.item.id,
+        item.id,
         warehouse.id,
-        Number(line.item.purchasePrice || 0),
+        Number(item.purchasePrice || 0),
       );
       if (remaining > current.qty + 0.0001) {
         throw new Error(
-          `Insufficient stock for ${line.item.code} in ${warehouse.code}. On hand ${current.qty}, delivery required ${remaining}`,
+          `Insufficient stock for ${item.code} in ${warehouse.code}. On hand ${current.qty}, delivery required ${remaining}`,
         );
       }
 
       const value = round2(remaining * current.rate);
       glLines.push(...inventoryIssuePosting({
         amount: value,
-        costAccountId: String(line.item.costAccount || input.defaultCostAccountId),
+        costAccountId: String(item.costAccount || input.defaultCostAccountId),
         projectId: order.project?.code || order.projectId || undefined,
-        description: `Delivery Note COGS: ${line.description || line.item.name || line.item.code}`,
+        description: `Delivery Note COGS: ${group.descriptions.join(" / ")}`,
         inventoryAccountId: input.inventoryAccountId,
       }));
 
-      const movementId = `${input.deliveryNumber}-${String(index + 1).padStart(3, "0")}`;
+      movementIndex += 1;
+      const movementId = `${input.deliveryNumber}-${String(movementIndex).padStart(3, "0")}`;
       await tx.stockMovement.create({
         data: {
           id: movementId,
-          itemId: line.item.id,
+          itemId: item.id,
           warehouseId: warehouse.id,
           type: "SALES_DELIVERY",
           quantity: remaining,
@@ -119,10 +138,10 @@ export async function postSalesDeliveryAtomic(input: {
       movementIds.push(movementId);
 
       const nextQty = round4(current.qty - remaining);
-      const nextValue = round2(current.value - value);
+      const nextValue = round2(Math.max(0, current.value - value));
       const nextRate = nextQty > 0 ? round4(nextValue / nextQty) : current.rate;
       valuationUpdates.push({
-        itemId: line.item.id,
+        itemId: item.id,
         quantity: nextQty,
         value: nextValue,
         rate: nextRate,
@@ -161,17 +180,16 @@ export async function postSalesDeliveryAtomic(input: {
     }
 
     let fullyDelivered = true;
-    for (const line of stockLines) {
-      if (!line.itemId) continue;
+    for (const group of stockByItem.values()) {
       const delivered = await tx.stockMovement.aggregate({
         where: {
-          itemId: line.itemId,
+          itemId: group.item.id,
           type: "SALES_DELIVERY",
           referenceId: order.id,
         },
         _sum: { quantity: true },
       });
-      if (Number(delivered._sum.quantity || 0) + 0.0001 < Number(line.quantity || 0)) {
+      if (Number(delivered._sum.quantity || 0) + 0.0001 < Number(group.quantity || 0)) {
         fullyDelivered = false;
         break;
       }
