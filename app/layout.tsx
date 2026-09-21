@@ -1,11 +1,10 @@
 import "./globals.css";
 import "./busy-controls.css";
-import Link from "next/link";
 import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
-import LogoutButton from "@/app/components/logout-button";
 import FlowReturnBridge from "@/app/components/flow-return-bridge";
 import SetupAccessGuard from "@/app/components/setup-access-guard";
-import CollapsibleSidebarNav, { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
+import SidebarShell from "@/app/components/sidebar-shell";
+import { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
 import GlobalDataTableEnhancer from "@/app/components/global-data-table-enhancer";
 import GlobalFormDraftCache from "@/app/components/global-form-draft-cache";
 import { getSetupGateState } from "@/lib/setup-gate";
@@ -140,28 +139,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           children
         ) : (
           <div className="shell">
-            <aside className="sidebar">
-              <Link prefetch={false} className="brand" href={setupActive ? "/dashboard" : "/setup/finance"}>
-                <div className="brand-icon">EN</div>
-                <div>
-                  <strong>EASYNET FINANCE AI</strong>
-                  <span>Enterprise Mini ERP · PGK</span>
-                </div>
-              </Link>
-              <CollapsibleSidebarNav groups={navGroups} />
-              <div className="sidebar-user">
-                <div className="sidebar-user-header">
-                  <div className="sidebar-user-avatar">
-                    {user.name ? user.name.charAt(0).toUpperCase() : "U"}
-                  </div>
-                  <div className="sidebar-user-info">
-                    <strong>{user.name}</strong>
-                    <span>{user.roles.join(", ")}</span>
-                  </div>
-                </div>
-                <LogoutButton />
-              </div>
-            </aside>
+            <SidebarShell
+              groups={navGroups}
+              homeHref={setupActive ? "/dashboard" : "/setup/finance"}
+              userName={user.name}
+              userRoles={user.roles}
+            />
             <main className="main">
               <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
