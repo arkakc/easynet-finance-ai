@@ -416,12 +416,12 @@ export async function allocateAdvancePaymentAtomic(input: {
       };
     }
 
-    const settlementBaseAmount = Number(settlementBaseAmount || 0);
-    const documentBaseAmount = Number(documentBaseAmount || 0);
-    const settlementExchangeRate = Number(settlementExchangeRate || 1);
-    const documentExchangeRate = Number(documentExchangeRate || 1);
-    const realizedGain = Number(realizedGain || 0);
-    const realizedLoss = Number(realizedLoss || 0);
+    const settlementBaseAmount = Number(allocation.settlementBaseAmount || 0);
+    const documentBaseAmount = Number(allocation.documentBaseAmount || 0);
+    const settlementExchangeRate = Number(allocation.settlementExchangeRate || 1);
+    const documentExchangeRate = Number(allocation.documentExchangeRate || 1);
+    const realizedGain = Number(allocation.realizedGain || 0);
+    const realizedLoss = Number(allocation.realizedLoss || 0);
 
     const transactionAudit = (side: "debit" | "credit", rate: number) => ({
       transactionCurrency: allocation.currency,
