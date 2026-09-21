@@ -17,8 +17,11 @@ export function normalizeCurrency(value: unknown, fallback = DEFAULT_BASE_CURREN
 }
 
 export async function companyBaseCurrency(tx: CurrencyTx) {
-  const row = await tx.globalSettings.findUnique({ where: { key: "currency" } });
-  return normalizeCurrency(row?.value || DEFAULT_BASE_CURRENCY);
+  const [canonical, legacy] = await Promise.all([
+    tx.globalSettings.findUnique({ where: { key: "currency" } }),
+    tx.globalSettings.findUnique({ where: { key: "base_currency" } }),
+  ]);
+  return normalizeCurrency(canonical?.value || legacy?.value || DEFAULT_BASE_CURRENCY);
 }
 
 export function requireExchangeRate(
