@@ -1,6 +1,8 @@
 import type { AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { allocateAdvancePaymentAtomic, createPaymentAllocationInTransaction } from "@/lib/accounting/payment-allocation";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -17,6 +19,8 @@ export type AtomicPaymentFinalizationInput = {
   lines: AtomicPostingLine[];
   againstInvoiceId?: string;
   againstBillId?: string;
+  exchangeGainAccountId?: string;
+  exchangeLossAccountId?: string;
   createdBy?: string;
   approvedBy?: string;
 };
@@ -31,6 +35,11 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
   return runAtomicAccounting(async ({ tx, postJournal }) => {
     const payment = await tx.payment.findFirst({
       where: { OR: [{ id: input.paymentId }, { code: input.paymentId }] },
+      include: {
+        customer: { select: { code: true } },
+        supplier: { select: { code: true } },
+        project: { select: { code: true } },
+      },
     });
     if (!payment) throw new Error("Payment Entry not found");
 
@@ -46,11 +55,21 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       throw new Error(`Payment Entry must be APPROVED before Final Save. Current status: ${payment.status}`);
     }
 
+    const fx = await resolveDocumentExchangeRate(tx, {
+      currency: payment.currency,
+      exchangeRate: Number(payment.exchangeRate || 0) || undefined,
+      postingDate: input.postingDate,
+    });
+    const baseAmount = toBaseAmount(amount, fx.currency, fx.baseCurrency, fx.exchangeRate);
+
     await tx.payment.update({
       where: { id: payment.id },
       data: {
         date: new Date(`${String(input.postingDate).slice(0, 10)}T00:00:00+10:00`),
         amount,
+        baseAmount,
+        currency: fx.currency,
+        exchangeRate: fx.exchangeRate,
         paymentMethod: input.paymentMethod,
         depositAccount: input.cashBankAccountId,
         referenceNumber: input.reference || null,
@@ -71,6 +90,102 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         })
       : null;
 
+    let postingLines: AtomicPostingLine[];
+
+    if (directAllocation && !directAllocation.alreadyAllocated) {
+      const cashAccount = input.cashBankAccountId;
+      const settlementAccount = input.lines.find(
+        (line) => String(line.accountId || "").toUpperCase() !== String(cashAccount || "").toUpperCase(),
+      )?.accountId;
+      if (!settlementAccount) throw new Error("Payment settlement account could not be resolved");
+
+      const partyRef = payment.customerId
+        ? (payment.customer?.code || payment.customerId)
+        : (payment.supplier?.code || payment.supplierId || "");
+      const projectRef = payment.project?.code || payment.projectId || input.projectId || "";
+      const transactionAudit = (side: "debit" | "credit", value: number, rate: number) => ({
+        transactionCurrency: fx.currency,
+        exchangeRate: rate,
+        transactionDebit: side === "debit" ? value : 0,
+        transactionCredit: side === "credit" ? value : 0,
+      });
+      const zeroFxAudit = {
+        transactionCurrency: fx.baseCurrency,
+        exchangeRate: 1,
+        transactionDebit: 0,
+        transactionCredit: 0,
+      };
+
+      if (payment.customerId) {
+        postingLines = [
+          {
+            accountId: cashAccount,
+            debit: directAllocation.settlementBaseAmount,
+            ...transactionAudit("debit", amount, directAllocation.settlementExchangeRate),
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Customer receipt",
+          },
+          {
+            accountId: settlementAccount,
+            credit: directAllocation.documentBaseAmount,
+            ...transactionAudit("credit", amount, directAllocation.documentExchangeRate),
+            customerId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Receivable",
+          },
+        ];
+      } else {
+        postingLines = [
+          {
+            accountId: settlementAccount,
+            debit: directAllocation.documentBaseAmount,
+            ...transactionAudit("debit", amount, directAllocation.documentExchangeRate),
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Settle Accounts Payable",
+          },
+          {
+            accountId: cashAccount,
+            credit: directAllocation.settlementBaseAmount,
+            ...transactionAudit("credit", amount, directAllocation.settlementExchangeRate),
+            supplierId: partyRef,
+            projectId: projectRef,
+            description: "Supplier payment",
+          },
+        ];
+      }
+
+      if (directAllocation.realizedGain > 0) {
+        postingLines.push({
+          accountId: input.exchangeGainAccountId || INITIAL_ACCOUNT_IDS.exchangeGain,
+          credit: directAllocation.realizedGain,
+          ...zeroFxAudit,
+          projectId: projectRef,
+          description: "Realized foreign exchange gain",
+        });
+      }
+      if (directAllocation.realizedLoss > 0) {
+        postingLines.push({
+          accountId: input.exchangeLossAccountId || INITIAL_ACCOUNT_IDS.exchangeLoss,
+          debit: directAllocation.realizedLoss,
+          ...zeroFxAudit,
+          projectId: projectRef,
+          description: "Realized foreign exchange loss",
+        });
+      }
+    } else {
+      postingLines = input.lines.map((line) => ({
+        ...line,
+        debit: toBaseAmount(Number(line.debit || 0), fx.currency, fx.baseCurrency, fx.exchangeRate),
+        credit: toBaseAmount(Number(line.credit || 0), fx.currency, fx.baseCurrency, fx.exchangeRate),
+        transactionCurrency: fx.currency,
+        exchangeRate: fx.exchangeRate,
+        transactionDebit: Number(line.debit || 0),
+        transactionCredit: Number(line.credit || 0),
+      }));
+    }
+
     const journal = await postJournal({
       postingDate: input.postingDate,
       documentType: input.documentType,
@@ -78,9 +193,12 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       documentNumber: input.documentNumber,
       reference: input.reference || input.documentNumber,
       projectId: input.projectId,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
       createdBy: input.createdBy || "payment-final-save",
       approvedBy: input.approvedBy || "Finance Controller",
-      lines: input.lines,
+      lines: postingLines,
     });
 
     if (directAllocation && !directAllocation.alreadyAllocated) {
@@ -113,6 +231,11 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       billOutstanding: input.againstBillId
         ? directAllocation?.documentOutstanding
         : undefined,
+      currency: fx.currency,
+      baseCurrency: fx.baseCurrency,
+      exchangeRate: fx.exchangeRate,
+      baseAmount,
+      realizedFx: directAllocation?.realizedFx || 0,
     };
   });
 }
