@@ -17,6 +17,7 @@ import {
   ReconciliationStatus,
 } from "@prisma/client";
 import { buildCashFlowStatement } from "../lib/accounting/cash-flow";
+import { buildTrialBalance } from "../lib/accounting/trial-balance";
 import { buildFinancialReconciliationSnapshot } from "../lib/system/financial-reconciliation";
 
 async function main() {
@@ -457,6 +458,21 @@ async function main() {
       throw new Error(`Clean reconciliation fixture is not ready: ${clean.controls.exceptions.join("; ")}`);
     }
 
+    const trialBalance = await buildTrialBalance({
+      startDate: "2026-01-01",
+      asOf: "2026-01-31",
+    }, client);
+    if (
+      trialBalance.currency !== "PGK"
+      || !trialBalance.totals.balanced
+      || trialBalance.totals.difference !== 0
+      || trialBalance.totals.debit !== trialBalance.totals.credit
+    ) {
+      throw new Error(
+        `Trial-balance control failed: ${trialBalance.currency}/${trialBalance.totals.debit}/${trialBalance.totals.credit}/${trialBalance.totals.difference}`,
+      );
+    }
+
     const cashFlow = await buildCashFlowStatement({
       from: "2026-01-01",
       asOf: "2026-01-31",
@@ -522,6 +538,13 @@ async function main() {
         reconciliationDriftBefore: clean.banking.reconciliationDrift,
         reconciliationDriftAfterBackdatedEntry: drifted.banking.reconciliationDrift,
         backdatedEntryDetected: !drifted.controls.bankReconciliationsMatched,
+      },
+      trialBalance: {
+        currency: trialBalance.currency,
+        debit: trialBalance.totals.debit,
+        credit: trialBalance.totals.credit,
+        difference: trialBalance.totals.difference,
+        balanced: trialBalance.totals.balanced,
       },
       cashFlow: {
         currency: cashFlow.currency,
