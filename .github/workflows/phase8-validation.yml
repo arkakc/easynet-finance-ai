@@ -41,6 +41,12 @@ jobs:
       - name: Reporting hardening UAT
         run: npm run test:reporting-hardening
 
+      - name: Financial statements regression
+        run: npm run test:financial-statements
+
+      - name: Period-close regression
+        run: npm run test:period-close
+
       - name: Multi-currency regression
         run: npm run test:multi-currency
 
