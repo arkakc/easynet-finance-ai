@@ -37,7 +37,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
   const canApprove = header.status === "PENDING"
     && header.sourceDocType.startsWith("MANUAL_")
     && user.permissions.includes("post.approve")
-    && String(header.createdBy || "").toLowerCase() !== String(user.email || "").toLowerCase();
+    && (user.roles.includes("System Manager") || String(header.createdBy || "").toLowerCase() !== String(user.email || "").toLowerCase());
 
   const baseCurrency = String(header.baseCurrency || "PGK").toUpperCase();
   const sourceCurrency = String(header.currency || baseCurrency).toUpperCase();
