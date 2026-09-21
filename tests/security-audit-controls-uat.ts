@@ -133,8 +133,27 @@ async function main() {
       requestId: `phase9-request-2-${suffix}`,
       metadata: { sequence: 2 },
     }, client);
+    await appendAuditEvent({
+      action: "PHASE9_USER_DELETE_TEST",
+      entityType: "User",
+      entityId: lockedUser.id,
+      entityCode: lockedUser.email,
+      actorEmail: lockedUser.email,
+      userId: lockedUser.id,
+      description: "Sealed event must survive actor user deletion",
+      outcome: "INFO",
+      requestId: `phase9-request-user-delete-${suffix}`,
+    }, client);
 
+    const integrityBeforeUserDelete = await verifyAuditIntegrity(client);
+    if (!integrityBeforeUserDelete.valid) {
+      throw new Error("Audit integrity was invalid before user deletion test");
+    }
+    await client.user.delete({ where: { id: lockedUser.id } });
     const cleanIntegrity = await verifyAuditIntegrity(client);
+    if (!cleanIntegrity.valid) {
+      throw new Error("Audit seal changed when the linked actor user was deleted");
+    }
     if (!cleanIntegrity.valid || cleanIntegrity.sealedEntries < 2 || !cleanIntegrity.headHash) {
       throw new Error("Fresh sealed audit chain did not verify");
     }
@@ -217,6 +236,7 @@ async function main() {
       auditIntegrity: {
         cleanValid: cleanIntegrity.valid,
         sealedEntries: cleanIntegrity.sealedEntries,
+        survivesActorUserDeletion: cleanIntegrity.valid && integrityBeforeUserDelete.valid,
         tamperDetected: !tamperedIntegrity.valid,
         brokenAtId: tamperedIntegrity.brokenAtId,
       },
