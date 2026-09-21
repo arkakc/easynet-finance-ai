@@ -7,7 +7,15 @@ async function main() {
   const [{ createSessionToken, sessionCookie, ROLE_PERMISSIONS }, { calculateFortnightlySWT, calculateSuperannuation }, { prisma }] = await Promise.all([
     import("../lib/auth"), import("../src/lib/services/payroll.service"), import("../src/lib/prisma"),
   ]);
-  const user = (role: Role): SessionUser => ({ email: `${role.toLowerCase().replace(/\s+/g, ".")}@uat.local`, name: "UAT", roles: [role], permissions: ROLE_PERMISSIONS[role] });
+  const roleUsers: Partial<Record<Role, { email: string; name: string }>> = {
+    "System Manager": { email: "admin@easynet.local", name: "UAT Administrator" },
+    "Sales User": { email: "sales@easynet.local", name: "UAT Sales User" },
+  };
+  const user = (role: Role): SessionUser => {
+    const identity = roleUsers[role];
+    if (!identity) throw new Error(`No seeded UAT identity for ${role}`);
+    return { ...identity, roles: [role], permissions: ROLE_PERMISSIONS[role], sessionVersion: 1 };
+  };
   const headers = (role: Role) => ({ Cookie: `${sessionCookie.name}=${createSessionToken(user(role))}` });
   const lowTax = calculateFortnightlySWT(500);
   if (lowTax !== 0) throw new Error(`PNG SWT low band expected 0, got ${lowTax}`);
