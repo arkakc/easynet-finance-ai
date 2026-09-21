@@ -329,7 +329,7 @@ export async function reversePostedJournal(
     await synchronizeSourceAfterReversal(tx, original, input.createdBy || "journal-reversal-ui", postingDate);
 
     const reversalJournalCode = documentSeriesId("Journal");
-    const reversalDocumentNo = documentSeriesId("Journal Reversal");
+    const reversalDocumentNo = `JR-${documentSeriesId("Journal Reversal").split("-")[1]}-${normalizedDate.slice(0, 4)}`;
 
     const reversal = await tx.journalHeader.create({
       data: {
