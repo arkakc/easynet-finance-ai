@@ -23,12 +23,13 @@ type JournalLine = {
 
 type Props = {
   accounts: ManualJournalAccount[];
+  baseCurrency: string;
   defaultPostingDate: string;
 };
 
 const blankLine = (description = ""): JournalLine => ({ accountId: "", debit: "", credit: "", description });
 const numberValue = (value: string) => Number(value || 0);
-const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK", minimumFractionDigits: 2 }).format(value);
+const money = (value: number, currency: string) => new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(value);
 
 const entryTypes = [
   ["JOURNAL_ENTRY", "Journal Entry"],
@@ -61,7 +62,7 @@ function optionLabel(options: readonly (readonly [string, string])[], value: str
   return options.find(([optionValue]) => optionValue === value)?.[1] || value;
 }
 
-export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props) {
+export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostingDate }: Props) {
   const router = useRouter();
   const [entryType, setEntryType] = useState("JOURNAL_ENTRY");
   const [journalType, setJournalType] = useState("GENERAL_JOURNAL");
@@ -181,7 +182,7 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
       <div className="form-title-row">
         <div>
           <h3 className="form-title">Manual Journal Entry</h3>
-          <p className="small">Maker step: prepare a balanced manual journal and submit it for checker approval. PENDING journals do not affect the GL or financial reports.</p>
+          <p className="small">Maker step: prepare a balanced manual journal in company base currency {baseCurrency} and submit it for checker approval. PENDING journals do not affect the GL or financial reports.</p>
         </div>
         <div className="button-row">
           <button type="button" className="secondary" disabled={busy} onClick={() => { setMessage("Refreshing ledger accounts without clearing your draft…"); router.refresh(); }}>
@@ -222,8 +223,8 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
                 <th>#</th>
                 <th>Account</th>
                 <th>Description</th>
-                <th>Debit (PGK)</th>
-                <th>Credit (PGK)</th>
+                <th>Debit ({baseCurrency})</th>
+                <th>Credit ({baseCurrency})</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -251,9 +252,9 @@ export function ManualJournalEntryClient({ accounts, defaultPostingDate }: Props
             <tfoot>
               <tr>
                 <th colSpan={3}>Total</th>
-                <th>{money(totals.debit)}</th>
-                <th>{money(totals.credit)}</th>
-                <th>{Math.abs(totals.difference) < 0.01 ? "Balanced" : `Diff ${money(Math.abs(totals.difference))}`}</th>
+                <th>{money(totals.debit, baseCurrency)}</th>
+                <th>{money(totals.credit, baseCurrency)}</th>
+                <th>{Math.abs(totals.difference) < 0.01 ? "Balanced" : `Diff ${money(Math.abs(totals.difference), baseCurrency)}`}</th>
               </tr>
             </tfoot>
           </table>
