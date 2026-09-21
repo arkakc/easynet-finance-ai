@@ -430,6 +430,10 @@ model Quote {
   status               QuoteStatus @default(DRAFT)
   currency             String      @default("PGK")
   exchangeRate         Decimal?
+  baseSubtotal         Decimal     @default(0)
+  baseTaxTotal         Decimal     @default(0)
+  baseDiscountTotal    Decimal     @default(0)
+  baseTotal            Decimal     @default(0)
   subtotal             Decimal     @default(0)
   taxTotal             Decimal     @default(0)
   discountTotal        Decimal     @default(0)
@@ -505,6 +509,12 @@ model Invoice {
   status              InvoiceStatus @default(DRAFT)
   currency            String        @default("PGK")
   exchangeRate        Decimal?
+  baseSubtotal        Decimal       @default(0)
+  baseTaxTotal        Decimal       @default(0)
+  baseDiscountTotal   Decimal       @default(0)
+  baseTotal           Decimal       @default(0)
+  baseAmountPaid      Decimal       @default(0)
+  baseOutstanding     Decimal       @default(0)
   subtotal            Decimal       @default(0)
   taxTotal            Decimal       @default(0)
   discountTotal       Decimal       @default(0)
@@ -595,6 +605,11 @@ model PurchaseOrder {
   status          POStatus      @default(DRAFT)
   currency        String        @default("PGK")
   exchangeRate    Decimal?
+  baseSubtotal    Decimal       @default(0)
+  baseTaxTotal    Decimal       @default(0)
+  baseFreight     Decimal       @default(0)
+  baseDiscountTotal Decimal     @default(0)
+  baseTotal       Decimal       @default(0)
   subtotal        Decimal       @default(0)
   taxTotal        Decimal       @default(0)
   freight         Decimal       @default(0)
@@ -693,6 +708,13 @@ model SupplierBill {
   status             BillStatus          @default(DRAFT)
   currency           String              @default("PGK")
   exchangeRate       Decimal?
+  baseSubtotal       Decimal             @default(0)
+  baseTaxTotal       Decimal             @default(0)
+  baseDiscountTotal  Decimal             @default(0)
+  baseFreight        Decimal             @default(0)
+  baseTotal          Decimal             @default(0)
+  baseAmountPaid     Decimal             @default(0)
+  baseOutstanding    Decimal             @default(0)
   subtotal           Decimal             @default(0)
   taxTotal           Decimal             @default(0)
   discountTotal      Decimal             @default(0)
@@ -774,6 +796,7 @@ model Payment {
   type             PaymentType
   date             DateTime      @default(now())
   amount           Decimal
+  baseAmount       Decimal       @default(0)
   currency         String        @default("PGK")
   exchangeRate     Decimal?
   paymentMethod    String // CASH, BANK, CHECK, TRANSFER, CARD, etc.
@@ -859,6 +882,10 @@ model PaymentAllocation {
   billId            String?
   allocationDate    DateTime
   amount            Decimal
+  baseAmount        Decimal                 @default(0)
+  currency          String                  @default("PGK")
+  exchangeRate      Decimal?
+  realizedFx        Decimal                 @default(0)
   allocationType    PaymentAllocationType
   status            PaymentAllocationStatus @default(POSTED)
   journalId         String?
@@ -1196,10 +1223,13 @@ model JournalHeader {
   sourceDocId         String?          @unique // Original document ID
   reversalOfJournalId String?
   status              JournalStatus    @default(PENDING)
-  currency            String           @default("PGK")
-  exchangeRate        Decimal?
-  totalDebit          Decimal          @default(0)
-  totalCredit         Decimal          @default(0)
+  currency            String           @default("PGK") // source transaction currency
+  baseCurrency        String           @default("PGK")
+  exchangeRate        Decimal? // base currency units per 1 source-currency unit
+  totalDebit          Decimal          @default(0) // base currency
+  totalCredit         Decimal          @default(0) // base currency
+  transactionTotalDebit Decimal        @default(0)
+  transactionTotalCredit Decimal       @default(0)
   isBalanced          Boolean          @default(false)
   createdBy           String
   approvedBy          String?
@@ -1231,10 +1261,15 @@ model JournalLine {
   lineNo      Int
   accountId   String
   description String
-  debit       Decimal         @default(0)
-  credit      Decimal         @default(0)
-  amount      Decimal         @default(0) // abs value
-  currency    String          @default("PGK")
+  debit       Decimal         @default(0) // base currency
+  credit      Decimal         @default(0) // base currency
+  amount      Decimal         @default(0) // base abs value
+  currency    String          @default("PGK") // base currency
+  transactionCurrency String  @default("PGK")
+  exchangeRate Decimal?
+  transactionDebit Decimal    @default(0)
+  transactionCredit Decimal   @default(0)
+  transactionAmount Decimal   @default(0)
   projectId   String?
   customerId  String?
   supplierId  String?
@@ -1455,6 +1490,23 @@ model GlobalSettings {
   updatedAt    DateTime @default(now())
 
   @@index([key])
+}
+
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  rateDate     DateTime
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal
+  source       String   @default("MANUAL")
+  isManual     Boolean  @default(true)
+  notes        String?
+  createdBy    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([rateDate, fromCurrency, toCurrency])
+  @@index([fromCurrency, toCurrency, rateDate])
 }
 
 model AccountingPeriod {
