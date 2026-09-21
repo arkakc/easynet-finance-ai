@@ -222,7 +222,6 @@ export default function DashboardClient() {
           <p className="small">Financial overview and real-time controls for Papua New Guinea SME operations.</p>
         </div>
         <div className="page-head-actions">
-          <div className="badge">GST: {gstStatus}</div>
           {systemMessages.length > 0 && (
             <details className="system-notice-tab">
               <summary>
