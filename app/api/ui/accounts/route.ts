@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requirePermission } from "@/lib/auth";
+import { requireConfigurationPermission, requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { AccountTypeGL, NormalBalance } from "@prisma/client";
@@ -117,7 +117,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    await requirePermission("accounts.write");
+    await requireConfigurationPermission("accounts.write");
     const body = await req.json();
     const { code, name, type, parentId, normalBalance, currency, description, taxCode, isActive } = body;
 
@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await requirePermission("accounts.write");
+    await requireConfigurationPermission("accounts.write");
     const body = await req.json();
     const { accountId, code, name, type, parentId, normalBalance, currency, description, taxCode, isActive } = body;
 
@@ -327,7 +327,7 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    await requirePermission("accounts.write");
+    await requireConfigurationPermission("accounts.write");
     const { searchParams } = new URL(req.url);
     const accountId = searchParams.get("accountId");
 

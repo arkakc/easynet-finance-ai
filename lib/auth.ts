@@ -389,6 +389,19 @@ export async function requirePermission(permission: Permission) {
   return user;
 }
 
+/**
+ * Configuration/master-data writes sometimes need to repair the very bank
+ * setup that the operational gate validates. Use this only for non-transactional
+ * maintenance routes; transaction-entry routes must keep requirePermission or
+ * requireValidatedRequestPermission.
+ */
+export async function requireConfigurationPermission(permission: Permission) {
+  const user = await getCurrentUser();
+  if (!user) throw new Error("Unauthorized");
+  if (!hasPermission(user, permission)) throw new Error("Forbidden");
+  return user;
+}
+
 export async function listConfiguredUsers(client: AuthClient = prisma) {
   const users = await client.user.findMany({
     orderBy: { email: "asc" },
