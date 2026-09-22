@@ -58,6 +58,7 @@ function validateBalanced(lines: ManualJournalLineInput[]) {
 
   let debit = 0;
   let credit = 0;
+  const accountSides = new Map<string, { debit: boolean; credit: boolean }>();
   for (const [index, line] of lines.entries()) {
     const d = Number(line.debit || 0);
     const c = Number(line.credit || 0);
@@ -70,8 +71,22 @@ function validateBalanced(lines: ManualJournalLineInput[]) {
     if (d === 0 && c === 0) {
       throw new Error(`Journal line ${index + 1} requires a debit or credit`);
     }
+    const accountRef = String(line.accountId || "").trim();
+    if (accountRef) {
+      const sides = accountSides.get(accountRef) || { debit: false, credit: false };
+      if (d > 0) sides.debit = true;
+      if (c > 0) sides.credit = true;
+      accountSides.set(accountRef, sides);
+    }
     debit += d;
     credit += c;
+  }
+
+  const selfCancellingAccounts = [...accountSides.entries()]
+    .filter(([, sides]) => sides.debit && sides.credit)
+    .map(([accountRef]) => accountRef);
+  if (selfCancellingAccounts.length) {
+    throw new Error(`The same account cannot be used on both debit and credit sides of a manual journal: ${selfCancellingAccounts.join(", ")}`);
   }
 
   const totalDebit = round2(debit);
