@@ -98,6 +98,21 @@ export async function postJournalInTransaction(
   const { normalized: postingDate, date } = accountingDate(request.postingDate);
   const { totalDebit, totalCredit } = assertBalanced(request.lines);
 
+  const accountSides = new Map<string, { debit: boolean; credit: boolean }>();
+  for (const line of request.lines) {
+    const code = accountCode(line.accountId);
+    const sides = accountSides.get(code) || { debit: false, credit: false };
+    if (Number(line.debit || 0) > 0) sides.debit = true;
+    if (Number(line.credit || 0) > 0) sides.credit = true;
+    accountSides.set(code, sides);
+  }
+  const selfCancellingAccounts = [...accountSides.entries()]
+    .filter(([, sides]) => sides.debit && sides.credit)
+    .map(([code]) => code);
+  if (selfCancellingAccounts.length) {
+    throw new Error(`The same account cannot be used on both debit and credit sides of a journal: ${selfCancellingAccounts.join(", ")}`);
+  }
+
   const lock = await tx.globalSettings.findUnique({ where: { key: "posting_lock_date" } });
   const lockDate = String(lock?.value || "").trim();
   if (lockDate && /^\d{4}-\d{2}-\d{2}$/.test(lockDate) && postingDate <= lockDate) {
