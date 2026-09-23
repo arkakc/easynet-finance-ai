@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { clearUnlinkedBankLedgerMarker, markUnlinkedBankLedgerDescription } from "@/lib/accounting/bank-ledger-status";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -177,6 +178,12 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
         `Bank GL account ${ledger.code} is already linked to active bank account ${duplicateActiveLink.code} — ${duplicateActiveLink.name}. Use a separate bank ledger for each physical bank account to preserve reconciliation integrity.`,
       );
     }
+    if (String(ledger.description || "").includes("[UNLINKED_BANK_LEDGER]")) {
+      await client.chartOfAccounts.update({
+        where: { id: ledger.id },
+        data: { description: clearUnlinkedBankLedgerMarker(ledger.description) || null },
+      });
+    }
     const name = input.displayName || `${input.bankName} ${maskedAccountNo(input.accountNumber)}`.trim();
     const data = {
       name,
@@ -198,6 +205,12 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
   const savedIds = new Set(saved.map((row) => row.id));
   for (const row of banksRequestedForRemoval) {
     if (savedIds.has(row.id)) continue;
+    if (row.chartOfAccounts?.id) {
+      await client.chartOfAccounts.update({
+        where: { id: row.chartOfAccounts.id },
+        data: { description: markUnlinkedBankLedgerDescription(row.chartOfAccounts.description) },
+      });
+    }
     await client.bankAccount.update({
       where: { id: row.id },
       data: {
