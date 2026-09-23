@@ -121,6 +121,34 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
   const activeInputs = inputs.filter((input) => input.isActive !== false);
   if (!activeInputs.length) throw new Error("At least one company bank account is mandatory after setup activation.");
 
+  const existingActiveBanks = await client.bankAccount.findMany({
+    where: { isActive: true },
+    include: {
+      chartOfAccounts: {
+        include: {
+          journalLines: {
+            where: { journal: { status: "POSTED" } },
+            select: { id: true },
+          },
+        },
+      },
+      _count: { select: { transactions: true, reconciliations: true } },
+    },
+  });
+  const retainedExistingIds = new Set(activeInputs.map((input) => input.id).filter((id): id is string => Boolean(id)));
+  const banksRequestedForRemoval = existingActiveBanks.filter((row) => !retainedExistingIds.has(row.id));
+
+  for (const row of banksRequestedForRemoval) {
+    const postedJournalCount = row.chartOfAccounts?.journalLines.length || 0;
+    const transactionCount = row._count.transactions;
+    const reconciliationCount = row._count.reconciliations;
+    if (postedJournalCount > 0 || transactionCount > 0 || reconciliationCount > 0) {
+      throw new Error(
+        `Cannot remove bank account ${row.code} — ${row.name}: historical activity exists (${postedJournalCount} posted GL line(s), ${transactionCount} bank transaction(s), ${reconciliationCount} reconciliation(s)). Keep this bank master for audit history and add a new bank account instead.`,
+      );
+    }
+  }
+
   const cleanInputs = activeInputs.map((input, index) => ({
     ...input,
     bankName: input.bankName.trim(),
@@ -136,6 +164,19 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
   const saved = [];
   for (const input of cleanInputs) {
     const ledger = await resolveBankLedger(client, input);
+    const duplicateActiveLink = await client.bankAccount.findFirst({
+      where: {
+        chartOfAccountsId: ledger.id,
+        isActive: true,
+        ...(input.id ? { NOT: { id: input.id } } : {}),
+      },
+      select: { code: true, name: true },
+    });
+    if (duplicateActiveLink) {
+      throw new Error(
+        `Bank GL account ${ledger.code} is already linked to active bank account ${duplicateActiveLink.code} — ${duplicateActiveLink.name}. Use a separate bank ledger for each physical bank account to preserve reconciliation integrity.`,
+      );
+    }
     const name = input.displayName || `${input.bankName} ${maskedAccountNo(input.accountNumber)}`.trim();
     const data = {
       name,
@@ -154,11 +195,18 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
     saved.push(row);
   }
 
-  const savedIds = saved.map((row) => row.id);
-  await client.bankAccount.updateMany({
-    where: { id: { notIn: savedIds } },
-    data: { isActive: false },
-  });
+  const savedIds = new Set(saved.map((row) => row.id));
+  for (const row of banksRequestedForRemoval) {
+    if (savedIds.has(row.id)) continue;
+    await client.bankAccount.update({
+      where: { id: row.id },
+      data: {
+        isActive: false,
+        chartOfAccountsId: null,
+        notes: `${row.notes || ""}${row.notes ? " | " : ""}Removed from active company banking settings by ${actorEmail}; no historical activity existed at removal.`,
+      },
+    });
+  }
 
   const first = saved[0];
   if (first) {
@@ -204,5 +252,13 @@ export function toPublicBankAccount(row: any) {
     linkedAccountName: row.chartOfAccounts?.name || "",
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    transactionCount: Number(row._count?.transactions || 0),
+    reconciliationCount: Number(row._count?.reconciliations || 0),
+    postedJournalCount: Number(row.chartOfAccounts?.journalLines?.length || 0),
+    hasHistory: Boolean(
+      Number(row._count?.transactions || 0)
+      || Number(row._count?.reconciliations || 0)
+      || Number(row.chartOfAccounts?.journalLines?.length || 0)
+    ),
   };
 }
