@@ -3,6 +3,7 @@ import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { appendAuditEvent } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
+import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
 
 export type ManualJournalLineInput = {
   accountId: string;
@@ -148,7 +149,10 @@ async function normalizeLines(
 
   const accounts = await tx.chartOfAccounts.findMany({
     where: { code: { in: requestedCodes } },
-    include: { children: { select: { id: true } } },
+    include: {
+      children: { select: { id: true } },
+      bankAccounts: { where: { isActive: true }, select: { id: true } },
+    },
   });
   const byCode = new Map(accounts.map((account) => [account.code, account]));
 
@@ -169,6 +173,13 @@ async function normalizeLines(
     throw new Error(
       `Cannot submit manual journal directly to group/control accounts: ${groups.join(", ")}`,
     );
+  }
+
+  const unlinkedBankLedgers = accounts
+    .filter((account) => isUnlinkedBankLedger(account.description, account.bankAccounts.length))
+    .map((account) => account.code);
+  if (unlinkedBankLedgers.length) {
+    throw new Error(`Cannot submit manual journal to unlinked bank ledger(s): ${unlinkedBankLedgers.join(", ")}. Re-link the ledger to an active company bank account or deactivate/delete the unused ledger.`);
   }
 
   const settings = await tx.globalSettings.findMany({
@@ -256,7 +267,10 @@ async function validatePersistedPendingJournal(
   const accountIds = [...new Set(journal.lines.map((line) => line.accountId))];
   const accounts = await tx.chartOfAccounts.findMany({
     where: { id: { in: accountIds } },
-    include: { children: { select: { id: true } } },
+    include: {
+      children: { select: { id: true } },
+      bankAccounts: { where: { isActive: true }, select: { id: true } },
+    },
   });
   if (accounts.length !== accountIds.length) {
     throw new Error("Pending manual journal contains a missing account");
@@ -270,6 +284,12 @@ async function validatePersistedPendingJournal(
     throw new Error(
       `Cannot approve manual journal posted to group/control accounts: ${groups.join(", ")}`,
     );
+  }
+  const unlinkedBankLedgers = accounts
+    .filter((account) => isUnlinkedBankLedger(account.description, account.bankAccounts.length))
+    .map((account) => account.code);
+  if (unlinkedBankLedgers.length) {
+    throw new Error(`Cannot approve manual journal: unlinked bank ledger(s) ${unlinkedBankLedgers.join(", ")}. Re-link the ledger to an active company bank account first.`);
   }
 
   return totals;
