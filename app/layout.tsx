@@ -4,6 +4,7 @@ import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
 import FlowReturnBridge from "@/app/components/flow-return-bridge";
 import SetupAccessGuard from "@/app/components/setup-access-guard";
 import SidebarShell from "@/app/components/sidebar-shell";
+import ProfileMenu from "@/app/components/profile-menu";
 import { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
 import GlobalDataTableEnhancer from "@/app/components/global-data-table-enhancer";
 import GlobalFormDraftCache from "@/app/components/global-form-draft-cache";
@@ -144,9 +145,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <SidebarShell
               groups={navGroups}
               homeHref={setupActive ? "/dashboard" : "/setup/finance"}
-              userName={user.name}
-              userRoles={user.roles}
             />
+            <ProfileMenu userName={user.name} userRoles={user.roles} />
             <main className="main">
               <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
