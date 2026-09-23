@@ -2,6 +2,7 @@ import { requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { ManualJournalEntryClient, type ManualJournalAccount } from "@/app/components/manual-journal-entry-client";
+import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +41,18 @@ export default async function ManualJournalEntryPage({ searchParams }: { searchP
     if (!backendConfigured) {
       const chartOfAccounts = await prisma.chartOfAccounts.findMany({
         orderBy: { code: "asc" },
-        include: { children: { select: { id: true } }, parent: { select: { code: true } }, journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } } },
+        include: {
+          children: { select: { id: true } },
+          parent: { select: { code: true } },
+          bankAccounts: { where: { isActive: true }, select: { id: true } },
+          journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
+        },
       });
       const currencySetting = await prisma.globalSettings.findFirst({ where: { key: { in: ["currency", "base_currency"] } }, orderBy: { updatedAt: "desc" } });
       baseCurrency = String(currencySetting?.value || "PGK").trim().toUpperCase();
-      accounts = chartOfAccounts.map((row) => ({
+      accounts = chartOfAccounts
+        .filter((row) => !isUnlinkedBankLedger(row.description, row.bankAccounts.length))
+        .map((row) => ({
         accountId: row.id,
         postingAccountId: `ACC-${row.code}`,
         accountCode: row.code,
