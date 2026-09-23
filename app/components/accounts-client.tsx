@@ -20,6 +20,8 @@ export type Account = {
   childCount?: number;
   journalLineCount?: number;
   bankLinkCount?: number;
+  bankActiveLinkCount?: number;
+  isUnlinkedBankLedger?: boolean;
   isGroup?: boolean;
   directDebit?: number;
   directCredit?: number;
@@ -1099,6 +1101,12 @@ export default function AccountsClient() {
 
             <span className="coa-badge-tag">{node.normalBalance === "CREDIT" ? "CR" : "DR"}</span>
 
+            {node.isUnlinkedBankLedger && (
+              <span className="badge" style={{ background: "#fff7ed", color: "#c2410c", border: "1px solid #fdba74" }} title="This bank ledger is not linked to an active physical company bank account and is blocked from transaction posting.">
+                Unlinked Bank Ledger
+              </span>
+            )}
+
             {String(node.active).toLowerCase() === "false" && (
               <span className="badge" style={{ background: "#fee2e2", color: "#b91c1c", border: "1px solid #fca5a5" }}>
                 Inactive
@@ -1551,6 +1559,10 @@ export default function AccountsClient() {
                   {targetAccount?.bankLinkCount ? (
                     <small style={{ color: "#b45309", marginLeft: "6px" }}>
                       Linked bank GL — re-link the company bank account before deactivation.
+                    </small>
+                  ) : targetAccount?.isUnlinkedBankLedger ? (
+                    <small style={{ color: "#c2410c", marginLeft: "6px" }}>
+                      Unlinked Bank Ledger — transaction posting is blocked until this ledger is re-linked. With no journal history or other dependency, you may deactivate or delete it.
                     </small>
                   ) : null}
                 </label>
