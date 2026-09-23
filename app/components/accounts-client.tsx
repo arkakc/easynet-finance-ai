@@ -19,6 +19,7 @@ export type Account = {
   isSystem?: boolean;
   childCount?: number;
   journalLineCount?: number;
+  bankLinkCount?: number;
   isGroup?: boolean;
   directDebit?: number;
   directCredit?: number;
@@ -1543,9 +1544,15 @@ export default function AccountsClient() {
                   <input
                     type="checkbox"
                     checked={formActive}
+                    disabled={Boolean(targetAccount?.bankLinkCount)}
                     onChange={(e) => setFormActive(e.target.checked)}
                   />
                   <span>Active Account (available for transaction posting)</span>
+                  {targetAccount?.bankLinkCount ? (
+                    <small style={{ color: "#b45309", marginLeft: "6px" }}>
+                      Linked bank GL — re-link the company bank account before deactivation.
+                    </small>
+                  ) : null}
                 </label>
               </div>
 
@@ -1581,9 +1588,11 @@ export default function AccountsClient() {
                           type="button"
                           className="coa-btn coa-btn-danger"
                           onClick={handleDelete}
-                          disabled={saving || (targetAccount.childCount ?? 0) > 0 || (targetAccount.journalLineCount ?? 0) > 0}
+                          disabled={saving || (targetAccount.bankLinkCount ?? 0) > 0 || (targetAccount.childCount ?? 0) > 0 || (targetAccount.journalLineCount ?? 0) > 0}
                           title={
-                            (targetAccount.childCount ?? 0) > 0
+                            (targetAccount.bankLinkCount ?? 0) > 0
+                              ? "Cannot delete: Account is linked to a company bank account"
+                              : (targetAccount.childCount ?? 0) > 0
                               ? "Cannot delete: Account has sub-accounts"
                               : (targetAccount.journalLineCount ?? 0) > 0
                               ? "Cannot delete: Account has posted transactions"
