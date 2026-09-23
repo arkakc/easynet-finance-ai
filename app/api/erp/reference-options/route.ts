@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
+import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
 
 const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
 
@@ -14,6 +15,7 @@ export async function GET() {
           parent: { select: { code: true } },
           children: { select: { id: true } },
           journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
+          bankAccounts: { where: { isActive: true }, select: { id: true } },
         },
         orderBy: { code: "asc" },
       }),
@@ -41,7 +43,7 @@ export async function GET() {
     ).trim().toUpperCase();
 
     const allAccounts = accounts
-      .filter((row) => row.children.length === 0)
+      .filter((row) => row.children.length === 0 && !isUnlinkedBankLedger(row.description, row.bankAccounts.length))
       .map((row) => {
         const postingId = `ACC-${row.code}`;
         const rawBalance = row.journalLines.reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0);
