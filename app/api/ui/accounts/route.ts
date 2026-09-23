@@ -3,6 +3,7 @@ import { requireConfigurationPermission, requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { AccountTypeGL, NormalBalance } from "@prisma/client";
+import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
 
 export async function GET() {
   try {
@@ -16,6 +17,7 @@ export async function GET() {
           parent: { select: { id: true, code: true, name: true } },
           children: { select: { id: true } },
           journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
+          bankAccounts: { where: { isActive: true }, select: { id: true } },
           _count: { select: { children: true, journalLines: true, bankAccounts: true } },
         },
         orderBy: { code: "asc" },
@@ -93,6 +95,8 @@ export async function GET() {
             childCount: account._count.children,
             journalLineCount: account._count.journalLines,
             bankLinkCount: account._count.bankAccounts,
+            bankActiveLinkCount: account.bankAccounts.length,
+            isUnlinkedBankLedger: isUnlinkedBankLedger(account.description, account.bankAccounts.length),
             isGroup: account._count.children > 0,
             directDebit: direct.directDebit,
             directCredit: direct.directCredit,
@@ -184,6 +188,9 @@ export async function POST(req: NextRequest) {
         isSystem: newAccount.isSystem,
         childCount: newAccount._count.children,
         journalLineCount: newAccount._count.journalLines,
+        bankLinkCount: newAccount._count.bankAccounts,
+        bankActiveLinkCount: 0,
+        isUnlinkedBankLedger: false,
         isGroup: false,
       },
     });
@@ -305,7 +312,7 @@ export async function PATCH(req: NextRequest) {
       include: {
         parent: { select: { id: true, code: true, name: true } },
         _count: { select: { children: true, journalLines: true, bankAccounts: true } },
-        bankAccounts: { select: { id: true, code: true, name: true } },
+        bankAccounts: { select: { id: true, code: true, name: true, isActive: true } },
       },
     });
 
@@ -329,6 +336,8 @@ export async function PATCH(req: NextRequest) {
         childCount: updated._count.children,
         journalLineCount: updated._count.journalLines,
         bankLinkCount: updated._count.bankAccounts,
+        bankActiveLinkCount: updated.bankAccounts.filter((row) => row.isActive).length,
+        isUnlinkedBankLedger: isUnlinkedBankLedger(updated.description, updated.bankAccounts.filter((row) => row.isActive).length),
         isGroup: updated._count.children > 0,
       },
     });
@@ -354,6 +363,7 @@ export async function DELETE(req: NextRequest) {
     const account = await prisma.chartOfAccounts.findUnique({
       where: { id: accountId },
       include: {
+        bankAccounts: { select: { id: true, code: true, name: true, isActive: true } },
         _count: { select: { children: true, journalLines: true } },
       },
     });
