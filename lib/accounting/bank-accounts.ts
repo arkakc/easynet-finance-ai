@@ -178,12 +178,6 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
         `Bank GL account ${ledger.code} is already linked to active bank account ${duplicateActiveLink.code} — ${duplicateActiveLink.name}. Use a separate bank ledger for each physical bank account to preserve reconciliation integrity.`,
       );
     }
-    if (String(ledger.description || "").includes("[UNLINKED_BANK_LEDGER]")) {
-      await client.chartOfAccounts.update({
-        where: { id: ledger.id },
-        data: { description: clearUnlinkedBankLedgerMarker(ledger.description) || null },
-      });
-    }
     const name = input.displayName || `${input.bankName} ${maskedAccountNo(input.accountNumber)}`.trim();
     const data = {
       name,
@@ -199,6 +193,12 @@ export async function upsertCompanyBankAccounts(client: DbClient, inputs: BankAc
     const row = input.id
       ? await client.bankAccount.update({ where: { id: input.id }, data, include: { chartOfAccounts: true } })
       : await client.bankAccount.create({ data: { ...data, code: documentSeriesId("Bank Account") }, include: { chartOfAccounts: true } });
+    if (String(ledger.description || "").includes("[UNLINKED_BANK_LEDGER]")) {
+      await client.chartOfAccounts.update({
+        where: { id: ledger.id },
+        data: { description: clearUnlinkedBankLedgerMarker(ledger.description) || null },
+      });
+    }
     saved.push(row);
   }
 
