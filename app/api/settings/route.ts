@@ -74,9 +74,18 @@ export async function GET() {
           take: 10,
         }),
         prisma.bankAccount.findMany({
-          where: { isActive: true },
-          orderBy: [{ createdAt: "asc" }],
-          include: { chartOfAccounts: true },
+          orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
+          include: {
+            chartOfAccounts: {
+              include: {
+                journalLines: {
+                  where: { journal: { status: "POSTED" } },
+                  select: { id: true },
+                },
+              },
+            },
+            _count: { select: { transactions: true, reconciliations: true } },
+          },
         }),
         prisma.chartOfAccounts.findMany({
           where: { isActive: true, type: "ASSET", children: { none: {} } },
