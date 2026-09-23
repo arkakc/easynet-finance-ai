@@ -3566,7 +3566,7 @@ label:has(textarea[required])::after,
    TOP-RIGHT PROFILE MENU
 ========================================================= */
 .profile-menu-wrap {
-  position: fixed;
+  position: absolute;
   top: 18px;
   right: 24px;
   z-index: 80;
