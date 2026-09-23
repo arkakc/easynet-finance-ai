@@ -87,7 +87,6 @@ export default function CollapsibleSidebarNav({ groups, compact = false }: Props
             <span className="nav-section-icon">{group.icon}</span>
             <span className="nav-label-text">{group.label}</span>
           </span>
-          {!compact && <span className="nav-section-chevron" aria-hidden="true">⌄</span>}
         </button>
         <div className="nav-links" id={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`}>
           {group.links.map((link) => link.disabled ? (
