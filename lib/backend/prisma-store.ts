@@ -1951,8 +1951,13 @@ export async function prismaDeleteQuote(quoteId: string) {
     prisma.invoice.count({ where: { sourceDocId: existing.id } }),
   ]);
 
+  const quoteReasons: string[] = [];
+  if (String(existing.status).toUpperCase() !== "DRAFT") quoteReasons.push(`status is ${existing.status}`);
   if (convertedCount > 0 || sourceDocCount > 0 || String(existing.status).toUpperCase() === "CONVERTED") {
-    throw new Error("Cannot delete quotation: quotation has already been converted to a sales invoice or has linked transactions.");
+    quoteReasons.push("quotation has been converted or linked to a downstream sales document");
+  }
+  if (quoteReasons.length > 0) {
+    throw new Error(`Cannot delete quotation: ${quoteReasons.join("; ")}. Cancel/retain the document instead of deleting audit history.`);
   }
 
   await prisma.quoteLine.deleteMany({ where: { quoteId: existing.id } });
@@ -1966,19 +1971,22 @@ export async function prismaDeleteInvoice(invoiceId: string) {
   });
   if (!existing) throw new Error("Sales invoice not found");
 
-  const [paymentCount, creditNoteCount] = await Promise.all([
+  const [paymentCount, creditNoteCount, sourceQuoteCount] = await Promise.all([
     prisma.paymentAllocation.count({ where: { invoiceId: existing.id, status: "POSTED" } }),
     prisma.creditNote.count({ where: { originalInvoiceId: existing.id } }),
+    prisma.quote.count({ where: { convertedToInvoiceId: existing.id } }),
   ]);
 
   const reasons: string[] = [];
+  if (String(existing.status).toUpperCase() !== "DRAFT") reasons.push(`status is ${existing.status}`);
   if (existing.glPosted || existing.journalId) reasons.push(`General Ledger journal entry posted (${existing.journalId || "GL"})`);
-  if (paymentCount > 0) reasons.push(`${paymentCount} payment(s)`);
+  if (paymentCount > 0) reasons.push(`${paymentCount} payment allocation(s)`);
   if (creditNoteCount > 0) reasons.push(`${creditNoteCount} credit note(s)`);
+  if (sourceQuoteCount > 0 || existing.sourceDocId) reasons.push("linked source quotation / sales document exists");
   if (Number(existing.amountPaid || 0) > 0) reasons.push(`amount paid K${Number(existing.amountPaid).toFixed(2)}`);
 
   if (reasons.length > 0) {
-    throw new Error(`Cannot delete sales invoice: invoice already has accounts ledger entries or transactions (${reasons.join(", ")}).`);
+    throw new Error(`Cannot delete sales invoice: ${reasons.join(", ")}. Posted/linked documents must be corrected by credit note, reversal, void, or cancellation—not deletion.`);
   }
 
   await prisma.invoiceLine.deleteMany({ where: { invoiceId: existing.id } });
@@ -1998,12 +2006,14 @@ export async function prismaDeletePurchaseOrder(poId: string) {
   ]);
 
   const reasons: string[] = [];
+  if (String(existing.status).toUpperCase() !== "DRAFT") reasons.push(`status is ${existing.status}`);
   if (billCount > 0) reasons.push(`${billCount} supplier bill(s)`);
   if (receiptCount > 0) reasons.push(`${receiptCount} goods receipt(s)`);
   if (existing.billId) reasons.push(`converted bill reference (${existing.billId})`);
+  if (existing.sourceDocId) reasons.push("linked supplier quotation/source document exists");
 
   if (reasons.length > 0) {
-    throw new Error(`Cannot delete purchase order / quotation: document already has linked bills or goods receipts (${reasons.join(", ")}).`);
+    throw new Error(`Cannot delete purchase order / quotation: ${reasons.join(", ")}. Retain the document and use cancellation/closure for audit traceability.`);
   }
 
   await prisma.pOLine.deleteMany({ where: { orderId: existing.id } });
@@ -2023,13 +2033,15 @@ export async function prismaDeleteSupplierBill(billId: string) {
   ]);
 
   const reasons: string[] = [];
+  if (String(existing.status).toUpperCase() !== "DRAFT") reasons.push(`status is ${existing.status}`);
   if (existing.glPosted || existing.journalId) reasons.push(`General Ledger journal entry posted (${existing.journalId || "GL"})`);
-  if (paymentCount > 0) reasons.push(`${paymentCount} payment(s)`);
+  if (paymentCount > 0) reasons.push(`${paymentCount} payment allocation(s)`);
   if (landedCostCount > 0) reasons.push(`${landedCostCount} landed cost voucher(s)`);
+  if (existing.orderId || existing.sourceDocId) reasons.push("linked purchase order/source document exists");
   if (Number(existing.amountPaid || 0) > 0) reasons.push(`amount paid K${Number(existing.amountPaid).toFixed(2)}`);
 
   if (reasons.length > 0) {
-    throw new Error(`Cannot delete supplier invoice: bill already has accounts ledger entries or payments (${reasons.join(", ")}).`);
+    throw new Error(`Cannot delete supplier invoice: ${reasons.join(", ")}. Posted/linked bills must be corrected by reversal, supplier refund/credit, void, or cancellation—not deletion.`);
   }
 
   await prisma.billLine.deleteMany({ where: { billId: existing.id } });
@@ -2048,12 +2060,13 @@ export async function prismaDeletePayment(paymentId: string) {
   });
 
   const reasons: string[] = [];
-  if (existing.status === "CLEARED" || existing.status === "CAPTURED") reasons.push(`payment status is ${existing.status}`);
+  if (String(existing.status).toUpperCase() !== "PENDING") reasons.push(`payment status is ${existing.status}`);
+  if (existing.journalId) reasons.push(`General Ledger journal entry posted (${existing.journalId})`);
   if (existing.clearanceDate) reasons.push("bank clearance recorded");
   if (allocationCount > 0) reasons.push(`${allocationCount} allocation row(s)`);
 
   if (reasons.length > 0) {
-    throw new Error(`Cannot delete payment: payment has already been finalized or cleared (${reasons.join(", ")}).`);
+    throw new Error(`Cannot delete payment: ${reasons.join(", ")}. Finalized payments must be reversed/refunded rather than deleted.`);
   }
 
   await prisma.payment.delete({ where: { id: existing.id } });
@@ -2068,9 +2081,10 @@ export async function prismaDeleteExpense(expenseId: string) {
 
   const reasons: string[] = [];
   if (existing.glPosted || existing.journalId) reasons.push(`General Ledger journal entry posted (${existing.journalId || "GL"})`);
+  if (existing.approvedAt || existing.approvedBy) reasons.push("expense has already been approved");
 
   if (reasons.length > 0) {
-    throw new Error(`Cannot delete expense: expense already has accounts ledger entries (${reasons.join(", ")}).`);
+    throw new Error(`Cannot delete expense: ${reasons.join(", ")}. Approved/posted expenses must be reversed or cancelled, not deleted.`);
   }
 
   await prisma.expense.delete({ where: { id: existing.id } });
