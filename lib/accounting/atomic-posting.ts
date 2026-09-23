@@ -2,6 +2,7 @@ import { AccountTypeGL, Prisma, PrismaClient } from "@prisma/client";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { prisma } from "@/src/lib/prisma";
 import { companyBaseCurrency, normalizeCurrency, requireExchangeRate, roundCurrency, roundExchangeRate } from "@/lib/accounting/currency";
+import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
 
 export type AtomicPostingLine = {
   accountId: string;
@@ -137,7 +138,10 @@ export async function postJournalInTransaction(
 
   const accounts = await tx.chartOfAccounts.findMany({
     where: { code: { in: requestedCodes } },
-    include: { children: { select: { id: true } } },
+    include: {
+      children: { select: { id: true } },
+      bankAccounts: { where: { isActive: true }, select: { id: true } },
+    },
   });
   const byCode = new Map(accounts.map((account) => [account.code, account]));
   const missing = requestedCodes.filter((code) => !byCode.has(code));
@@ -148,6 +152,13 @@ export async function postJournalInTransaction(
 
   const groups = accounts.filter((account) => account.children.length > 0).map((account) => account.code);
   if (groups.length) throw new Error(`Cannot post journal directly to group/control accounts: ${groups.join(", ")}`);
+
+  const unlinkedBankLedgers = accounts
+    .filter((account) => isUnlinkedBankLedger(account.description, account.bankAccounts.length))
+    .map((account) => account.code);
+  if (unlinkedBankLedgers.length) {
+    throw new Error(`Cannot post journal to unlinked bank ledger(s): ${unlinkedBankLedgers.join(", ")}. Re-link the ledger to an active company bank account or deactivate/delete the unused ledger.`);
+  }
 
   const baseCurrency = normalizeCurrency(request.baseCurrency || await companyBaseCurrency(tx));
   const sourceCurrency = normalizeCurrency(request.currency || baseCurrency);
