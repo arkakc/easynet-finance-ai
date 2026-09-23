@@ -16,7 +16,7 @@ export async function GET() {
           parent: { select: { id: true, code: true, name: true } },
           children: { select: { id: true } },
           journalLines: { where: { journal: { status: "POSTED" } }, select: { debit: true, credit: true } },
-          _count: { select: { children: true, journalLines: true } },
+          _count: { select: { children: true, journalLines: true, bankAccounts: true } },
         },
         orderBy: { code: "asc" },
       });
@@ -92,6 +92,7 @@ export async function GET() {
             isSystem: account.isSystem,
             childCount: account._count.children,
             journalLineCount: account._count.journalLines,
+            bankLinkCount: account._count.bankAccounts,
             isGroup: account._count.children > 0,
             directDebit: direct.directDebit,
             directCredit: direct.directCredit,
@@ -160,7 +161,7 @@ export async function POST(req: NextRequest) {
       },
       include: {
         parent: { select: { id: true, code: true, name: true } },
-        _count: { select: { children: true, journalLines: true } },
+        _count: { select: { children: true, journalLines: true, bankAccounts: true } },
       },
     });
 
@@ -207,7 +208,10 @@ export async function PATCH(req: NextRequest) {
 
     const current = await prisma.chartOfAccounts.findUnique({
       where: { id: accountId },
-      include: { children: { select: { id: true } } },
+      include: {
+        children: { select: { id: true } },
+        bankAccounts: { select: { id: true, code: true, name: true, isActive: true } },
+      },
     });
 
     if (!current) {
@@ -260,6 +264,16 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (typeof isActive === "boolean") {
+      if (isActive === false && current.isActive && current.bankAccounts.length > 0) {
+        const linkedBank = current.bankAccounts[0];
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Cannot deactivate account ${current.code}: it is linked to company bank account ${linkedBank.code} — ${linkedBank.name}. Re-link the bank account to another valid active bank ledger first.`,
+          },
+          { status: 400 }
+        );
+      }
       updateData.isActive = isActive;
     }
 
@@ -290,7 +304,8 @@ export async function PATCH(req: NextRequest) {
       data: updateData,
       include: {
         parent: { select: { id: true, code: true, name: true } },
-        _count: { select: { children: true, journalLines: true } },
+        _count: { select: { children: true, journalLines: true, bankAccounts: true } },
+        bankAccounts: { select: { id: true, code: true, name: true } },
       },
     });
 
@@ -313,6 +328,7 @@ export async function PATCH(req: NextRequest) {
         isSystem: updated.isSystem,
         childCount: updated._count.children,
         journalLineCount: updated._count.journalLines,
+        bankLinkCount: updated._count.bankAccounts,
         isGroup: updated._count.children > 0,
       },
     });
@@ -344,6 +360,17 @@ export async function DELETE(req: NextRequest) {
 
     if (!account) {
       return NextResponse.json({ ok: false, error: "Account not found" }, { status: 404 });
+    }
+
+    if (account.bankAccounts.length > 0) {
+      const linkedBank = account.bankAccounts[0];
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Cannot delete account ${account.code}: it is linked to company bank account ${linkedBank.code} — ${linkedBank.name}. Re-link the bank account to another valid active bank ledger first.`,
+        },
+        { status: 400 }
+      );
     }
 
     if (account.isSystem) {
