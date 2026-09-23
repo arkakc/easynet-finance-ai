@@ -2398,12 +2398,21 @@ label:has(textarea[required])::after,
   color: #0f172a;
 }
 
+.coa-modal > form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
 .coa-modal-body {
   padding: 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  flex: 1;
 }
 
 .coa-form-row {
@@ -2476,6 +2485,7 @@ label:has(textarea[required])::after,
   padding: 14px 20px;
   border-top: 1px solid #f1f5f9;
   background: #f8fafc;
+  flex-shrink: 0;
 }
 
 .coa-footer-left {
