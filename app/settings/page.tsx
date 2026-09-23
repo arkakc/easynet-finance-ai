@@ -40,6 +40,10 @@ type BankAccountDraft = {
   linkedAccountCode: string;
   linkedAccountName?: string;
   isActive: boolean;
+  transactionCount?: number;
+  reconciliationCount?: number;
+  postedJournalCount?: number;
+  hasHistory?: boolean;
 };
 
 type RetainedDocument = {
@@ -380,6 +384,10 @@ export default function SettingsPage() {
           linkedAccountCode: String(row.linkedAccountCode || ""),
           linkedAccountName: String(row.linkedAccountName || ""),
           isActive: row.isActive !== false,
+          transactionCount: Number(row.transactionCount || 0),
+          reconciliationCount: Number(row.reconciliationCount || 0),
+          postedJournalCount: Number(row.postedJournalCount || 0),
+          hasHistory: Boolean(row.hasHistory),
         }))
         : bName || bAcc || bBsb
           ? [{ ...newBankDraft(), displayName: bName, bankName: bName, accountNumber: bAcc, bsb: bBsb, currency: bCurr || "PGK" }]
@@ -451,6 +459,7 @@ export default function SettingsPage() {
   // Strict VERIFIED check: blocked if missing either GST number or retained source evidence document
   const isVerifiedBlocked = isGstVerified && (!hasGstNumber || !hasGstEvidence);
   const activeBankAccounts = bankAccounts.filter((row) => row.isActive !== false);
+  const historicalBankAccounts = bankAccounts.filter((row) => row.isActive === false);
   const hasMandatoryBankAccount = activeBankAccounts.some((row) => row.bankName.trim() && row.accountNumber.trim());
   const hasIncompleteBankAccount = activeBankAccounts.some((row) => !row.bankName.trim() || !row.accountNumber.trim());
 
@@ -486,8 +495,18 @@ export default function SettingsPage() {
 
   const removeBankAccount = (localId: string) => {
     setBankAccounts((rows) => {
+      const target = rows.find((row) => row.localId === localId);
+      if (!target) return rows;
+      if (target.hasHistory) {
+        setErrorMessage("This bank account has historical GL/bank/reconciliation activity and must be retained for audit history. Add a new bank account instead.");
+        return rows;
+      }
       const activeRows = rows.filter((row) => row.isActive !== false);
-      if (activeRows.length <= 1) return rows.map((row) => (row.localId === localId ? { ...row, bankName: "", accountNumber: "", bsb: "", displayName: "", linkedAccountCode: "" } : row));
+      if (activeRows.length <= 1) {
+        setErrorMessage("At least one active company bank account is mandatory. Add another bank account before removing this one.");
+        return rows;
+      }
+      setErrorMessage("");
       return rows.map((row) => (row.localId === localId ? { ...row, isActive: false } : row));
     });
   };
@@ -1031,10 +1050,27 @@ export default function SettingsPage() {
                     <strong>Bank Account {index + 1}</strong>
                     {row.code && <span className="settings-field-hint" style={{ marginLeft: 8 }}>{row.code}</span>}
                   </div>
-                  <button type="button" className="coa-btn" onClick={() => removeBankAccount(row.localId)} disabled={settingsFieldDisabled}>
-                    Remove
+                  <button
+                    type="button"
+                    className="coa-btn"
+                    onClick={() => removeBankAccount(row.localId)}
+                    disabled={settingsFieldDisabled || Boolean(row.hasHistory) || activeBankAccounts.length <= 1}
+                    title={
+                      row.hasHistory
+                        ? "Protected: historical activity exists. Keep this bank master for audit history."
+                        : activeBankAccounts.length <= 1
+                          ? "Add another active bank account before removing this one."
+                          : "Remove from active company banking settings"
+                    }
+                  >
+                    {row.hasHistory ? "Protected" : "Remove"}
                   </button>
                 </div>
+                {row.hasHistory && (
+                  <div className="settings-field-hint" style={{ marginTop: 8, color: "#92400e" }}>
+                    🔒 Audit-protected bank master: {row.postedJournalCount || 0} posted GL line(s), {row.transactionCount || 0} bank transaction(s), {row.reconciliationCount || 0} reconciliation(s). This record cannot be removed; add a new bank account instead.
+                  </div>
+                )}
                 <div className="settings-grid-2col" style={{ marginTop: 12 }}>
                   <label className="settings-field-label">
                     Account Display Name
@@ -1126,6 +1162,32 @@ export default function SettingsPage() {
               + Add another bank account
             </button>
           </div>
+
+          {historicalBankAccounts.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div className="form-title-row">
+                <strong>Historical / Inactive Bank Master Records</strong>
+                <span className="settings-field-hint">Retained for audit traceability</span>
+              </div>
+              <div className="bank-account-stack" style={{ marginTop: 8 }}>
+                {historicalBankAccounts.map((row) => (
+                  <div className="bank-account-card" key={row.localId} style={{ opacity: 0.82 }}>
+                    <div className="form-title-row">
+                      <div>
+                        <strong>{row.displayName || row.bankName || row.code || "Historical Bank"}</strong>
+                        {row.code && <span className="settings-field-hint" style={{ marginLeft: 8 }}>{row.code}</span>}
+                      </div>
+                      <span className="settings-badge-required">Inactive / Retained</span>
+                    </div>
+                    <div className="settings-field-hint" style={{ marginTop: 6 }}>
+                      {row.bankName} · {row.accountNumber} · {row.currency}
+                      {row.linkedAccountName ? ` · Former GL: ${row.linkedAccountName}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Error Feedback */}
