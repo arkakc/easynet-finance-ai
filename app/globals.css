@@ -3567,13 +3567,13 @@ label:has(textarea[required])::after,
 ========================================================= */
 .profile-menu-wrap {
   position: absolute;
-  top: 18px;
+  top: 10px;
   right: 24px;
   z-index: 80;
 }
 .profile-avatar-button {
-  width: 46px;
-  height: 46px;
+  width: 40px;
+  height: 40px;
   padding: 0 !important;
   border: 1px solid #dbe4ee !important;
   border-radius: 999px !important;
@@ -3600,9 +3600,9 @@ label:has(textarea[required])::after,
   letter-spacing: -.01em;
 }
 .profile-avatar-circle {
-  width: 38px;
-  height: 38px;
-  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
 }
 .profile-dropdown {
   position: absolute;
@@ -3676,15 +3676,15 @@ label:has(textarea[required])::after,
 }
 @media (max-width: 720px) {
   .profile-menu-wrap {
-    top: 12px;
+    top: 8px;
     right: 12px;
   }
   .profile-avatar-button {
-    width: 42px;
-    height: 42px;
+    width: 38px;
+    height: 38px;
   }
   .profile-avatar-circle {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
   }
 }
