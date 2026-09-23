@@ -3,7 +3,7 @@ import { requireConfigurationPermission, requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import { AccountTypeGL, NormalBalance } from "@prisma/client";
-import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
+import { isUnlinkedBankLedger, markUnlinkedBankLedgerDescription } from "@/lib/accounting/bank-ledger-status";
 
 export async function GET() {
   try {
@@ -263,7 +263,11 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (description !== undefined) {
-      updateData.description = description ? String(description).trim() : null;
+      const requestedDescription = description ? String(description).trim() : "";
+      const activeBankLinkCount = current.bankAccounts.filter((row) => row.isActive).length;
+      updateData.description = isUnlinkedBankLedger(current.description, activeBankLinkCount)
+        ? markUnlinkedBankLedgerDescription(requestedDescription)
+        : (requestedDescription || null);
     }
 
     if (taxCode !== undefined) {
