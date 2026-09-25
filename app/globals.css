@@ -4420,3 +4420,31 @@ form.panel {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================
+   AUTO ITEM ACCOUNT MAPPING
+========================================================= */
+.auto-account-cell {
+  min-width: 210px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.auto-account-cell > strong {
+  color: #0f172a;
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.auto-account-cell > .small {
+  color: #64748b;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.auto-account-cell .searchable-select {
+  min-width: 230px;
+}
