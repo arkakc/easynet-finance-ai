@@ -4448,3 +4448,53 @@ form.panel {
 .auto-account-cell .searchable-select {
   min-width: 230px;
 }
+
+
+/* Wider, user-resizable TEMP item setup table */
+.adjustable-form-table {
+  table-layout: fixed;
+}
+
+.adjustable-form-table th,
+.adjustable-form-table td {
+  overflow: visible;
+}
+
+.adjustable-form-table .adjustable-th-content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  padding-right: 10px;
+}
+
+.adjustable-form-table .column-resizer {
+  position: absolute;
+  top: -10px;
+  right: -8px;
+  width: 14px;
+  height: calc(100% + 20px);
+  cursor: col-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.adjustable-form-table input,
+.adjustable-form-table select,
+.adjustable-form-table .searchable-select,
+.adjustable-form-table .searchable-select-control {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.adjustable-form-table input,
+.adjustable-form-table select,
+.adjustable-form-table .searchable-select-control > input {
+  min-height: 48px;
+  font-size: 14px;
+}
+
+.adjustable-form-table td {
+  vertical-align: top;
+}
