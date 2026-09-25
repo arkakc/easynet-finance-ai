@@ -32,7 +32,7 @@ function transactionHref(type:string,id:string){
 }
 function movementDocumentNumber(row:any){
   const movementId=clean(row?.movementId);
-  return movementId.replace(/-\\d{3}$/,"")||movementId;
+  return movementId.replace(/-\d{3}$/,"")||movementId;
 }
 function uniqueLinks(links:DocumentLink[]){
   const seen=new Set<string>();
@@ -46,7 +46,7 @@ function uniqueLinks(links:DocumentLink[]){
 
 async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]>{
   const links:DocumentLink[]=[];
-  const id=clean(
+  const currentId=clean(
     type==="quote"?record.quoteId:
     type==="invoice"?record.invoiceId:
     type==="purchaseOrder"?record.poId:
@@ -55,164 +55,253 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
     record.expenseId
   );
 
-  if(type==="quote"){
-    const order=isSalesOrder(record);
-    if(order){
-      const sourceId=clean(record.sourceDocumentId||record.sourceQuoteId||record.salesQuoteId);
-      if(sourceId){
-        const source=(await findRecords<any>("Quotes",{quoteId:sourceId},1)).rows[0];
-        links.push({direction:"previous",label:"Sales Quotation",id:sourceId,number:clean(source?.quoteNumber)||sourceId,type:"quote",href:transactionHref("quote",sourceId)});
+  const add=(stage:number,currentStage:number,label:string,id:string,number:string,linkType:string,href:string)=>{
+    if(!id||id===currentId)return;
+    links.push({
+      direction:stage<currentStage?"previous":"next",
+      label,
+      id,
+      number:number||id,
+      type:linkType,
+      href,
+    });
+  };
+
+  const salesSide =
+    type==="quote" ||
+    type==="invoice" ||
+    (type==="payment"&&clean(record.partyType)==="Customer");
+
+  if(salesSide){
+    const[quotesResult,invoicesResult,paymentsResult,movementsResult]=await Promise.all([
+      listTable<any>("Quotes",500,0),
+      listTable<any>("Invoices",500,0),
+      listTable<any>("Payments",500,0),
+      listTable<any>("StockMovements",500,0),
+    ]);
+    const quotes=quotesResult.rows||[];
+    const invoices=invoicesResult.rows||[];
+    const payments=paymentsResult.rows||[];
+    const movements=movementsResult.rows||[];
+    const quoteById=new Map(quotes.map((row:any)=>[clean(row.quoteId),row]));
+    const invoiceById=new Map(invoices.map((row:any)=>[clean(row.invoiceId),row]));
+
+    let rootQuoteId="";
+    let currentStage=10;
+
+    if(type==="quote"){
+      if(isSalesOrder(record)){
+        currentStage=20;
+        rootQuoteId=clean(record.sourceDocumentId||record.sourceQuoteId||record.salesQuoteId);
+      }else{
+        currentStage=10;
+        rootQuoteId=currentId;
       }
-      const[movements,invoices]=await Promise.all([
-        listTable<any>("StockMovements",500,0),
-        listTable<any>("Invoices",500,0),
-      ]);
+    }else if(type==="invoice"){
+      currentStage=40;
+      const sourceId=clean(record.sourceDocumentId||record.sourceSalesOrderId||record.salesOrderId||record.sourceQuoteId);
+      const sourceQuote=quoteById.get(sourceId);
+      rootQuoteId=sourceQuote&&isSalesOrder(sourceQuote)
+        ? clean(sourceQuote.sourceDocumentId||sourceQuote.sourceQuoteId||sourceQuote.salesQuoteId)
+        : sourceId;
+    }else if(type==="payment"){
+      const againstId=clean(record.againstDocumentId);
+      if(againstId){
+        currentStage=50;
+        const invoice=invoiceById.get(againstId);
+        const invoiceSource=clean(invoice?.sourceDocumentId||invoice?.sourceSalesOrderId||invoice?.salesOrderId||invoice?.sourceQuoteId);
+        const sourceQuote=quoteById.get(invoiceSource);
+        rootQuoteId=sourceQuote&&isSalesOrder(sourceQuote)
+          ? clean(sourceQuote.sourceDocumentId||sourceQuote.sourceQuoteId||sourceQuote.salesQuoteId)
+          : invoiceSource;
+      }else{
+        currentStage=15;
+        rootQuoteId=clean(record.sourceDocumentId)||paymentSourceMarker(record,"SQ");
+        const sourceQuote=quoteById.get(rootQuoteId);
+        if(sourceQuote&&isSalesOrder(sourceQuote)){
+          rootQuoteId=clean(sourceQuote.sourceDocumentId||sourceQuote.sourceQuoteId||sourceQuote.salesQuoteId);
+        }
+      }
+    }
+
+    if(rootQuoteId){
+      const rootQuote=quoteById.get(rootQuoteId);
+      if(rootQuote) add(10,currentStage,"Sales Quotation",rootQuoteId,clean(rootQuote.quoteNumber)||rootQuoteId,"quote",transactionHref("quote",rootQuoteId));
+
+      const salesOrders=quotes.filter((row:any)=>
+        isSalesOrder(row)&&clean(row.sourceDocumentId||row.sourceQuoteId||row.salesQuoteId)===rootQuoteId
+      );
+      const orderIds=new Set(salesOrders.map((row:any)=>clean(row.quoteId)).filter(Boolean));
+      for(const order of salesOrders){
+        const orderId=clean(order.quoteId);
+        add(20,currentStage,"Sales Order",orderId,clean(order.quoteNumber)||orderId,"quote",transactionHref("quote",orderId));
+      }
+
+      const deliverySources=new Set<string>([rootQuoteId,...orderIds]);
       const deliveryNumbers=new Set<string>();
-      for(const movement of movements.rows||[]){
-        if(clean(movement.movementType)!=="SALES_DELIVERY"||clean(movement.sourceDocumentId)!==id)continue;
+      for(const movement of movements){
+        if(clean(movement.movementType)!=="SALES_DELIVERY")continue;
+        if(!deliverySources.has(clean(movement.sourceDocumentId)))continue;
         const number=movementDocumentNumber(movement);
         if(!number||deliveryNumbers.has(number))continue;
         deliveryNumbers.add(number);
-        links.push({direction:"next",label:"Delivery Note / Stock Out",id:number,number,type:"deliveryNote",href:`/stock?mode=register&sourceDocumentId=${encodeURIComponent(id)}`});
+        const sourceId=clean(movement.sourceDocumentId);
+        add(30,currentStage,"Delivery Note / Stock Out",number,number,"deliveryNote",`/stock?mode=register&sourceDocumentId=${encodeURIComponent(sourceId)}`);
       }
-      for(const invoice of invoices.rows||[]){
-        if(![invoice.sourceDocumentId,invoice.sourceSalesOrderId,invoice.salesOrderId].some(value=>clean(value)===id))continue;
+
+      const chainInvoices=invoices.filter((invoice:any)=>{
+        const sourceIds=[invoice.sourceDocumentId,invoice.sourceSalesOrderId,invoice.salesOrderId,invoice.sourceQuoteId].map(clean);
+        return sourceIds.some((sourceId:string)=>sourceId===rootQuoteId||orderIds.has(sourceId));
+      });
+      const invoiceIds=new Set(chainInvoices.map((row:any)=>clean(row.invoiceId)).filter(Boolean));
+      for(const invoice of chainInvoices){
         const invoiceId=clean(invoice.invoiceId);
-        links.push({direction:"next",label:clean(invoice.invoiceNumber).toUpperCase().startsWith("CN-")?"Sales Credit Note":"Sales Invoice",id:invoiceId,number:clean(invoice.invoiceNumber)||invoiceId,type:"invoice",href:transactionHref("invoice",invoiceId)});
+        const credit=clean(invoice.invoiceNumber).toUpperCase().startsWith("CN-");
+        add(credit?45:40,currentStage,credit?"Sales Credit Note / Return":"Sales Invoice",invoiceId,clean(invoice.invoiceNumber)||invoiceId,"invoice",transactionHref("invoice",invoiceId));
       }
-    }else{
-      const[quotes,invoices,payments]=await Promise.all([
-        listTable<any>("Quotes",500,0),
-        listTable<any>("Invoices",500,0),
-        listTable<any>("Payments",500,0),
-      ]);
-      for(const next of quotes.rows||[]){
-        if(!isSalesOrder(next)||clean(next.sourceDocumentId||next.sourceQuoteId||next.salesQuoteId)!==id)continue;
-        const nextId=clean(next.quoteId);
-        links.push({direction:"next",label:"Sales Order",id:nextId,number:clean(next.quoteNumber)||nextId,type:"quote",href:transactionHref("quote",nextId)});
-      }
-      for(const invoice of invoices.rows||[]){
-        if(clean(invoice.sourceDocumentId)!==id)continue;
-        const invoiceId=clean(invoice.invoiceId);
-        links.push({direction:"next",label:"Sales Invoice (legacy/direct source)",id:invoiceId,number:clean(invoice.invoiceNumber)||invoiceId,type:"invoice",href:transactionHref("invoice",invoiceId)});
-      }
-      for(const payment of payments.rows||[]){
+
+      for(const payment of payments){
         if(clean(payment.partyType)!=="Customer")continue;
-        const source=clean(payment.sourceDocumentId)||paymentSourceMarker(payment,"SQ");
-        if(source!==id)continue;
         const paymentId=clean(payment.paymentId);
-        links.push({direction:"next",label:"Customer Advance / Receipt",id:paymentId,number:clean(payment.paymentNumber)||paymentId,type:"payment",href:transactionHref("payment",paymentId)});
+        if(!paymentId)continue;
+        const sourceId=clean(payment.sourceDocumentId);
+        const markerQuoteId=paymentSourceMarker(payment,"SQ");
+        const againstId=clean(payment.againstDocumentId);
+        const isAdvance=sourceId===rootQuoteId||markerQuoteId===rootQuoteId||orderIds.has(sourceId);
+        const isSettlement=invoiceIds.has(againstId)||invoiceIds.has(sourceId);
+        if(!isAdvance&&!isSettlement)continue;
+        const refund=clean(payment.paymentType).toUpperCase()==="PAY";
+        add(isSettlement?50:15,currentStage,refund?"Customer Refund Payment":isSettlement?"Sales Payment / Receipt":"Customer Advance / Receipt",paymentId,clean(payment.paymentNumber)||paymentId,"payment",transactionHref("payment",paymentId));
       }
     }
   }
 
-  if(type==="invoice"){
-    const sourceId=clean(record.sourceDocumentId||record.sourceSalesOrderId||record.salesOrderId||record.sourceQuoteId);
-    if(sourceId){
-      const source=(await findRecords<any>("Quotes",{quoteId:sourceId},1)).rows[0];
-      links.push({direction:"previous",label:isSalesOrder(source)?"Sales Order":"Sales Quotation",id:sourceId,number:clean(source?.quoteNumber)||sourceId,type:"quote",href:transactionHref("quote",sourceId)});
+  const purchaseSide =
+    type==="purchaseOrder" ||
+    type==="supplierBill" ||
+    (type==="payment"&&clean(record.partyType)==="Supplier");
+
+  if(purchaseSide){
+    const[ordersResult,billsResult,paymentsResult,movementsResult]=await Promise.all([
+      listTable<any>("PurchaseOrders",500,0),
+      listTable<any>("SupplierBills",500,0),
+      listTable<any>("Payments",500,0),
+      listTable<any>("StockMovements",500,0),
+    ]);
+    const orders=ordersResult.rows||[];
+    const bills=billsResult.rows||[];
+    const payments=paymentsResult.rows||[];
+    const movements=movementsResult.rows||[];
+    const orderById=new Map(orders.map((row:any)=>[clean(row.poId),row]));
+    const billById=new Map(bills.map((row:any)=>[clean(row.billId),row]));
+
+    let supplierQuoteId="";
+    let poIds=new Set<string>();
+    let currentStage=10;
+
+    if(type==="purchaseOrder"){
+      if(isSupplierQuote(record)){
+        currentStage=10;
+        supplierQuoteId=currentId;
+        poIds=new Set(
+          orders
+            .filter((row:any)=>!isSupplierQuote(row)&&clean(row.sourceDocumentId||row.sourceSupplierQuoteId||row.supplierQuoteId)===supplierQuoteId)
+            .map((row:any)=>clean(row.poId))
+            .filter(Boolean)
+        );
+      }else{
+        currentStage=20;
+        poIds=new Set([currentId]);
+        supplierQuoteId=clean(record.sourceDocumentId||record.sourceSupplierQuoteId||record.supplierQuoteId);
+      }
+    }else if(type==="supplierBill"){
+      currentStage=40;
+      const poId=clean(record.sourceDocumentId||record.sourcePurchaseOrderId||record.poId);
+      if(poId)poIds=new Set([poId]);
+      const po=orderById.get(poId);
+      supplierQuoteId=clean(po?.sourceDocumentId||po?.sourceSupplierQuoteId||po?.supplierQuoteId);
+    }else if(type==="payment"){
+      const againstId=clean(record.againstDocumentId);
+      if(againstId){
+        currentStage=50;
+        const bill=billById.get(againstId);
+        const poId=clean(bill?.sourceDocumentId||bill?.sourcePurchaseOrderId||bill?.poId);
+        if(poId)poIds=new Set([poId]);
+        const po=orderById.get(poId);
+        supplierQuoteId=clean(po?.sourceDocumentId||po?.sourceSupplierQuoteId||po?.supplierQuoteId);
+      }else{
+        currentStage=25;
+        const poId=clean(record.sourceDocumentId)||paymentSourceMarker(record,"PO");
+        if(poId)poIds=new Set([poId]);
+        const po=orderById.get(poId);
+        if(po&&isSupplierQuote(po)){
+          supplierQuoteId=poId;
+          poIds=new Set(
+            orders
+              .filter((row:any)=>!isSupplierQuote(row)&&clean(row.sourceDocumentId||row.sourceSupplierQuoteId||row.supplierQuoteId)===supplierQuoteId)
+              .map((row:any)=>clean(row.poId))
+              .filter(Boolean)
+          );
+        }else{
+          supplierQuoteId=clean(po?.sourceDocumentId||po?.sourceSupplierQuoteId||po?.supplierQuoteId);
+        }
+      }
     }
-    const[invoices,payments]=await Promise.all([listTable<any>("Invoices",500,0),listTable<any>("Payments",500,0)]);
-    for(const credit of invoices.rows||[]){
-      if(clean(credit.sourceDocumentId)!==id||!clean(credit.invoiceNumber).toUpperCase().startsWith("CN-"))continue;
-      const creditId=clean(credit.invoiceId);
-      links.push({direction:"next",label:"Sales Credit Note / Return",id:creditId,number:clean(credit.invoiceNumber)||creditId,type:"invoice",href:transactionHref("invoice",creditId)});
+
+    if(supplierQuoteId){
+      const supplierQuote=orderById.get(supplierQuoteId);
+      if(supplierQuote)add(10,currentStage,"Supplier Quotation",supplierQuoteId,clean(supplierQuote.poNumber)||supplierQuoteId,"purchaseOrder",transactionHref("purchaseOrder",supplierQuoteId));
+      if(poIds.size===0){
+        poIds=new Set(
+          orders
+            .filter((row:any)=>!isSupplierQuote(row)&&clean(row.sourceDocumentId||row.sourceSupplierQuoteId||row.supplierQuoteId)===supplierQuoteId)
+            .map((row:any)=>clean(row.poId))
+            .filter(Boolean)
+        );
+      }
     }
-    for(const payment of payments.rows||[]){
-      if(clean(payment.partyType)!=="Customer")continue;
-      if(clean(payment.againstDocumentId)!==id&&clean(payment.sourceDocumentId)!==id)continue;
+
+    for(const poId of poIds){
+      const po=orderById.get(poId);
+      if(po)add(20,currentStage,"Purchase Order",poId,clean(po.poNumber)||poId,"purchaseOrder",transactionHref("purchaseOrder",poId));
+    }
+
+    const receiptNumbers=new Set<string>();
+    for(const movement of movements){
+      if(clean(movement.movementType)!=="PURCHASE_RECEIPT")continue;
+      const sourcePo=clean(movement.sourceDocumentId);
+      if(!poIds.has(sourcePo))continue;
+      const number=movementDocumentNumber(movement);
+      if(!number||receiptNumbers.has(number))continue;
+      receiptNumbers.add(number);
+      add(30,currentStage,"Purchase Receipt / GRN",number,number,"purchaseReceipt",`/stock?mode=register&sourcePo=${encodeURIComponent(sourcePo)}`);
+    }
+
+    const chainBills=bills.filter((bill:any)=>
+      [bill.sourceDocumentId,bill.sourcePurchaseOrderId,bill.poId].map(clean).some((poId:string)=>poIds.has(poId))
+    );
+    const billIds=new Set(chainBills.map((row:any)=>clean(row.billId)).filter(Boolean));
+    for(const bill of chainBills){
+      const billId=clean(bill.billId);
+      add(40,currentStage,"Supplier Invoice",billId,clean(bill.billNumber)||billId,"supplierBill",transactionHref("supplierBill",billId));
+    }
+
+    for(const payment of payments){
+      if(clean(payment.partyType)!=="Supplier")continue;
       const paymentId=clean(payment.paymentId);
-      links.push({direction:"next",label:clean(payment.paymentType).toUpperCase()==="PAY"?"Customer Refund":"Sales Payment / Receipt",id:paymentId,number:clean(payment.paymentNumber)||paymentId,type:"payment",href:transactionHref("payment",paymentId)});
-    }
-  }
-
-  if(type==="purchaseOrder"){
-    const supplierQuote=isSupplierQuote(record);
-    if(supplierQuote){
-      const purchaseOrders=await listTable<any>("PurchaseOrders",500,0);
-      for(const po of purchaseOrders.rows||[]){
-        if(isSupplierQuote(po)||clean(po.sourceDocumentId||po.sourceSupplierQuoteId||po.supplierQuoteId)!==id)continue;
-        const poId=clean(po.poId);
-        links.push({direction:"next",label:"Purchase Order",id:poId,number:clean(po.poNumber)||poId,type:"purchaseOrder",href:transactionHref("purchaseOrder",poId)});
-      }
-    }else{
-      const sourceId=clean(record.sourceDocumentId||record.sourceSupplierQuoteId||record.supplierQuoteId);
-      if(sourceId){
-        const source=(await findRecords<any>("PurchaseOrders",{poId:sourceId},1)).rows[0];
-        links.push({direction:"previous",label:"Supplier Quotation",id:sourceId,number:clean(source?.poNumber)||sourceId,type:"purchaseOrder",href:transactionHref("purchaseOrder",sourceId)});
-      }
-      const[movements,bills,payments]=await Promise.all([
-        listTable<any>("StockMovements",500,0),
-        listTable<any>("SupplierBills",500,0),
-        listTable<any>("Payments",500,0),
-      ]);
-      const receiptNumbers=new Set<string>();
-      for(const movement of movements.rows||[]){
-        if(clean(movement.movementType)!=="PURCHASE_RECEIPT"||clean(movement.sourceDocumentId)!==id)continue;
-        const number=movementDocumentNumber(movement);
-        if(!number||receiptNumbers.has(number))continue;
-        receiptNumbers.add(number);
-        links.push({direction:"next",label:"Purchase Receipt / GRN",id:number,number,type:"purchaseReceipt",href:`/stock?mode=register&sourcePo=${encodeURIComponent(id)}`});
-      }
-      for(const bill of bills.rows||[]){
-        if(![bill.sourceDocumentId,bill.sourcePurchaseOrderId,bill.poId].some(value=>clean(value)===id))continue;
-        const billId=clean(bill.billId);
-        links.push({direction:"next",label:"Supplier Invoice",id:billId,number:clean(bill.billNumber)||billId,type:"supplierBill",href:transactionHref("supplierBill",billId)});
-      }
-      for(const payment of payments.rows||[]){
-        if(clean(payment.partyType)!=="Supplier")continue;
-        const source=clean(payment.sourceDocumentId)||paymentSourceMarker(payment,"PO");
-        if(source!==id)continue;
-        const paymentId=clean(payment.paymentId);
-        links.push({direction:"next",label:"Supplier Advance / Payment",id:paymentId,number:clean(payment.paymentNumber)||paymentId,type:"payment",href:transactionHref("payment",paymentId)});
-      }
-    }
-  }
-
-  if(type==="supplierBill"){
-    const sourceId=clean(record.sourceDocumentId||record.sourcePurchaseOrderId||record.poId);
-    if(sourceId){
-      const source=(await findRecords<any>("PurchaseOrders",{poId:sourceId},1)).rows[0];
-      links.push({direction:"previous",label:"Purchase Order",id:sourceId,number:clean(source?.poNumber)||sourceId,type:"purchaseOrder",href:transactionHref("purchaseOrder",sourceId)});
-    }
-    const payments=await listTable<any>("Payments",500,0);
-    for(const payment of payments.rows||[]){
-      if(clean(payment.partyType)!=="Supplier"||clean(payment.againstDocumentId)!==id)continue;
-      const paymentId=clean(payment.paymentId);
-      links.push({direction:"next",label:"Purchase Payment",id:paymentId,number:clean(payment.paymentNumber)||paymentId,type:"payment",href:transactionHref("payment",paymentId)});
-    }
-  }
-
-  if(type==="payment"){
-    const againstId=clean(record.againstDocumentId);
-    const sourceId=clean(record.sourceDocumentId);
-    if(againstId){
-      const against=clean(record.againstDocumentType).toLowerCase();
-      if(clean(record.partyType)==="Customer"){
-        const invoice=(await findRecords<any>("Invoices",{invoiceId:againstId},1)).rows[0];
-        links.push({direction:"previous",label:against.includes("credit")?"Sales Credit Note":"Sales Invoice",id:againstId,number:clean(invoice?.invoiceNumber)||againstId,type:"invoice",href:transactionHref("invoice",againstId)});
-      }else if(clean(record.partyType)==="Supplier"){
-        const bill=(await findRecords<any>("SupplierBills",{billId:againstId},1)).rows[0];
-        links.push({direction:"previous",label:"Supplier Invoice",id:againstId,number:clean(bill?.billNumber)||againstId,type:"supplierBill",href:transactionHref("supplierBill",againstId)});
-      }
-    }else if(clean(record.partyType)==="Customer"){
-      const quoteId=sourceId||paymentSourceMarker(record,"SQ");
-      if(quoteId){
-        const quote=(await findRecords<any>("Quotes",{quoteId},1)).rows[0];
-        links.push({direction:"previous",label:isSalesOrder(quote)?"Sales Order":"Sales Quotation",id:quoteId,number:clean(quote?.quoteNumber)||quoteId,type:"quote",href:transactionHref("quote",quoteId)});
-      }
-    }else if(clean(record.partyType)==="Supplier"){
-      const poId=sourceId||paymentSourceMarker(record,"PO");
-      if(poId){
-        const po=(await findRecords<any>("PurchaseOrders",{poId},1)).rows[0];
-        links.push({direction:"previous",label:"Purchase Order",id:poId,number:clean(po?.poNumber)||poId,type:"purchaseOrder",href:transactionHref("purchaseOrder",poId)});
-      }
+      if(!paymentId)continue;
+      const sourceId=clean(payment.sourceDocumentId);
+      const markerPoId=paymentSourceMarker(payment,"PO");
+      const againstId=clean(payment.againstDocumentId);
+      const isAdvance=poIds.has(sourceId)||poIds.has(markerPoId);
+      const isSettlement=billIds.has(againstId)||billIds.has(sourceId);
+      if(!isAdvance&&!isSettlement)continue;
+      add(isSettlement?50:25,currentStage,isSettlement?"Purchase Payment":"Supplier Advance / Payment",paymentId,clean(payment.paymentNumber)||paymentId,"payment",transactionHref("payment",paymentId));
     }
   }
 
   return uniqueLinks(links);
 }
-
 export async function GET(request:NextRequest){
   try{
     const type=String(request.nextUrl.searchParams.get("type")||"");
