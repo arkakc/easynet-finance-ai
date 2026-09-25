@@ -262,8 +262,8 @@ export async function POST(request: Request) {
         const exact = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
         if (exact.length) throw new Error(`Line ${line.lineNo}: Item Master already contains "${name}". Select the existing Item instead of creating a duplicate.`);
         const type = normalizeItemType(resolution.itemType);
-        const revenueAccount = String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4200"));
-        const costAccount = String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5100"));
+        const revenueAccount = String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4101"));
+        const costAccount = String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5111"));
         validatePostingAccount(state.accounts, revenueAccount, "revenue");
         validatePostingAccount(state.accounts, costAccount, "cost");
         sequence += 1;
