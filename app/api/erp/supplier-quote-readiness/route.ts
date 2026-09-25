@@ -173,8 +173,8 @@ export async function POST(request: Request) {
         sequence += 1;
         const code = `ITEM-${String(sequence).padStart(5, "0")}`;
         const type = itemType(resolution.itemType);
-        const revenueAccount=String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4200"));
-        const costAccount=String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5100"));
+        const revenueAccount=String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4101"));
+        const costAccount=String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5111"));
         validatePostingAccount(state.accounts,revenueAccount,"revenue");
         validatePostingAccount(state.accounts,costAccount,"cost");
         item = {
