@@ -260,7 +260,12 @@ export async function POST(request: Request) {
         const name = String(resolution.itemName || "").trim();
         if (name.length < 2) throw new Error(`Line ${line.lineNo}: Item Name is required`);
         const exact = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
-        if (exact.length) throw new Error(`Line ${line.lineNo}: Item Master already contains "${name}". Select the existing Item instead of creating a duplicate.`);
+        if (exact.length === 1) {
+          item = exact[0];
+          linkPlan.push({ line, item });
+          continue;
+        }
+        if (exact.length > 1) throw new Error(`Line ${line.lineNo}: multiple active Item Master records match "${name}". Select the correct existing Item before continuing.`);
         const type = normalizeItemType(resolution.itemType);
         const revenueAccount = String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4101"));
         const costAccount = String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5111"));
@@ -299,6 +304,10 @@ export async function POST(request: Request) {
     }
 
     const refreshed = await loadSnapshot(quoteId);
+    const stillUnlinked = refreshed.lines.filter((line:any)=>!String(line.itemId||"").trim());
+    if (stillUnlinked.length) {
+      throw new Error(`${stillUnlinked.length} quotation line(s) are still not linked to Item Master after save. No further conversion is allowed until the link is repaired.`);
+    }
     return NextResponse.json({
       ok: true,
       createdItems: createItems.length,
