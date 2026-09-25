@@ -36,53 +36,46 @@ function active(row: Account) {
 }
 
 function heuristic(itemName: string, itemType: "STOCK" | "SERVICE" | "NON_STOCK"): Suggestion {
+  // Controlled global policy:
+  // STOCK and NON_STOCK items use the company-wide Sales / COGS posting pair.
+  // SERVICE remains independently classified because service revenue/direct-cost treatment differs.
+  if (itemType === "STOCK" || itemType === "NON_STOCK") {
+    return {
+      revenueAccountId: "ACC-4101",
+      costAccountId: "ACC-5111",
+      confidence: 1,
+      reason: "Controlled global stock/non-stock posting policy",
+      source: "RULE_FALLBACK",
+    };
+  }
+
   const text = itemName.toLowerCase();
-  let revenueAccountId = itemType === "SERVICE" ? "ACC-4100" : "ACC-4200";
-  let costAccountId = itemType === "SERVICE" ? "ACC-5200" : "ACC-5100";
-  let reason = "Default item-type mapping";
+  let revenueAccountId = "ACC-4100";
+  let costAccountId = "ACC-5200";
+  let reason = "Service item default";
 
   const has = (...tokens: string[]) => tokens.some((token) => text.includes(token));
 
   if (has("cloud", "hosting", "server hosting", "vps", "domain", "subscription", "saas")) {
     revenueAccountId = "ACC-4700";
     costAccountId = "ACC-5600";
-    reason = "Cloud / hosting / subscription item wording";
+    reason = "Cloud / hosting / subscription service wording";
   } else if (has("software", "license", "licence", "microsoft 365", "office 365", "antivirus")) {
     revenueAccountId = "ACC-4300";
     costAccountId = "ACC-5400";
-    reason = "Software / licence item wording";
+    reason = "Software / licence service wording";
   } else if (has("erp", "automation", "workflow", "business automation")) {
     revenueAccountId = "ACC-4500";
     costAccountId = "ACC-5200";
-    reason = "ERP / business automation item wording";
+    reason = "ERP / business automation service wording";
   } else if (has("managed it", "managed service", "support plan", "maintenance plan")) {
     revenueAccountId = "ACC-4400";
     costAccountId = "ACC-5200";
-    reason = "Managed IT service item wording";
+    reason = "Managed IT service wording";
   } else if (has("consult", "technical support", "professional service", "implementation", "training")) {
     revenueAccountId = "ACC-4600";
     costAccountId = has("subcontract", "consultant") ? "ACC-5300" : "ACC-5200";
-    reason = "Consulting / technical service item wording";
-  } else if (has("freight", "delivery", "shipping", "transport")) {
-    revenueAccountId = itemType === "SERVICE" ? "ACC-4600" : "ACC-4900";
-    costAccountId = "ACC-5500";
-    reason = "Freight / delivery item wording";
-  } else if (has("network", "cctv", "camera", "firewall", "router", "switch", "wifi", "wi-fi", "starlink", "nas", "server", "installation", "ict")) {
-    // Physical ICT equipment is hardware for revenue classification. Only
-    // service/non-stock ICT work belongs in the general services revenue
-    // account. This prevents items such as network switches and routers from
-    // being classified as software revenue when the AI fallback is used.
-    revenueAccountId = itemType === "STOCK" ? "ACC-4200" : "ACC-4100";
-    costAccountId = itemType === "STOCK" ? "ACC-5100" : "ACC-5200";
-    reason = itemType === "STOCK" ? "ICT hardware item wording" : "ICT service item wording";
-  } else if (itemType === "STOCK") {
-    revenueAccountId = "ACC-4200";
-    costAccountId = "ACC-5100";
-    reason = "Stock / hardware item default";
-  } else if (itemType === "SERVICE") {
-    revenueAccountId = "ACC-4100";
-    costAccountId = "ACC-5200";
-    reason = "Service item default";
+    reason = "Consulting / technical service wording";
   }
 
   return { revenueAccountId, costAccountId, confidence: 0.55, reason, source: "RULE_FALLBACK" };
@@ -111,7 +104,7 @@ export async function POST(request: Request) {
 
     let suggestion: Suggestion = heuristic(input.itemName, input.itemType);
 
-    if (env.OPENAI_API_KEY && income.length && expense.length) {
+    if (input.itemType === "SERVICE" && env.OPENAI_API_KEY && income.length && expense.length) {
       try {
         const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
         const response = await (client.responses as any).parse({
