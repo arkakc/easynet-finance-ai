@@ -426,6 +426,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, deleted: true, result: deleteResult });
     }
 
+    const controlledFlowOnly: Record<string,string> = {
+      createSalesOrder: "Sales Order must be created from an approved Sales Quotation using the controlled conversion flow.",
+      createInvoice: "Sales Invoice must be created from a Sales Order. Stock items require Delivery Note / Stock Out before invoicing.",
+      createPurchaseOrder: "Purchase Order must be created from an approved Supplier Quotation using the controlled conversion flow.",
+      createSupplierBill: "Supplier Invoice must be created from a Purchase Order using the controlled purchase flow.",
+    };
+    if (body.action && controlledFlowOnly[body.action]) {
+      return NextResponse.json({ ok:false, error:controlledFlowOnly[body.action] }, { status:400 });
+    }
+
     const permission = body.action ? permissionForAction(body.action, String(body.payload?.partyType || "")) : undefined;
     if (!permission) return NextResponse.json({ ok: false, error: "Unsupported transaction action" }, { status: 400 });
     await requirePermission(permission);
