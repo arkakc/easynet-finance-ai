@@ -167,8 +167,13 @@ export async function POST(request: Request) {
         const name = String(resolution.itemName || "").trim();
         if (name.length < 2) throw new Error(`Line ${line.lineNo}: Item Name is required`);
         const exact = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
-        if (exact.length) {
-          throw new Error(`Line ${line.lineNo}: Item Master already contains "${name}". Select the existing Item instead of creating a duplicate.`);
+        if (exact.length === 1) {
+          item = exact[0];
+          linkPlan.push({ line, item });
+          continue;
+        }
+        if (exact.length > 1) {
+          throw new Error(`Line ${line.lineNo}: multiple active Item Master records match "${name}". Select the correct existing Item before continuing.`);
         }
         sequence += 1;
         const code = `ITEM-${String(sequence).padStart(5, "0")}`;
@@ -210,6 +215,10 @@ export async function POST(request: Request) {
     }
 
     const refreshed = await snapshot(supplierQuoteId);
+    const stillUnlinked = refreshed.lines.filter((line:any)=>!String(line.itemId||"").trim());
+    if (stillUnlinked.length) {
+      throw new Error(`${stillUnlinked.length} Supplier Quotation line(s) are still not linked to Item Master after save. Purchase Order conversion remains blocked.`);
+    }
     return NextResponse.json({
       ok: true,
       createdItems: createItems.length,
