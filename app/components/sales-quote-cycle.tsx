@@ -20,7 +20,7 @@ type AllocationSummary={allocatedAmount:number;remainingAmount:number;allocation
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
 function localDate(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const v=Object.fromEntries(parts.map((p)=>[p.type,p.value]));return`${v.year}-${v.month}-${v.day}`;}
 function createdValue(row:Payment){const t=new Date(row.createdAt||"").getTime();return Number.isFinite(t)?t:0;}
-function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||(only?.itemType==="SERVICE"?"ACC-4100":"ACC-4200"),costAccount:only?.costAccount||(only?.itemType==="SERVICE"?"ACC-5200":"ACC-5100"),deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
+function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||"",costAccount:only?.costAccount||"",deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
 
 export default function SalesQuoteCycle({quoteId}:{quoteId:string}){
   const router=useRouter();
