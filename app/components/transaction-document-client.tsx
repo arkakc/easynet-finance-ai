@@ -172,7 +172,17 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     "projectName",
     "projectCode",
   ]);
-  const fields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
+  const compactHeaderHidden=new Set([
+    "status",
+    "currency",
+    "netAmount",
+    "gstAmount",
+    "totalAmount",
+    "baseNetAmount",
+    "baseGstAmount",
+    "baseTotalAmount",
+  ]);
+  const fields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&!compactHeaderHidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
   const linkedValue=(hrefValue:string,label:string)=>hrefValue?<Link prefetch={false} href={hrefValue}>{label}</Link>:label;
   const fieldDisplay=(key:string,value:unknown)=>{
     if(key==="status"&&type==="invoice"&&!isCreditNote)return publicStatus;
