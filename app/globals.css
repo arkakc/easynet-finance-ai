@@ -3774,3 +3774,283 @@ label:has(textarea[required])::after,
   color: #64748b;
   font-size: 0.92rem;
 }
+
+
+/* =========================================================
+   SYSTEM-WIDE ADVANCED DOCTYPE FORM UX
+   Shared visual system for transaction/master-data forms.
+========================================================= */
+.form-title-row {
+  width: 100%;
+  align-items: center;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e8edf3;
+}
+
+.form-title-row > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.form-title-row h2,
+.form-title-row h3,
+.form-title-row h4 {
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0 0 5px !important;
+  line-height: 1.3;
+}
+
+.form-title-row .small {
+  display: block;
+  max-width: 900px;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.form-grid {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  column-gap: 28px;
+  row-gap: 20px;
+  align-items: start;
+}
+
+.form-grid > label,
+.quick-modal-form label,
+.settings-field-label,
+.coa-form-group,
+.finance-modal-field {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  color: #334155;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+}
+
+.form-grid > label > input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.form-grid > label > select,
+.form-grid > label > textarea,
+.form-grid .searchable-select-control > input,
+.quick-modal-form input:not([type="checkbox"]):not([type="radio"]),
+.quick-modal-form select,
+.quick-modal-form textarea,
+.settings-field-label input:not([type="checkbox"]):not([type="radio"]),
+.settings-field-label select,
+.settings-field-label textarea,
+.coa-form-group input:not([type="checkbox"]):not([type="radio"]),
+.coa-form-group select,
+.coa-form-group textarea,
+.finance-modal-field input:not([type="checkbox"]):not([type="radio"]),
+.finance-modal-field select,
+.finance-modal-field textarea {
+  min-height: 46px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 10px 13px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.025);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.form-grid > label > textarea,
+.quick-modal-form textarea,
+.settings-field-label textarea,
+.coa-form-group textarea,
+.finance-modal-field textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.form-grid > label > input:hover:not(:disabled),
+.form-grid > label > select:hover:not(:disabled),
+.form-grid > label > textarea:hover:not(:disabled),
+.form-grid .searchable-select-control > input:hover:not(:disabled),
+.quick-modal-form input:hover:not(:disabled),
+.quick-modal-form select:hover:not(:disabled),
+.quick-modal-form textarea:hover:not(:disabled) {
+  border-color: #94a3b8;
+}
+
+.form-grid > label > input:focus,
+.form-grid > label > select:focus,
+.form-grid > label > textarea:focus,
+.form-grid .searchable-select-control > input:focus,
+.quick-modal-form input:focus,
+.quick-modal-form select:focus,
+.quick-modal-form textarea:focus,
+.settings-field-label input:focus,
+.settings-field-label select:focus,
+.settings-field-label textarea:focus,
+.coa-form-group input:focus,
+.coa-form-group select:focus,
+.coa-form-group textarea:focus,
+.finance-modal-field input:focus,
+.finance-modal-field select:focus,
+.finance-modal-field textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .11);
+}
+
+.form-grid > label > input:disabled,
+.form-grid > label > select:disabled,
+.form-grid > label > textarea:disabled,
+.form-grid .searchable-select-control > input:disabled,
+.quick-modal-form input:disabled,
+.quick-modal-form select:disabled,
+.quick-modal-form textarea:disabled {
+  background: #f8fafc;
+  color: #64748b;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.form-grid .small,
+.quick-modal-form .small,
+.settings-field-label .small,
+.coa-form-group .small,
+.finance-modal-field .small {
+  margin-top: -1px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+/* Required state should look deliberate, not like a stray asterisk floating in space. */
+.form-grid label:has(input[required]:not([type="hidden"])),
+.form-grid label:has(select[required]),
+.form-grid label:has(textarea[required]),
+.quick-modal-form label:has(input[required]:not([type="hidden"])),
+.quick-modal-form label:has(select[required]),
+.quick-modal-form label:has(textarea[required]),
+.settings-field-label:has(input[required]:not([type="hidden"])),
+.settings-field-label:has(select[required]),
+.settings-field-label:has(textarea[required]),
+.coa-form-group:has(input[required]:not([type="hidden"])),
+.coa-form-group:has(select[required]),
+.coa-form-group:has(textarea[required]),
+.finance-modal-field:has(input[required]:not([type="hidden"])),
+.finance-modal-field:has(select[required]),
+.finance-modal-field:has(textarea[required]) {
+  padding-right: 0;
+}
+
+.form-grid label:has(input[required]:not([type="hidden"]))::after,
+.form-grid label:has(select[required])::after,
+.form-grid label:has(textarea[required])::after,
+.quick-modal-form label:has(input[required]:not([type="hidden"]))::after,
+.quick-modal-form label:has(select[required])::after,
+.quick-modal-form label:has(textarea[required])::after,
+.settings-field-label:has(input[required]:not([type="hidden"]))::after,
+.settings-field-label:has(select[required])::after,
+.settings-field-label:has(textarea[required])::after,
+.coa-form-group:has(input[required]:not([type="hidden"]))::after,
+.coa-form-group:has(select[required])::after,
+.coa-form-group:has(textarea[required])::after,
+.finance-modal-field:has(input[required]:not([type="hidden"]))::after,
+.finance-modal-field:has(select[required])::after,
+.finance-modal-field:has(textarea[required])::after {
+  content: "Required";
+  position: absolute;
+  top: -2px;
+  right: 0;
+  color: #b91c1c;
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.field-action {
+  min-height: 30px;
+  margin-top: 0;
+}
+
+.field-action button,
+.field-action .button-link {
+  min-height: 30px !important;
+  padding: 5px 11px !important;
+  border-radius: 8px !important;
+  background: #f8fafc !important;
+}
+
+.searchable-select-control > input {
+  min-height: 46px;
+  padding-right: 46px !important;
+}
+
+.searchable-select-toggle {
+  width: 44px;
+  border-left-color: #e2e8f0;
+  color: #475569;
+}
+
+.searchable-select-menu {
+  margin-top: 2px;
+  max-height: 310px;
+  border-color: #dbe3ed;
+  border-radius: 12px;
+  padding: 7px;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, .16), 0 4px 10px rgba(15, 23, 42, .06);
+}
+
+.searchable-select-option {
+  min-height: 42px;
+  padding: 9px 11px;
+  border-radius: 8px;
+}
+
+.panel > .form-grid,
+form.panel > .form-grid {
+  margin-top: 2px;
+}
+
+form.panel {
+  overflow: visible;
+}
+
+@media (max-width: 900px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+    column-gap: 0;
+    row-gap: 18px;
+  }
+
+  .form-title-row {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel {
+    padding: 18px 16px;
+  }
+
+  .form-title-row {
+    gap: 10px;
+    flex-direction: column;
+  }
+
+  .form-title-row .auto-badge,
+  .form-title-row .badge {
+    align-self: flex-start;
+  }
+}
