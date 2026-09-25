@@ -18,6 +18,12 @@ function normalized(value: unknown) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function canonicalItemName(value: unknown) {
+  const raw = String(value || "").trim().toUpperCase();
+  const withoutTempPrefix = raw.replace(/^\s*(TMP|TEMP|TEMPORARY)\s*[-_:]*\s*/i, "");
+  return withoutTempPrefix.replace(/[^A-Z0-9]/g, "");
+}
+
 function isActive(value: unknown) {
   return !["false", "0", "no", "inactive"].includes(String(value ?? "true").trim().toLowerCase());
 }
@@ -73,6 +79,7 @@ async function loadSnapshot(quoteId: string) {
 function buildReadiness(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
   const itemByIdentity = new Map<string, any>();
   const itemsByName = new Map<string, any[]>();
+  const itemsByCanonicalName = new Map<string, any[]>();
   for (const item of snapshot.items) {
     const id = itemIdentity(item);
     const code = String(item.itemCode || item.itemId || "").trim();
@@ -80,6 +87,8 @@ function buildReadiness(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
     if (code) itemByIdentity.set(normalized(code), item);
     const nameKey = normalized(item.itemName);
     if (nameKey) itemsByName.set(nameKey, [...(itemsByName.get(nameKey) || []), item]);
+    const canonicalKey = canonicalItemName(item.itemName);
+    if (canonicalKey) itemsByCanonicalName.set(canonicalKey, [...(itemsByCanonicalName.get(canonicalKey) || []), item]);
   }
 
   const activeInvoiceIds = new Set(snapshot.invoices.map((row: any) => String(row.invoiceId || "")));
@@ -97,6 +106,8 @@ function buildReadiness(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
     const persistedItemId = String(line.itemId || "").trim();
     const originalName = lineName(line);
     const exactMatches = itemsByName.get(normalized(originalName)) || [];
+    const canonicalMatches = itemsByCanonicalName.get(canonicalItemName(originalName)) || [];
+    const candidateMatches = exactMatches.length ? exactMatches : canonicalMatches;
     const item = persistedItemId ? itemByIdentity.get(normalized(persistedItemId)) : undefined;
     if (!persistedItemId) {
       temporaryLines.push({
@@ -105,9 +116,9 @@ function buildReadiness(snapshot: Awaited<ReturnType<typeof loadSnapshot>>) {
         originalTempItemName: originalName,
         itemName: originalName,
         qty: Number(line.qty || 0),
-        uom: String(line.uom || exactMatches[0]?.uom || "Each"),
+        uom: String(line.uom || candidateMatches[0]?.uom || "Each"),
         rate: Number(line.rate || 0),
-        existingCandidates: exactMatches.filter((candidate: any) => isActive(candidate.active)).map((candidate: any) => ({
+        existingCandidates: candidateMatches.filter((candidate: any) => isActive(candidate.active)).map((candidate: any) => ({
           itemId: itemIdentity(candidate),
           itemCode: String(candidate.itemCode || candidate.itemId || ""),
           itemName: String(candidate.itemName || ""),
@@ -237,11 +248,14 @@ export async function POST(request: Request) {
     const resolutionMap = new Map((body.resolutions || []).map((row) => [String(row.quoteLineId || ""), row]));
     const itemById = new Map<string, any>();
     const itemByName = new Map<string, any[]>();
+    const itemByCanonicalName = new Map<string, any[]>();
     for (const item of state.items) {
       const id = itemIdentity(item);
       if (id) itemById.set(id, item);
       const key = normalized(item.itemName);
       if (key) itemByName.set(key, [...(itemByName.get(key) || []), item]);
+      const canonicalKey = canonicalItemName(item.itemName);
+      if (canonicalKey) itemByCanonicalName.set(canonicalKey, [...(itemByCanonicalName.get(canonicalKey) || []), item]);
     }
 
     let sequence = nextSequence(state.items);
@@ -259,7 +273,9 @@ export async function POST(request: Request) {
       } else {
         const name = String(resolution.itemName || "").trim();
         if (name.length < 2) throw new Error(`Line ${line.lineNo}: Item Name is required`);
-        const exact = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const direct = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const canonical = (itemByCanonicalName.get(canonicalItemName(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const exact = direct.length ? direct : canonical;
         if (exact.length === 1) {
           item = exact[0];
           linkPlan.push({ line, item });
