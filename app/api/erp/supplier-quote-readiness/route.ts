@@ -17,6 +17,12 @@ function normalized(value: unknown) {
   return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function canonicalItemName(value: unknown) {
+  const raw = String(value || "").trim().toUpperCase();
+  const withoutTempPrefix = raw.replace(/^\s*(TMP|TEMP|TEMPORARY)\s*[-_:]*\s*/i, "");
+  return withoutTempPrefix.replace(/[^A-Z0-9]/g, "");
+}
+
 function isActive(value: unknown) {
   return !["false", "0", "no", "inactive"].includes(String(value ?? "true").trim().toLowerCase());
 }
@@ -48,9 +54,12 @@ async function snapshot(supplierQuoteId: string) {
   const existingPo = (convertedResult.rows || []).find((row: any) => !String(row.poNumber || "").toUpperCase().startsWith("SUPQ-")) || null;
   const items = itemResult.rows || [];
   const byName = new Map<string, any[]>();
+  const byCanonicalName = new Map<string, any[]>();
   for (const item of items) {
     const key = normalized(item.itemName);
     if (key) byName.set(key, [...(byName.get(key) || []), item]);
+    const canonicalKey = canonicalItemName(item.itemName);
+    if (canonicalKey) byCanonicalName.set(canonicalKey, [...(byCanonicalName.get(canonicalKey) || []), item]);
   }
   const lines = [...(lineResult.rows || [])].sort((a, b) => Number(a.lineNo || 0) - Number(b.lineNo || 0));
   const temporaryLines = lines
@@ -65,7 +74,9 @@ async function snapshot(supplierQuoteId: string) {
         qty: Number(line.qty || 0),
         uom: String(line.uom || "Each"),
         rate: Number(line.rate || 0),
-        existingCandidates: (byName.get(normalized(originalName)) || [])
+        existingCandidates: ((byName.get(normalized(originalName)) || []).length
+          ? (byName.get(normalized(originalName)) || [])
+          : (byCanonicalName.get(canonicalItemName(originalName)) || []))
           .filter((item: any) => isActive(item.active))
           .map((item: any) => ({
             itemId: String(item.itemId || item.itemCode || ""),
@@ -142,11 +153,14 @@ export async function POST(request: Request) {
     const resolutionMap = new Map((body.resolutions || []).map((row) => [String(row.poLineId || ""), row]));
     const itemById = new Map<string, any>();
     const itemByName = new Map<string, any[]>();
+    const itemByCanonicalName = new Map<string, any[]>();
     for (const item of state.items) {
       const id = String(item.itemId || item.itemCode || "");
       if (id) itemById.set(id, item);
       const key = normalized(item.itemName);
       if (key) itemByName.set(key, [...(itemByName.get(key) || []), item]);
+      const canonicalKey = canonicalItemName(item.itemName);
+      if (canonicalKey) itemByCanonicalName.set(canonicalKey, [...(itemByCanonicalName.get(canonicalKey) || []), item]);
     }
 
     let sequence = nextSequence(state.items);
@@ -166,7 +180,9 @@ export async function POST(request: Request) {
       } else {
         const name = String(resolution.itemName || "").trim();
         if (name.length < 2) throw new Error(`Line ${line.lineNo}: Item Name is required`);
-        const exact = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const direct = (itemByName.get(normalized(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const canonical = (itemByCanonicalName.get(canonicalItemName(name)) || []).filter((candidate: any) => isActive(candidate.active));
+        const exact = direct.length ? direct : canonical;
         if (exact.length === 1) {
           item = exact[0];
           linkPlan.push({ line, item });
