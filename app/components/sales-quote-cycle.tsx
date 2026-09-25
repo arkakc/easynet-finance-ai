@@ -54,6 +54,11 @@ export default function SalesQuoteCycle({quoteId}:{quoteId:string}){
     const orders=(transactionsBody.salesOrders||[]) as SalesOrderRef[];
     const linked=orders.find((row)=>String(row.sourceDocumentId||"")===quoteId)||orders.find((row)=>String(row.customerId||"")===String(next.quote.customerId||"")&&String(row.projectId||"")===String(next.quote.projectId||"")&&Math.abs(Number(row.totalAmount||0)-Number(next.quote.totalAmount||0))<0.01)||null;
     setSalesOrder(linked);
+    try{
+      const paymentResponse=await fetch(`/api/erp/source-payments?sourceDocumentId=${encodeURIComponent(quoteId)}&partyType=Customer&partyId=${encodeURIComponent(next.quote.customerId)}`,{cache:"no-store"});
+      const paymentBody=await paymentResponse.json();
+      if(paymentResponse.ok&&paymentBody.ok)setPayments((paymentBody.payments||[]) as Payment[]);
+    }catch{}
     const initial=Object.fromEntries((next.temporaryLines||[]).map((line)=>[line.quoteLineId,defaultDraft(line)]));setDrafts(initial);
     if((next.temporaryLines||[]).length&&!referencesLoaded)await loadReferences();
     if(["APPROVED","PART_INVOICED"].includes(String(next.quote.status||"").toUpperCase())){for(const line of next.temporaryLines||[]){const draft=initial[line.quoteLineId];if(draft&&!draft.existingItemId)void requestSuggestion(line.quoteLineId,draft.itemName,draft.itemType);}}
@@ -115,7 +120,31 @@ export default function SalesQuoteCycle({quoteId}:{quoteId:string}){
     <div className="form-title-row"><div><strong>Sales Quotation → Sales Order</strong><p className="small">Controlled workflow: approve quotation → create Sales Order → approve Sales Order → Delivery Note / Stock Out → Sales Invoice → Customer Receipt.</p></div><span className="auto-badge">{salesOrder?"APPROVED & CONVERTED":readiness.quote.status}</span></div>
     {message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}
 
-    {salesOrder&&<div className="document-meta" style={{marginTop:16}}><div><span>Linked Sales Order</span><strong><Link prefetch={false} href={`/transactions/quote/${encodeURIComponent(salesOrder.quoteId)}?returnModule=sales&returnTab=salesOrder&returnMode=list`}>{salesOrder.quoteNumber||salesOrder.quoteId}</Link></strong></div><div><span>Sales Order Status</span><strong>{salesOrder.status}</strong></div></div>}
+    {salesOrder&&<>
+      <div className="document-meta" style={{marginTop:16}}>
+        <div><span>Linked Sales Order</span><strong><Link prefetch={false} href={`/transactions/quote/${encodeURIComponent(salesOrder.quoteId)}?returnModule=sales&returnTab=salesOrder&returnMode=list`}>{salesOrder.quoteNumber||salesOrder.quoteId}</Link></strong></div>
+        <div><span>Sales Order Status</span><strong>{salesOrder.status}</strong></div>
+        <div><span>Customer Advance Created</span><strong>{money(totalCreated)}</strong></div>
+        <div><span>Customer Advance Posted</span><strong>{money(totalPosted)}</strong></div>
+      </div>
+      {payments.length>0&&<div className="table-wrap" style={{marginTop:16}}>
+        <div className="form-title-row" style={{marginBottom:10}}>
+          <div><h4>Linked Customer Advance / Payment Entries</h4><p className="small">Advance entries created against this Sales Quotation remain visible here after conversion to Sales Order for audit continuity.</p></div>
+          <span className="auto-badge">{payments.length} LINKED</span>
+        </div>
+        <table className="data-table">
+          <thead><tr><th>Payment Entry</th><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Journal</th></tr></thead>
+          <tbody>{[...payments].sort((a,b)=>createdValue(b)-createdValue(a)).map((row)=><tr key={row.paymentId}>
+            <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td>
+            <td>{row.paymentDate||"—"}</td>
+            <td>{money(row.amount)}</td>
+            <td>{row.paymentMethod||"—"}</td>
+            <td>{row.status||"DRAFT"}</td>
+            <td>{row.journalId?<Link prefetch={false} href={`/journals/${encodeURIComponent(row.journalId)}`}>{row.journalId}</Link>:"Not posted"}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    </>}
 
     {readiness.existingInvoices.length>0&&<div className="table-wrap" style={{marginTop:16}}><h4>Quotation-linked Sales Invoices</h4><table className="data-table"><thead><tr><th>Sales Invoice</th><th>Status</th><th>Total</th><th>Outstanding</th></tr></thead><tbody>{readiness.existingInvoices.map((row)=><tr key={row.invoiceId}><td><Link prefetch={false} href={`/transactions/invoice/${encodeURIComponent(row.invoiceId)}`}><strong>{row.invoiceNumber}</strong></Link></td><td>{row.status}</td><td>{money(row.totalAmount)}</td><td>{money(row.outstandingAmount)}</td></tr>)}</tbody></table></div>}
 
