@@ -158,6 +158,11 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const backMode=returnContext.returnMode&&VALID_MODES.has(returnContext.returnMode)?returnContext.returnMode:"menu";
   const backHref=`/transactions?module=${encodeURIComponent(backModule)}&tab=${encodeURIComponent(backTab)}&mode=${encodeURIComponent(backMode)}`;
   const backLabel=SECTION_LABELS[backTab]||"Transactions";
+  const paymentSourceBack=record&&type==="payment"&&String(record.sourceDocumentId||"").trim()
+    ? String(record.partyType||"")==="Supplier"
+      ? {href:`/transactions/purchaseOrder/${encodeURIComponent(String(record.sourceDocumentId))}`,label:"Purchase Order"}
+      : {href:`/transactions/quote/${encodeURIComponent(String(record.sourceDocumentId))}`,label:"Sales Quotation"}
+    : null;
 
   if(!config)return <section className="panel warning-panel"><strong>Unsupported transaction document type.</strong></section>;
 
@@ -227,7 +232,12 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
-      <Link prefetch={false} href={backHref}>← Back to {backLabel}</Link>
+      <div className="document-toolbar-back">
+        {paymentSourceBack
+          ? <Link prefetch={false} href={paymentSourceBack.href}>← Back to {paymentSourceBack.label}</Link>
+          : <Link prefetch={false} href={backHref}>← Back to {backLabel}</Link>}
+        {paymentSourceBack&&<Link prefetch={false} className="document-toolbar-secondary-back" href={backHref}>Back to {backLabel} list</Link>}
+      </div>
       <div className="row-actions">
         {error && (
           <details className="system-notice-tab">
