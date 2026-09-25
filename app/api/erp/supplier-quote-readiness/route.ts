@@ -34,11 +34,12 @@ function nextSequence(items: any[]) {
 }
 
 async function snapshot(supplierQuoteId: string) {
-  const [quoteResult, lineResult, itemResult, convertedResult] = await Promise.all([
+  const [quoteResult, lineResult, itemResult, convertedResult, accountResult] = await Promise.all([
     findRecords<any>("PurchaseOrders", { poId: supplierQuoteId }, 1),
     findRecords<any>("POLines", { poId: supplierQuoteId }, 500),
     listTable<any>("Items", 500, 0),
     findRecords<any>("PurchaseOrders", { sourceDocumentId: supplierQuoteId }, 20),
+    listTable<any>("Accounts", 500, 0),
   ]);
   const quote = quoteResult.rows[0];
   if (!quote || !String(quote.poNumber || "").toUpperCase().startsWith("SUPQ-")) {
@@ -83,6 +84,7 @@ async function snapshot(supplierQuoteId: string) {
     lines,
     items,
     existingPo,
+    accounts: accountResult.rows || [],
     readiness: {
       supplierQuoteId,
       supplierQuoteNumber: String(quote.poNumber || supplierQuoteId),
@@ -96,6 +98,15 @@ async function snapshot(supplierQuoteId: string) {
       } : null,
     },
   };
+}
+
+function validatePostingAccount(accounts:any[],accountId:string,kind:"revenue"|"cost"){
+  const parentIds=new Set(accounts.map((row:any)=>String(row.parentAccount||"")).filter(Boolean));
+  const account=accounts.find((row:any)=>String(row.accountId||"")===accountId);
+  if(!account||!isActive(account.active)||parentIds.has(accountId))throw new Error(`Invalid ${kind} posting account: ${accountId}`);
+  const type=String(account.accountType||"").toLowerCase();
+  if(kind==="revenue"&&!["income","revenue"].includes(type))throw new Error(`Revenue account must be an Income posting account: ${accountId}`);
+  if(kind==="cost"&&!["expense","cost of goods sold","cogs"].includes(type))throw new Error(`Cost account must be an Expense/COGS posting account: ${accountId}`);
 }
 
 export async function GET(request: Request) {
@@ -162,13 +173,17 @@ export async function POST(request: Request) {
         sequence += 1;
         const code = `ITEM-${String(sequence).padStart(5, "0")}`;
         const type = itemType(resolution.itemType);
+        const revenueAccount=String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4200"));
+        const costAccount=String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5100"));
+        validatePostingAccount(state.accounts,revenueAccount,"revenue");
+        validatePostingAccount(state.accounts,costAccount,"cost");
         item = {
           itemId: code,
           itemCode: code,
           itemName: name,
           itemType: type,
-          revenueAccount: String(resolution.revenueAccount || (type === "SERVICE" ? "ACC-4100" : "ACC-4200")),
-          costAccount: String(resolution.costAccount || (type === "SERVICE" ? "ACC-5200" : "ACC-5100")),
+          revenueAccount,
+          costAccount,
           defaultRate: 0,
           taxCode: "",
           active: true,
