@@ -12,7 +12,7 @@ type Draft={existingItemId:string;itemName:string;itemType:"STOCK"|"SERVICE"|"NO
 type Account={accountId:string;accountCode:string;accountName:string;accountType:string;parentAccount:string};
 type Suggestion={revenueAccountId:string;costAccountId:string;revenueAccountLabel:string;costAccountLabel:string;confidence:number;reason:string;source:"AI"|"RULE_FALLBACK"};
 
-function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||"ACC-4200",costAccount:only?.costAccount||"ACC-5100",deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
+function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||"",costAccount:only?.costAccount||"",deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
 
 export default function SupplierQuoteItemReadiness({supplierQuoteId}:{supplierQuoteId:string}){
   const router=useRouter();
