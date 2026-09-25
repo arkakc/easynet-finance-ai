@@ -114,6 +114,12 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   }
 
   useEffect(()=>{
+    const handleDocumentUpdated=()=>{void loadDocument(undefined,false);};
+    window.addEventListener("easynet:transaction-document-updated",handleDocumentUpdated);
+    return()=>window.removeEventListener("easynet:transaction-document-updated",handleDocumentUpdated);
+  },[loadDocument]);
+
+  useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
     setReturnContext({returnModule:params.get("returnModule")||undefined,returnTab:params.get("returnTab")||undefined,returnMode:params.get("returnMode")||undefined});
     const controller=new AbortController();
