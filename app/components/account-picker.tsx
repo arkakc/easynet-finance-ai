@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 export type AccountPickerOption = {
   accountId: string;
@@ -40,7 +40,7 @@ export default function AccountPicker({
   accounts,
   kind = "all",
   name,
-  placeholder = "Search account by code or name",
+  placeholder = "Select account",
   required,
   disabled,
 }: {
@@ -53,24 +53,23 @@ export default function AccountPicker({
   required?: boolean;
   disabled?: boolean;
 }) {
-  const listId = `${useId().replace(/:/g, "")}-${name}`;
   const parentIds = useMemo(() => new Set(accounts.map((row) => String(row.parentAccount || "")).filter(Boolean)), [accounts]);
   const options = useMemo(() => accounts.filter((row) => !parentIds.has(String(row.accountId || "")) && matchesKind(row, kind)), [accounts, kind, parentIds]);
-  const selected = options.find((row) => String(row.accountId) === String(value)) || accounts.find((row) => String(row.accountId) === String(value));
-  const [query, setQuery] = useState(selected ? label(selected) : value || "");
+  const selectedExists = options.some((row) => String(row.accountId) === String(value));
+  const legacySelected = !selectedExists && value ? accounts.find((row) => String(row.accountId) === String(value)) : undefined;
 
-  useEffect(() => setQuery(selected ? label(selected) : value || ""), [selected, value]);
-
-  function handleChange(next: string) {
-    setQuery(next);
-    const normalized = next.trim().toLowerCase();
-    const match = options.find((row) => [row.accountId, row.accountCode, label(row), row.accountName].filter(Boolean).some((candidate) => String(candidate).toLowerCase() === normalized));
-    onChange(match ? String(match.accountId) : next.trim());
-  }
-
-  return <>
-    <input list={listId} value={query} onChange={(event) => handleChange(event.target.value)} placeholder={placeholder} required={required} disabled={disabled} autoComplete="off" aria-label={`${name} search`} />
-    <input type="hidden" name={name} value={value} />
-    <datalist id={listId}>{options.map((row) => <option key={row.accountId} value={label(row)}>{label(row)}</option>)}</datalist>
-  </>;
+  return (
+    <select
+      name={name}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      required={required}
+      disabled={disabled}
+      aria-label={name}
+    >
+      <option value="">{placeholder}</option>
+      {legacySelected && <option value={String(legacySelected.accountId)}>{label(legacySelected)}</option>}
+      {options.map((row) => <option key={row.accountId} value={String(row.accountId)}>{label(row)}</option>)}
+    </select>
+  );
 }
