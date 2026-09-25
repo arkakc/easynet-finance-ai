@@ -72,6 +72,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[record,setRecord]=useState<any|null>(null);
   const[lines,setLines]=useState<any[]>([]);
   const[references,setReferences]=useState<any>({customers:[],suppliers:[],projects:[],accounts:[],items:[]});
+  const[documentLinks,setDocumentLinks]=useState<any[]>([]);
   const[loading,setLoading]=useState(true);
   const[error,setError]=useState("");
   const[returnContext,setReturnContext]=useState<ReturnContext>({});
@@ -86,6 +87,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     setRecord(body.record||null);
     setLines(body.lines||[]);
     setReferences(body.references||{});
+    setDocumentLinks(Array.isArray(body.documentLinks)?body.documentLinks:[]);
     setLoading(false);
   }, [type, id]);
 
@@ -267,6 +269,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
       </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
+        {documentLinks.length>0&&<section className="document-links-section">
+          <div className="document-section-heading document-links-heading">
+            <div><span className="document-section-kicker">Audit trail</span><h2>Document Links</h2></div>
+            <span className="document-section-count">{documentLinks.length} linked</span>
+          </div>
+          <div className="document-links-grid">
+            {documentLinks.map((link:any,index:number)=><div className="document-link-card" key={`${link.direction}-${link.type}-${link.id}-${index}`}>
+              <div className="document-link-direction">{link.direction==="previous"?"Previous document":"Next document"}</div>
+              <strong className="document-link-label">{link.label}</strong>
+              <Link prefetch={false} className="document-link-id" href={String(link.href||"#")}>{link.number||link.id}</Link>
+            </div>)}
+          </div>
+        </section>}
         {(previous||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
         {previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
         {fields.length>0&&<div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>}
