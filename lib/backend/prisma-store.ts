@@ -568,6 +568,54 @@ export async function prismaListTable<T = any>(table: string, limit = 500, offse
       });
       return rows.map(mapItem).filter(Boolean) as T[];
     }
+    case "QuoteLines": {
+      const existing = await prisma.quoteLine.findFirst({ where: { id: idValue } });
+      if (!existing) throw new Error(`QuoteLine ${idValue} not found`);
+      let itemId: string | null | undefined;
+      if (patch.itemId !== undefined) {
+        const requested = String(patch.itemId || "").trim();
+        if (!requested) itemId = null;
+        else {
+          const item = await prisma.item.findFirst({ where: { OR: [{ id: requested }, { code: requested }] } });
+          if (!item) throw new Error(`Item ${requested} not found for QuoteLine ${idValue}`);
+          itemId = item.id;
+        }
+      }
+      const updated = await prisma.quoteLine.update({
+        where: { id: existing.id },
+        data: {
+          itemId,
+          unit: patch.uom !== undefined ? String(patch.uom || "Each") : undefined,
+          description: patch.description !== undefined ? String(patch.description || "") : undefined,
+        },
+      });
+      return mapQuoteLine(updated) as T;
+    }
+
+    case "POLines": {
+      const existing = await prisma.pOLine.findFirst({ where: { id: idValue } });
+      if (!existing) throw new Error(`POLine ${idValue} not found`);
+      let itemId: string | null | undefined;
+      if (patch.itemId !== undefined) {
+        const requested = String(patch.itemId || "").trim();
+        if (!requested) itemId = null;
+        else {
+          const item = await prisma.item.findFirst({ where: { OR: [{ id: requested }, { code: requested }] } });
+          if (!item) throw new Error(`Item ${requested} not found for POLine ${idValue}`);
+          itemId = item.id;
+        }
+      }
+      const updated = await prisma.pOLine.update({
+        where: { id: existing.id },
+        data: {
+          itemId,
+          unit: patch.uom !== undefined ? String(patch.uom || "Each") : undefined,
+          description: patch.description !== undefined ? String(patch.description || "") : undefined,
+        },
+      });
+      return mapPOLine(updated) as T;
+    }
+
     case "PurchaseOrders": {
       const rows = await prisma.purchaseOrder.findMany({
         take: limit,
