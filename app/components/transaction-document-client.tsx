@@ -196,8 +196,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     if(key==="projectId")return linkedValue(masterHref("project",value),named(value,projectMap));
     if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);
     if(key==="exchangeRate"){
-      if(transactionCurrency===baseCurrency)return "1.00000000";
-      return `1 ${transactionCurrency} = ${n(value).toFixed(8).replace(/0+$/,"").replace(/\.$/,"")} ${baseCurrency}`;
+      if(transactionCurrency===baseCurrency)return "1.00";
+      const rate=n(value).toFixed(6).replace(/0+$/,"").replace(/\.$/,"");
+      return `1 ${transactionCurrency} = ${rate} ${baseCurrency}`;
     }
     if(moneyFields.has(key))return transactionMoney(value);
     if(baseMoneyFields.has(key))return baseMoney(value);
