@@ -44,6 +44,9 @@ type BankAccountDraft = {
   reconciliationCount?: number;
   postedJournalCount?: number;
   hasHistory?: boolean;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type RetainedDocument = {
@@ -158,6 +161,7 @@ export default function SettingsPage() {
   const [saveStatusText, setSaveStatusText] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState("");
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
+  const [expandedHistoricalBankId, setExpandedHistoricalBankId] = useState<string | null>(null);
 
   // Form Fields
   const [companyName, setCompanyName] = useState("");
@@ -1170,21 +1174,73 @@ export default function SettingsPage() {
                 <span className="settings-field-hint">Retained for audit traceability</span>
               </div>
               <div className="bank-account-stack" style={{ marginTop: 8 }}>
-                {historicalBankAccounts.map((row) => (
-                  <div className="bank-account-card" key={row.localId} style={{ opacity: 0.82 }}>
-                    <div className="form-title-row">
-                      <div>
-                        <strong>{row.displayName || row.bankName || row.code || "Historical Bank"}</strong>
-                        {row.code && <span className="settings-field-hint" style={{ marginLeft: 8 }}>{row.code}</span>}
-                      </div>
-                      <span className="settings-badge-required">Inactive / Retained</span>
+                {historicalBankAccounts.map((row) => {
+                  const isExpanded = expandedHistoricalBankId === row.localId;
+                  return (
+                    <div className="bank-account-card" key={row.localId} style={{ opacity: 0.9 }}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedHistoricalBankId((current) => current === row.localId ? null : row.localId)}
+                        aria-expanded={isExpanded}
+                        style={{
+                          width: "100%",
+                          border: 0,
+                          background: "transparent",
+                          padding: 0,
+                          textAlign: "left",
+                          cursor: "pointer",
+                          color: "inherit",
+                          font: "inherit",
+                        }}
+                        title="Click to view retained bank master details"
+                      >
+                        <div className="form-title-row">
+                          <div>
+                            <strong>{row.displayName || row.bankName || row.code || "Historical Bank"}</strong>
+                            {row.code && <span className="settings-field-hint" style={{ marginLeft: 8 }}>{row.code}</span>}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span className="settings-badge-required">Inactive / Retained</span>
+                            <span aria-hidden="true" style={{ fontSize: 16 }}>{isExpanded ? "▾" : "▸"}</span>
+                          </div>
+                        </div>
+                        <div className="settings-field-hint" style={{ marginTop: 6 }}>
+                          {row.bankName} · {row.accountNumber} · {row.currency}
+                          {row.linkedAccountName ? ` · Former GL: ${row.linkedAccountName}` : ""}
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            paddingTop: 12,
+                            borderTop: "1px solid var(--border, #e2e8f0)",
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                            gap: 10,
+                          }}
+                        >
+                          <div><strong>Bank Master ID</strong><div className="settings-field-hint">{row.code || row.id || "—"}</div></div>
+                          <div><strong>Bank Name</strong><div className="settings-field-hint">{row.bankName || "—"}</div></div>
+                          <div><strong>Account Number</strong><div className="settings-field-hint">{row.accountNumber || "—"}</div></div>
+                          <div><strong>BSB / Branch Code</strong><div className="settings-field-hint">{row.bsb || "—"}</div></div>
+                          <div><strong>Currency</strong><div className="settings-field-hint">{row.currency || "—"}</div></div>
+                          <div><strong>Status</strong><div className="settings-field-hint">Inactive / Retained</div></div>
+                          <div><strong>Posted GL Lines</strong><div className="settings-field-hint">{row.postedJournalCount || 0}</div></div>
+                          <div><strong>Bank Transactions</strong><div className="settings-field-hint">{row.transactionCount || 0}</div></div>
+                          <div><strong>Reconciliations</strong><div className="settings-field-hint">{row.reconciliationCount || 0}</div></div>
+                          <div><strong>Created</strong><div className="settings-field-hint">{row.createdAt ? new Date(row.createdAt).toLocaleString() : "—"}</div></div>
+                          <div><strong>Last Updated</strong><div className="settings-field-hint">{row.updatedAt ? new Date(row.updatedAt).toLocaleString() : "—"}</div></div>
+                          <div style={{ gridColumn: "1 / -1" }}>
+                            <strong>Audit Note</strong>
+                            <div className="settings-field-hint" style={{ marginTop: 4 }}>{row.notes || "Retained for audit traceability."}</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="settings-field-hint" style={{ marginTop: 6 }}>
-                      {row.bankName} · {row.accountNumber} · {row.currency}
-                      {row.linkedAccountName ? ` · Former GL: ${row.linkedAccountName}` : ""}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
