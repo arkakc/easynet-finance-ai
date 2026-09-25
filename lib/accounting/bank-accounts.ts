@@ -265,6 +265,7 @@ export function toPublicBankAccount(row: any) {
     linkedAccountName: row.chartOfAccounts?.name || "",
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
+    notes: row.notes || "",
     transactionCount: Number(row._count?.transactions || 0),
     reconciliationCount: Number(row._count?.reconciliations || 0),
     postedJournalCount: Number(row.chartOfAccounts?.journalLines?.length || 0),
