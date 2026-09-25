@@ -254,11 +254,22 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </div>
     </div>
     <section className="document-sheet">
-      <header className="document-header"><div><div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div><h1>{title}</h1><div className="document-number">{number}</div></div><div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div></header>
+      <header className="document-header">
+        <div className="document-header-main">
+          <div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div>
+          <h1>{title}</h1>
+          <div className="document-header-subline">
+            <span className="document-number">{number}</span>
+            <span className="document-type-note">Finance document</span>
+          </div>
+        </div>
+        <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
+      </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
-        {previous&&<div className="document-meta" style={{marginBottom:20}}><div><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div></div>}
-        <div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>
-        {lines.length>0&&<div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`${baseCurrency} ${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>{transactionMoney(line.rate)}</td><td>{transactionMoney(line.netAmount)}</td><td>{transactionMoney(line.gstAmount)}</td><td><strong>{transactionMoney(line.totalAmount)}</strong></td></tr>;})}</tbody></table></div>}
+        {(previous||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
+        {previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
+        {fields.length>0&&<div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>}
+        {lines.length>0&&<><div className="document-section-heading document-lines-heading"><div><span className="document-section-kicker">Items</span><h2>Line items</h2></div><span className="document-section-count">{lines.length} line{lines.length===1?"":"s"}</span></div><div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`${baseCurrency} ${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>{transactionMoney(line.rate)}</td><td>{transactionMoney(line.netAmount)}</td><td>{transactionMoney(line.gstAmount)}</td><td><strong>{transactionMoney(line.totalAmount)}</strong></td></tr>;})}</tbody></table></div></>}
         {lines.length>0&&(()=>{
           const lineNetTotal = lines.reduce((sum: number, l: any) => sum + n(l.netAmount || (n(l.qty) * n(l.rate))), 0);
           const lineGstTotal = lines.reduce((sum: number, l: any) => sum + n(l.gstAmount), 0);
@@ -267,22 +278,22 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
           const docGst = n(record.gstAmount ?? record.taxTotal ?? lineGstTotal);
           const docTotal = n(record.totalAmount ?? record.total ?? lineGrandTotal);
           return (
-            <div style={{ display: "flex", justifyContent: "flex-end", margin: "18px 0 24px" }}>
-              <div style={{ width: "min(380px, 100%)", border: "1px solid #cbd5e1", borderRadius: 8, background: "#f8fafc", padding: "14px 18px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
+            <div className="document-totals-wrap">
+              <div className="document-totals-card">
+                <div className="document-total-row">
                   <span>Net Total</span>
                   <strong>{transactionMoney(docNet)}</strong>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", color: "#475569", fontSize: "0.95rem" }}>
+                <div className="document-total-row">
                   <span>GST</span>
                   <strong>{transactionMoney(docGst)}</strong>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", borderTop: "2px solid #cbd5e1", marginTop: 6, fontSize: "1.15rem", color: "#0f172a" }}>
-                  <strong>Total</strong>
-                  <strong style={{ color: "#0f172a" }}>{transactionMoney(docTotal)}</strong>
+                <div className="document-total-row document-total-grand">
+                  <span>Total</span>
+                  <strong>{transactionMoney(docTotal)}</strong>
                 </div>
                 {transactionCurrency !== baseCurrency && n(record.baseTotalAmount) > 0 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 2px", marginTop: 6, color: "#475569", fontSize: "0.9rem" }}>
+                  <div className="document-total-row document-total-base">
                     <span>Base Total</span>
                     <strong>{baseMoney(record.baseTotalAmount)}</strong>
                   </div>
