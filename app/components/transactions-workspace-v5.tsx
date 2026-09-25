@@ -138,7 +138,7 @@ export default function TransactionsWorkspaceV5(){
   useEffect(()=>{const params=new URLSearchParams(searchParamsKey);const requestedModule=params.get("module");const resolvedModule:Module=requestedModule==="purchase"||requestedModule==="expense"?requestedModule:"sales";const requestedTab=params.get("tab") as Tab|null;const resolvedTab=requestedTab&&MODULE_TABS[resolvedModule].includes(requestedTab)?requestedTab:defaultTab(resolvedModule);const requestedMode=params.get("mode");const resolvedMode:SectionMode=requestedMode==="create"?requestedMode:"list";setModule(resolvedModule);setTab(resolvedTab);setSectionMode(resolvedMode);setInitialized(true);},[searchParamsKey]);
   useEffect(()=>{if(!initialized)return;if(sectionMode==="list"){void loadTransactions(true);if(!mastersLoaded)void loadMasters();if(tab==="purchaseOrder"&&!receiptStatesLoaded)void loadReceiptStates();}if(sectionMode==="create"){if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder","supplierInvoice","expense"].includes(tab)&&!mastersLoaded)void loadMasters();if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder"].includes(tab)&&!itemsLoaded)void loadItems();if(["supplierInvoice","deliveryNote"].includes(tab)&&!existingLoaded)void loadTransactions();if(tab==="expense"||tab==="salesInvoice")void loadAccountOptions();if(numberMeta[tab])void loadNextDocumentNo(tab);}},[initialized,sectionMode,tab]);
 
-  const salesSide=module==="sales";const commercial=["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder"].includes(tab);const supplierQuotation=tab==="supplierQuote";const partyOptions=salesSide?masters.customers:masters.suppliers;
+  const salesSide=module==="sales";const commercial=["salesQuote","supplierQuote"].includes(tab);const controlledCreateBlocked=["salesOrder","salesInvoice","purchaseOrder"].includes(tab);const supplierQuotation=tab==="supplierQuote";const partyOptions=salesSide?masters.customers:masters.suppliers;
   const projectOptions=useMemo(()=>{if(!salesSide||!selectedParty)return masters.projects;const linked=masters.projects.filter(project=>String(project.customerId||"")===selectedParty);return linked.length?linked:masters.projects;},[salesSide,selectedParty,masters.projects]);
   const subtotal=useMemo(()=>lines.reduce((sum,line)=>sum+(Number(line.qty)||0)*(Number(line.rate)||0),0),[lines]);const gstAmount=useMemo(()=>subtotal*((Number(gstRate)||0)/100),[subtotal,gstRate]);const netTotal=subtotal+gstAmount;
   const deliveryReadySalesOrders=useMemo(()=>tx.salesOrders.filter((row:any)=>["APPROVED","PART DELIVERED"].includes(normalizedStatus(row.status))),[tx.salesOrders]);
@@ -401,16 +401,42 @@ export default function TransactionsWorkspaceV5(){
       </button>
       <button
         type="button"
-        disabled={globallyBusy}
+        disabled={globallyBusy||controlledCreateBlocked}
         className={sectionMode==="create"?"tab active":"tab"}
         style={{padding:"8px 18px",borderRadius:"6px",fontWeight:600,display:"inline-flex",alignItems:"center",gap:"8px"}}
         onClick={()=>openMode("create")}
+        title={controlledCreateBlocked?"Created only from the previous approved document in the controlled flow.":undefined}
       >
-        <span>➕</span> {section.createLabel}
+        <span>{controlledCreateBlocked?"🔗":"➕"}</span> {controlledCreateBlocked?(
+          tab==="salesOrder"?"Create from Sales Quotation":
+          tab==="salesInvoice"?"Create from Sales Order":
+          "Create from Supplier Quotation"
+        ):section.createLabel}
       </button>
     </div>
 
     {sectionMode==="create"&&<section className={`panel ${styles.contextBar}`}><button type="button" disabled={globallyBusy} className="secondary" onClick={()=>openMode("list")}>← Back to {section.listLabel}</button><span className={styles.contextTitle}>{section.createLabel}</span></section>}
+
+    {sectionMode==="create"&&controlledCreateBlocked&&<section className="panel">
+      <div className="form-title-row">
+        <div>
+          <h3>Controlled Document Flow</h3>
+          <p className="small">Direct entry is blocked for audit integrity. Create this document from its approved previous document so the full sales/purchase chain stays traceable.</p>
+        </div>
+        <span className="auto-badge">FLOW CONTROLLED</span>
+      </div>
+      <div className="button-row">
+        <button type="button" onClick={()=>{
+          const upstream:Tab=tab==="salesOrder"?"salesQuote":tab==="salesInvoice"?"salesOrder":"supplierQuote";
+          setTab(upstream);
+          setSectionMode("list");
+          syncUrl(module,upstream,"list");
+          void loadTransactions(true);
+        }}>
+          {tab==="salesOrder"?"Open Sales Quotations":tab==="salesInvoice"?"Open Sales Orders":"Open Supplier Quotations"}
+        </button>
+      </div>
+    </section>}
 
     {sectionMode==="create"&&commercial&&<form className="panel" onSubmit={submitCommercial} onInvalidCapture={invalidCommercialField}>
       <div className="form-title-row"><div><h3>{section.createLabel}</h3><p className="small">{supplierQuotation?"Select an existing Item or type a temporary supplier item. After approval, every TEMP line must be reviewed and saved permanently in Item Master before PO conversion.":"Operational rows remain Item Master linked. If a supporting master is missing, create it instantly without leaving this page or losing draft data."}</p></div><span className="auto-badge">Document No: {nextDocumentNo||"AUTO"}</span></div>
