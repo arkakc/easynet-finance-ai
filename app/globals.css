@@ -4498,3 +4498,22 @@ form.panel {
 .adjustable-form-table td {
   vertical-align: top;
 }
+
+
+.document-toolbar-back {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.document-toolbar-secondary-back {
+  color: #64748b;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.document-toolbar-secondary-back:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
