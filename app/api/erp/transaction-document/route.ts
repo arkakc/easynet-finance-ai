@@ -18,6 +18,7 @@ type DocumentLink = {
   number:string;
   href:string;
   type:string;
+  stage:number;
 };
 
 function clean(value:unknown){return String(value||"").trim();}
@@ -41,7 +42,7 @@ function uniqueLinks(links:DocumentLink[]){
     if(seen.has(key))return false;
     seen.add(key);
     return true;
-  });
+  }).sort((a,b)=>a.stage-b.stage||a.number.localeCompare(b.number));
 }
 
 async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]>{
@@ -64,6 +65,7 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
       number:number||id,
       type:linkType,
       href,
+      stage,
     });
   };
 
