@@ -219,17 +219,64 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
               <div className="card"><div className="label">Payment Entries</div><div className="value">{financial.summary?.payments||0}</div></div>
             </>}
           </div>
-          <div className="table-wrap" style={{marginTop:18}}>
-            <div className="form-title-row" style={{marginBottom:10}}>
-              <div><h4>Linked Documents</h4><p className="small">Complete document history for this {type}.</p></div>
-              <span className="auto-badge">{financial.documents?.length||0} LINKED</span>
+          <div className="party-document-explorer" style={{marginTop:18}}>
+            <div className="form-title-row party-document-explorer-head">
+              <div>
+                <h4>Linked Document Explorer</h4>
+                <p className="small">Search and filter the full document history. Only 25 rows are shown at a time.</p>
+              </div>
+              <span className="auto-badge">{filteredDocuments.length} OF {financial.documents?.length||0}</span>
             </div>
-            <table className="data-table">
-              <thead><tr><th>Document Type</th><th>Document</th><th>Status</th><th>Amount</th><th>Outstanding</th></tr></thead>
-              <tbody>{(financial.documents||[]).length?(financial.documents||[]).map((row:any,index:number)=><tr key={`${row.kind}-${row.number}-${index}`}><td>{row.kind}</td><td><Link href={row.href}><strong>{row.number}</strong></Link></td><td>{row.status||"—"}</td><td>{row.amount===null||row.amount===undefined?"—":money(row.amount)}</td><td>{row.outstanding===undefined?"—":money(row.outstanding)}</td></tr>):<tr><td colSpan={5}>No linked transactions yet.</td></tr>}</tbody>
-            </table>
-          </div>
-        </>}
+
+            <div className="party-document-toolbar">
+              <input
+                aria-label="Search linked documents"
+                placeholder="Search document no., type, status or amount…"
+                value={documentSearch}
+                onChange={(event)=>setDocumentSearch(event.target.value)}
+              />
+              <select aria-label="Filter by document type" value={documentType} onChange={(event)=>setDocumentType(event.target.value)}>
+                <option value="ALL">All document types</option>
+                {documentTypes.map((value)=><option key={value} value={value}>{value}</option>)}
+              </select>
+              <select aria-label="Filter by status" value={documentStatus} onChange={(event)=>setDocumentStatus(event.target.value)}>
+                <option value="ALL">All statuses</option>
+                {documentStatuses.map((value)=><option key={value} value={value}>{value}</option>)}
+              </select>
+              {(documentSearch||documentType!=="ALL"||documentStatus!=="ALL")&&
+                <button type="button" className="secondary" onClick={()=>{setDocumentSearch("");setDocumentType("ALL");setDocumentStatus("ALL");}}>Clear filters</button>}
+            </div>
+
+            <div className="table-wrap party-document-table">
+              <table className="data-table">
+                <thead><tr><th>Document Type</th><th>Document</th><th>Status</th><th>Amount</th><th>Outstanding</th></tr></thead>
+                <tbody>
+                  {pagedDocuments.length
+                    ? pagedDocuments.map((row:any,index:number)=><tr key={\`\${row.kind}-\${row.number}-\${(documentPage-1)*DOCUMENT_PAGE_SIZE+index}\`}>
+                        <td>{row.kind}</td>
+                        <td><Link href={row.href}><strong>{row.number}</strong></Link></td>
+                        <td><span className="party-doc-status">{row.status||"—"}</span></td>
+                        <td>{row.amount===null||row.amount===undefined?"—":money(row.amount)}</td>
+                        <td>{row.outstanding===undefined?"—":money(row.outstanding)}</td>
+                      </tr>)
+                    : <tr><td colSpan={5}>No linked documents match the current filters.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="party-document-pagination">
+              <span className="small">
+                {filteredDocuments.length
+                  ? \`Showing \${(documentPage-1)*DOCUMENT_PAGE_SIZE+1}–\${Math.min(documentPage*DOCUMENT_PAGE_SIZE,filteredDocuments.length)} of \${filteredDocuments.length}\`
+                  : "No results"}
+              </span>
+              <div className="button-row">
+                <button type="button" className="secondary" disabled={documentPage<=1} onClick={()=>setDocumentPage((page)=>Math.max(1,page-1))}>Previous</button>
+                <span className="auto-badge">Page {documentPage} / {documentPageCount}</span>
+                <button type="button" className="secondary" disabled={documentPage>=documentPageCount} onClick={()=>setDocumentPage((page)=>Math.min(documentPageCount,page+1))}>Next</button>
+              </div>
+            </div>
+          </div>        </>}
       </section>}
 
       <section className="panel">
