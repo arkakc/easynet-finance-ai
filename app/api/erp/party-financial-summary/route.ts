@@ -7,7 +7,7 @@ const n=(value:unknown)=>{const v=Number(value||0);return Number.isFinite(v)?v:0
 const activeStatus=(value:unknown)=>!["CANCELLED","REVERSED"].includes(clean(value).toUpperCase());
 const postedPayment=(row:any)=>clean(row.status).toUpperCase()==="POSTED"&&Boolean(clean(row.journalId));
 const recognizedDocument=(row:any)=>["POSTED","PARTLY_PAID","PAID"].includes(clean(row.status).toUpperCase());
-const movementDoc=(row:any)=>clean(row.movementId).replace(/-\d{3}$/,"")||clean(row.movementId);
+const movementDoc=(row:any)=>clean(row.movementId).replace(/-\d{3}$/,"")||clean(row.movementId);\nconst paymentMarker=(row:any,prefix:"SQ"|"PO")=>clean(row.reference).match(new RegExp(`^${prefix}:([^|]+)\\|`))?.[1]||"";\nconst rowDate=(row:any)=>clean(row.quoteDate||row.invoiceDate||row.poDate||row.billDate||row.paymentDate||row.date||row.createdAt).slice(0,10);
 
 function txHref(type:string,id:string){
   return `/transactions/${type}/${encodeURIComponent(id)}`;
@@ -45,12 +45,45 @@ export async function GET(request:NextRequest){
       const advancePayments=payments.filter((row:any)=>postedPayment(row)&&!clean(row.againstDocumentId));
       const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.unallocatedAmount??row.amount)),0);
 
+      const rootByOrderId=new Map<string,string>();
+      for(const row of salesOrders){
+        const orderId=clean(row.quoteId);
+        const root=clean(row.sourceDocumentId||row.sourceQuoteId||row.salesQuoteId)||orderId;
+        if(orderId)rootByOrderId.set(orderId,root);
+      }
+      const rootByInvoiceId=new Map<string,string>();
+      for(const row of invoices){
+        const sourceId=clean(row.sourceDocumentId||row.sourceSalesOrderId||row.salesOrderId||row.sourceQuoteId);
+        rootByInvoiceId.set(clean(row.invoiceId),rootByOrderId.get(sourceId)||sourceId||clean(row.invoiceId));
+      }
+
       const documents:any[]=[];
-      for(const row of salesQuotes)documents.push({kind:"Sales Quotation",number:clean(row.quoteNumber)||clean(row.quoteId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",clean(row.quoteId))});
-      for(const row of salesOrders)documents.push({kind:"Sales Order",number:clean(row.quoteNumber)||clean(row.quoteId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",clean(row.quoteId))});
-      for(const num of deliveryNumbers)documents.push({kind:"Delivery Note / Stock Out",number:num,status:"POSTED",amount:null,href:"/stock?mode=register"});
-      for(const row of invoices)documents.push({kind:clean(row.invoiceNumber).toUpperCase().startsWith("CN-")?"Sales Credit Note":"Sales Invoice",number:clean(row.invoiceNumber)||clean(row.invoiceId),status:clean(row.status),amount:n(row.totalAmount),outstanding:n(row.outstandingAmount??row.totalAmount),href:txHref("invoice",clean(row.invoiceId))});
-      for(const row of payments)documents.push({kind:clean(row.againstDocumentId)?"Sales Payment / Receipt":"Customer Advance / Receipt",number:clean(row.paymentNumber)||clean(row.paymentId),status:clean(row.status),amount:n(row.amount),href:txHref("payment",clean(row.paymentId))});
+      for(const row of salesQuotes){
+        const id=clean(row.quoteId);
+        documents.push({kind:"Sales Quotation",number:clean(row.quoteNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",id),date:rowDate(row),chainId:id});
+      }
+      for(const row of salesOrders){
+        const id=clean(row.quoteId);
+        documents.push({kind:"Sales Order",number:clean(row.quoteNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",id),date:rowDate(row),chainId:rootByOrderId.get(id)||id});
+      }
+      for(const row of movementsResult.rows||[]){
+        if(clean(row.movementType)!=="SALES_DELIVERY")continue;
+        const sourceId=clean(row.sourceDocumentId);
+        if(!quoteIds.has(sourceId)&&!orderIds.has(sourceId))continue;
+        const num=movementDoc(row);if(!num)continue;
+        documents.push({kind:"Delivery Note / Stock Out",number:num,status:"POSTED",amount:null,href:`/stock?mode=register&sourceDocumentId=${encodeURIComponent(sourceId)}`,date:rowDate(row),chainId:rootByOrderId.get(sourceId)||sourceId});
+      }
+      for(const row of invoices){
+        const id=clean(row.invoiceId);
+        documents.push({kind:clean(row.invoiceNumber).toUpperCase().startsWith("CN-")?"Sales Credit Note":"Sales Invoice",number:clean(row.invoiceNumber)||id,status:clean(row.status),amount:n(row.totalAmount),outstanding:n(row.outstandingAmount??row.totalAmount),href:txHref("invoice",id),date:rowDate(row),chainId:rootByInvoiceId.get(id)||id});
+      }
+      for(const row of payments){
+        const id=clean(row.paymentId);
+        const againstId=clean(row.againstDocumentId);
+        const sourceId=clean(row.sourceDocumentId);
+        const chainId=againstId?(rootByInvoiceId.get(againstId)||againstId):(rootByOrderId.get(sourceId)||sourceId||paymentMarker(row,"SQ")||id);
+        documents.push({kind:againstId?"Sales Payment / Receipt":"Customer Advance / Receipt",number:clean(row.paymentNumber)||id,status:clean(row.status),amount:n(row.amount),href:txHref("payment",id),date:rowDate(row),chainId});
+      }
 
       return NextResponse.json({ok:true,type,partyId,summary:{
         outstanding,
@@ -87,12 +120,45 @@ export async function GET(request:NextRequest){
     const advancePayments=payments.filter((row:any)=>postedPayment(row)&&!clean(row.againstDocumentId));
     const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.unallocatedAmount??row.amount)),0);
 
+    const rootByPoId=new Map<string,string>();
+    for(const row of purchaseOrders){
+      const poId=clean(row.poId);
+      const root=clean(row.sourceDocumentId||row.sourceSupplierQuoteId||row.supplierQuoteId)||poId;
+      if(poId)rootByPoId.set(poId,root);
+    }
+    const rootByBillId=new Map<string,string>();
+    for(const row of bills){
+      const sourceId=clean(row.poId||row.sourceDocumentId||row.sourcePurchaseOrderId);
+      rootByBillId.set(clean(row.billId),rootByPoId.get(sourceId)||sourceId||clean(row.billId));
+    }
+
     const documents:any[]=[];
-    for(const row of supplierQuotes)documents.push({kind:"Supplier Quotation",number:clean(row.poNumber)||clean(row.poId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",clean(row.poId))});
-    for(const row of purchaseOrders)documents.push({kind:"Purchase Order",number:clean(row.poNumber)||clean(row.poId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",clean(row.poId))});
-    for(const num of receiptNumbers)documents.push({kind:"Purchase Receipt / GRN",number:num,status:"POSTED",amount:null,href:"/stock?mode=register"});
-    for(const row of bills)documents.push({kind:"Supplier Invoice",number:clean(row.billNumber)||clean(row.billId),status:clean(row.status),amount:n(row.totalAmount),outstanding:n(row.outstandingAmount??row.totalAmount),href:txHref("supplierBill",clean(row.billId))});
-    for(const row of payments)documents.push({kind:clean(row.againstDocumentId)?"Purchase Payment":"Supplier Advance / Payment",number:clean(row.paymentNumber)||clean(row.paymentId),status:clean(row.status),amount:n(row.amount),href:txHref("payment",clean(row.paymentId))});
+    for(const row of supplierQuotes){
+      const id=clean(row.poId);
+      documents.push({kind:"Supplier Quotation",number:clean(row.poNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",id),date:rowDate(row),chainId:id});
+    }
+    for(const row of purchaseOrders){
+      const id=clean(row.poId);
+      documents.push({kind:"Purchase Order",number:clean(row.poNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",id),date:rowDate(row),chainId:rootByPoId.get(id)||id});
+    }
+    for(const row of movementsResult.rows||[]){
+      if(clean(row.movementType)!=="PURCHASE_RECEIPT")continue;
+      const sourceId=clean(row.sourceDocumentId);
+      if(!poIds.has(sourceId))continue;
+      const num=movementDoc(row);if(!num)continue;
+      documents.push({kind:"Purchase Receipt / GRN",number:num,status:"POSTED",amount:null,href:`/stock?mode=register&sourcePo=${encodeURIComponent(sourceId)}`,date:rowDate(row),chainId:rootByPoId.get(sourceId)||sourceId});
+    }
+    for(const row of bills){
+      const id=clean(row.billId);
+      documents.push({kind:"Supplier Invoice",number:clean(row.billNumber)||id,status:clean(row.status),amount:n(row.totalAmount),outstanding:n(row.outstandingAmount??row.totalAmount),href:txHref("supplierBill",id),date:rowDate(row),chainId:rootByBillId.get(id)||id});
+    }
+    for(const row of payments){
+      const id=clean(row.paymentId);
+      const againstId=clean(row.againstDocumentId);
+      const sourceId=clean(row.sourceDocumentId);
+      const chainId=againstId?(rootByBillId.get(againstId)||againstId):(rootByPoId.get(sourceId)||sourceId||paymentMarker(row,"PO")||id);
+      documents.push({kind:againstId?"Purchase Payment":"Supplier Advance / Payment",number:clean(row.paymentNumber)||id,status:clean(row.status),amount:n(row.amount),href:txHref("payment",id),date:rowDate(row),chainId});
+    }
 
     return NextResponse.json({ok:true,type,partyId,summary:{
       outstanding,
