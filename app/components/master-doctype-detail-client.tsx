@@ -173,7 +173,7 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
         <div className="form-title-row">
           <div>
             <h3>{type==="customer"?"Customer Financial Position":"Supplier Financial Position"}</h3>
-            <p className="small">{type==="customer"?"Receivables, customer advances and linked sales documents in one audit view.":"Payables, supplier advances and linked purchase documents in one audit view."}</p>
+            <p className="small">{type==="customer"?"Posted receivables, available customer advances and linked sales documents in one audit view. Draft/unposted documents are shown in history but do not change the financial balances.":"Posted payables, available supplier prepayments and linked purchase documents in one audit view. Draft/unposted documents are shown in history but do not change the financial balances."}</p>
           </div>
           <span className="auto-badge">{financialLoading?"Loading…":"LIVE"}</span>
         </div>
@@ -181,20 +181,20 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
           <div className="document-meta party-financial-summary">
             <div><span>{type==="customer"?"Outstanding Receivable":"Outstanding Payable"}</span><strong>{money(financial.summary?.outstanding)}</strong></div>
             <div><span>{type==="customer"?"Customer Advance Available":"Supplier Advance Available"}</span><strong>{money(financial.summary?.advanceBalance)}</strong></div>
-            <div><span>Net Position</span><strong>{money(financial.summary?.netPosition)}</strong><small className="small">{Number(financial.summary?.netPosition||0)>=0?(type==="customer"?"Customer owes us":"We owe supplier"):(type==="customer"?"We hold excess customer advance":"Supplier advance exceeds payable")}</small></div>
+            <div><span>Net Commercial Exposure</span><strong>{money(financial.summary?.netExposure)}</strong><small className="small">{Number(financial.summary?.netExposure||0)>=0?(type==="customer"?"Receivable remaining after considering available advance":"Payable remaining after considering supplier prepayment"):(type==="customer"?"Available customer advance exceeds posted receivable":"Supplier prepayment exceeds posted payable")}. Informational only; balances remain separate in the ledger.</small></div>
           </div>
           <div className="grid party-document-counts">
             {type==="customer"?<>
               <div className="card"><div className="label">Sales Quotations</div><div className="value">{financial.summary?.salesQuotes||0}</div></div>
               <div className="card"><div className="label">Sales Orders</div><div className="value">{financial.summary?.salesOrders||0}</div></div>
               <div className="card"><div className="label">Deliveries</div><div className="value">{financial.summary?.deliveries||0}</div></div>
-              <div className="card"><div className="label">Sales Invoices</div><div className="value">{financial.summary?.invoices||0}</div></div>
+              <div className="card"><div className="label">Sales Invoices</div><div className="value">{financial.summary?.invoices||0}</div><div className="small">{financial.summary?.recognizedInvoiceCount||0} accounting-recognized</div></div>
               <div className="card"><div className="label">Payment Entries</div><div className="value">{financial.summary?.payments||0}</div></div>
             </>:<>
               <div className="card"><div className="label">Supplier Quotations</div><div className="value">{financial.summary?.supplierQuotes||0}</div></div>
               <div className="card"><div className="label">Purchase Orders</div><div className="value">{financial.summary?.purchaseOrders||0}</div></div>
               <div className="card"><div className="label">Purchase Receipts</div><div className="value">{financial.summary?.receipts||0}</div></div>
-              <div className="card"><div className="label">Supplier Invoices</div><div className="value">{financial.summary?.invoices||0}</div></div>
+              <div className="card"><div className="label">Supplier Invoices</div><div className="value">{financial.summary?.invoices||0}</div><div className="small">{financial.summary?.recognizedInvoiceCount||0} accounting-recognized</div></div>
               <div className="card"><div className="label">Payment Entries</div><div className="value">{financial.summary?.payments||0}</div></div>
             </>}
           </div>
