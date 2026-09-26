@@ -70,6 +70,11 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
   const [error, setError] = useState("");
   const [financial, setFinancial] = useState<any | null>(null);
   const [financialLoading, setFinancialLoading] = useState(false);
+  const [documentSearch, setDocumentSearch] = useState("");
+  const [documentType, setDocumentType] = useState("ALL");
+  const [documentStatus, setDocumentStatus] = useState("ALL");
+  const [documentPage, setDocumentPage] = useState(1);
+  const DOCUMENT_PAGE_SIZE = 25;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -115,6 +120,22 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
   }, [load]);
 
   const pageTitle = useMemo(() => record ? `${config.title}: ${text(record[config.nameKey]) || text(record[config.idKey])}` : `${config.title} Detail`, [config, record]);
+
+  const documentTypes = useMemo(() => Array.from(new Set((financial?.documents||[]).map((row:any)=>String(row.kind||"")).filter(Boolean))).sort(), [financial]);
+  const documentStatuses = useMemo(() => Array.from(new Set((financial?.documents||[]).map((row:any)=>String(row.status||"")).filter(Boolean))).sort(), [financial]);
+  const filteredDocuments = useMemo(() => {
+    const query=documentSearch.trim().toLowerCase();
+    return (financial?.documents||[]).filter((row:any)=>{
+      if(documentType!=="ALL"&&String(row.kind||"")!==documentType)return false;
+      if(documentStatus!=="ALL"&&String(row.status||"")!==documentStatus)return false;
+      if(!query)return true;
+      return [row.kind,row.number,row.status,row.amount,row.outstanding].some((value)=>String(value??"").toLowerCase().includes(query));
+    });
+  },[financial,documentSearch,documentType,documentStatus]);
+  const documentPageCount=Math.max(1,Math.ceil(filteredDocuments.length/DOCUMENT_PAGE_SIZE));
+  const pagedDocuments=useMemo(()=>filteredDocuments.slice((documentPage-1)*DOCUMENT_PAGE_SIZE,documentPage*DOCUMENT_PAGE_SIZE),[filteredDocuments,documentPage]);
+
+  useEffect(()=>{setDocumentPage(1);},[documentSearch,documentType,documentStatus]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
