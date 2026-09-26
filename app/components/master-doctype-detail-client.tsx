@@ -252,7 +252,7 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
                 <thead><tr><th>Document Type</th><th>Document</th><th>Status</th><th>Amount</th><th>Outstanding</th></tr></thead>
                 <tbody>
                   {pagedDocuments.length
-                    ? pagedDocuments.map((row:any,index:number)=><tr key={`\${row.kind}-\${row.number}-\${(documentPage-1)*DOCUMENT_PAGE_SIZE+index}`}>
+                    ? pagedDocuments.map((row:any,index:number)=><tr key={`${String(row.href||row.number||row.kind||"document")}-${(documentPage-1)*DOCUMENT_PAGE_SIZE+index}`}>
                         <td>{row.kind}</td>
                         <td><Link href={row.href}><strong>{row.number}</strong></Link></td>
                         <td><span className="party-doc-status">{row.status||"—"}</span></td>
