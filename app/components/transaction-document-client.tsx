@@ -254,6 +254,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const salesInvoiceSettlementReady=Boolean(record)&&type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)&&salesInvoiceOutstanding>0.001;
   const salesInvoicePaid=Boolean(record)&&type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
+  const previousDocument=documentLinks.filter((link:any)=>link.direction==="previous").at(-1)||null;
+  const nextDocument=documentLinks.find((link:any)=>link.direction==="next")||null;
+  const explorerHref=`/document-explorer?documentType=${encodeURIComponent(type)}&documentId=${encodeURIComponent(id)}`;
+  const showLegacyPrevious=Boolean(previous)&&documentLinks.length===0;
 
   return <div className="document-page">
     <div className="document-toolbar no-print">
@@ -310,21 +314,32 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
       </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
-        {documentLinks.length>0&&<section className="document-links-section">
-          <div className="document-section-heading document-links-heading">
-            <div><span className="document-section-kicker">Audit trail</span><h2>Document Links</h2></div>
-            <span className="document-section-count">{documentLinks.length} linked</span>
+        {documentLinks.length>0&&<section className="document-chain-compact no-print">
+          <div className="document-chain-title">
+            <div><span className="document-section-kicker">Workflow</span><h2>Document Flow</h2></div>
+            <Link prefetch={false} className="button-link secondary-link" href={explorerHref}>View Full Relationship</Link>
           </div>
-          <div className="document-links-grid">
-            {documentLinks.map((link:any,index:number)=><div className="document-link-card" key={`${link.direction}-${link.type}-${link.id}-${index}`}>
-              <div className="document-link-direction">{link.direction==="previous"?"Previous document":"Next document"}</div>
-              <strong className="document-link-label">{link.label}</strong>
-              <Link prefetch={false} className="document-link-id" href={String(link.href||"#")}>{link.number||link.id}</Link>
-            </div>)}
+          <div className="document-chain-strip">
+            <div className={`document-chain-node ${previousDocument?"linked":"muted"}`}>
+              <span>Previous</span>
+              {previousDocument?<><strong>{previousDocument.label}</strong><Link prefetch={false} href={String(previousDocument.href||"#")}>{previousDocument.number||previousDocument.id}</Link></>:<strong>None</strong>}
+            </div>
+            <div className="document-chain-arrow">→</div>
+            <div className="document-chain-node current">
+              <span>Current</span>
+              <strong>{title}</strong>
+              <b>{number}</b>
+            </div>
+            <div className="document-chain-arrow">→</div>
+            <div className={`document-chain-node ${nextDocument?"linked":"muted"}`}>
+              <span>Next</span>
+              {nextDocument?<><strong>{nextDocument.label}</strong><Link prefetch={false} href={String(nextDocument.href||"#")}>{nextDocument.number||nextDocument.id}</Link></>:<strong>Not created yet</strong>}
+            </div>
           </div>
+          {documentLinks.length>2&&<div className="small document-chain-more">{documentLinks.length-2} additional related document{documentLinks.length-2===1?"":"s"} available in the Relationship Explorer.</div>}
         </section>}
-        {(previous||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
-        {previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
+        {(showLegacyPrevious||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
+        {showLegacyPrevious&&previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
         {fields.length>0&&<div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>}
         {type==="payment"&&paymentAdvancedFields.length>0&&<details className="payment-advanced-details no-print">
           <summary>Advanced Accounting Details</summary>
