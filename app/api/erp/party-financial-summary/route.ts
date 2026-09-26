@@ -6,6 +6,7 @@ const clean=(value:unknown)=>String(value||"").trim();
 const n=(value:unknown)=>{const v=Number(value||0);return Number.isFinite(v)?v:0;};
 const activeStatus=(value:unknown)=>!["CANCELLED","REVERSED"].includes(clean(value).toUpperCase());
 const postedPayment=(row:any)=>clean(row.status).toUpperCase()==="POSTED"&&Boolean(clean(row.journalId));
+const recognizedDocument=(row:any)=>["POSTED","PARTLY_PAID","PAID"].includes(clean(row.status).toUpperCase());
 const movementDoc=(row:any)=>clean(row.movementId).replace(/-\d{3}$/,"")||clean(row.movementId);
 
 function txHref(type:string,id:string){
@@ -39,9 +40,10 @@ export async function GET(request:NextRequest){
         if(!quoteIds.has(clean(row.sourceDocumentId))&&!orderIds.has(clean(row.sourceDocumentId)))continue;
         const num=movementDoc(row);if(num)deliveryNumbers.add(num);
       }
-      const outstanding=invoices.reduce((sum:number,row:any)=>sum+n(row.outstandingAmount??row.totalAmount),0);
+      const recognizedInvoices=invoices.filter(recognizedDocument);
+      const outstanding=recognizedInvoices.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.outstandingAmount??row.totalAmount)),0);
       const advancePayments=payments.filter((row:any)=>postedPayment(row)&&!clean(row.againstDocumentId));
-      const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+n(row.unallocatedAmount??row.amount),0);
+      const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.unallocatedAmount??row.amount)),0);
 
       const documents:any[]=[];
       for(const row of salesQuotes)documents.push({kind:"Sales Quotation",number:clean(row.quoteNumber)||clean(row.quoteId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",clean(row.quoteId))});
@@ -53,7 +55,8 @@ export async function GET(request:NextRequest){
       return NextResponse.json({ok:true,type,partyId,summary:{
         outstanding,
         advanceBalance,
-        netPosition:outstanding-advanceBalance,
+        netExposure:outstanding-advanceBalance,
+        recognizedInvoiceCount:recognizedInvoices.length,
         salesQuotes:salesQuotes.length,
         salesOrders:salesOrders.length,
         deliveries:deliveryNumbers.size,
@@ -79,9 +82,10 @@ export async function GET(request:NextRequest){
       if(clean(row.movementType)!=="PURCHASE_RECEIPT"||!poIds.has(clean(row.sourceDocumentId)))continue;
       const num=movementDoc(row);if(num)receiptNumbers.add(num);
     }
-    const outstanding=bills.reduce((sum:number,row:any)=>sum+n(row.outstandingAmount??row.totalAmount),0);
+    const recognizedBills=bills.filter(recognizedDocument);
+    const outstanding=recognizedBills.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.outstandingAmount??row.totalAmount)),0);
     const advancePayments=payments.filter((row:any)=>postedPayment(row)&&!clean(row.againstDocumentId));
-    const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+n(row.unallocatedAmount??row.amount),0);
+    const advanceBalance=advancePayments.reduce((sum:number,row:any)=>sum+Math.max(0,n(row.unallocatedAmount??row.amount)),0);
 
     const documents:any[]=[];
     for(const row of supplierQuotes)documents.push({kind:"Supplier Quotation",number:clean(row.poNumber)||clean(row.poId),status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",clean(row.poId))});
@@ -93,7 +97,8 @@ export async function GET(request:NextRequest){
     return NextResponse.json({ok:true,type,partyId,summary:{
       outstanding,
       advanceBalance,
-      netPosition:outstanding-advanceBalance,
+      netExposure:outstanding-advanceBalance,
+      recognizedInvoiceCount:recognizedBills.length,
       supplierQuotes:supplierQuotes.length,
       purchaseOrders:purchaseOrders.length,
       receipts:receiptNumbers.size,
