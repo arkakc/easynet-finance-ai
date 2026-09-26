@@ -312,6 +312,7 @@ export async function GET(request:NextRequest){
 
     let config=type?CONFIG[type]:undefined;
     let result:{rows:any[]}={rows:[]};
+    let movementSearch:{number:string;kind:string}|null=null;
 
     if(config){
       await requirePermission(config.permission);
@@ -324,6 +325,27 @@ export async function GET(request:NextRequest){
         let candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.idField]:id},1);
         if(!candidate.rows[0])candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.numberField]:id},1);
         if(candidate.rows[0])matches.push({type:candidateType,config:candidateConfig,record:candidate.rows[0]});
+      }
+      if(matches.length===0){
+        const movementResult=await listTable<any>("StockMovements",500,0);
+        const movement=(movementResult.rows||[]).find((row:any)=>
+          movementDocumentNumber(row)===id&&["SALES_DELIVERY","PURCHASE_RECEIPT"].includes(clean(row.movementType))
+        );
+        if(movement){
+          const movementType=clean(movement.movementType);
+          const sourceId=clean(movement.sourceDocumentId);
+          if(movementType==="SALES_DELIVERY"){
+            let source=await findRecords<any>("Quotes",{quoteId:sourceId},1);
+            if(!source.rows[0])source=await findRecords<any>("Quotes",{quoteNumber:sourceId},1);
+            if(source.rows[0])matches.push({type:"quote",config:CONFIG.quote,record:source.rows[0]});
+            movementSearch={number:id,kind:"Delivery Note / Stock Out"};
+          }else{
+            let source=await findRecords<any>("PurchaseOrders",{poId:sourceId},1);
+            if(!source.rows[0])source=await findRecords<any>("PurchaseOrders",{poNumber:sourceId},1);
+            if(source.rows[0])matches.push({type:"purchaseOrder",config:CONFIG.purchaseOrder,record:source.rows[0]});
+            movementSearch={number:id,kind:"Purchase Receipt / GRN"};
+          }
+        }
       }
       if(matches.length===0)return NextResponse.json({ok:false,error:"Document not found"},{status:404});
       if(matches.length>1){
@@ -390,6 +412,7 @@ export async function GET(request:NextRequest){
       record,
       lines,
       documentLinks,
+      searchedDocument:movementSearch,
       references:{
         customers:customerResult.rows||[],
         suppliers:supplierResult.rows||[],
