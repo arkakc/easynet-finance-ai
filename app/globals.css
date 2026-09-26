@@ -4971,3 +4971,116 @@ form.panel {
   margin-top: 7px;
   font-size: 11px;
 }
+
+
+/* Compact full-chain document flow tabs */
+.document-flow-tabs {
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.document-flow-tabs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.document-flow-tabs-head strong {
+  display: block;
+  font-size: 14px;
+}
+
+.document-flow-explorer-link {
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.document-flow-tab-row {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.document-flow-stage-wrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.document-flow-tab {
+  min-width: 118px;
+  max-width: 170px;
+  padding: 7px 8px;
+  border: 1px solid #dbe3ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.document-flow-tab.current {
+  border-width: 2px;
+  padding: 6px 7px;
+}
+
+.document-flow-tab.empty {
+  opacity: .58;
+}
+
+.document-flow-tab-label {
+  display: block;
+  margin-bottom: 3px;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.document-flow-tab-links {
+  display: grid;
+  gap: 2px;
+  min-height: 16px;
+}
+
+.document-flow-tab-links a,
+.document-flow-current-number {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.document-flow-current-number {
+  color: #0f172a;
+}
+
+.document-flow-placeholder {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.document-flow-mini-arrow {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1;
+}
+
+@media (max-width: 760px) {
+  .document-flow-tabs-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .document-flow-tab {
+    min-width: 112px;
+  }
+}
