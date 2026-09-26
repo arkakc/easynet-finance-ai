@@ -67,7 +67,7 @@ export async function POST(request: Request) {
     const paymentId = documentSeriesId("Payment", Number(year()));
     const paymentNumber = await nextPaymentNumber();
     const userReference = input.reference || `${input.partyType} advance against ${String(input.partyType === "Customer" ? source.quoteNumber || input.sourceDocumentId : source.poNumber || input.sourceDocumentId)}`;
-    const row = await appendRecord("Payments", {
+    const created = await appendRecord<any>("Payments", {
       paymentId,
       paymentNumber,
       paymentType: input.partyType === "Customer" ? "RECEIVE" : "PAY",
@@ -86,7 +86,18 @@ export async function POST(request: Request) {
       status: "DRAFT",
     }, "advance-payment:source-linked");
 
-    return NextResponse.json({ ok: true, payment: row, remainingCapacity: round2(remainingCapacity - input.amount) });
+    const payment = created.row;
+    const createdPaymentId = String(payment?.paymentId || paymentId || "").trim();
+    const createdPaymentNumber = String(payment?.paymentNumber || paymentNumber || createdPaymentId).trim();
+    if (!createdPaymentId) throw new Error("Advance Payment was saved but the created Payment ID could not be resolved");
+
+    return NextResponse.json({
+      ok: true,
+      payment,
+      paymentId: createdPaymentId,
+      paymentNumber: createdPaymentNumber,
+      remainingCapacity: round2(remainingCapacity - input.amount),
+    });
   } catch (error) {
     const message = error instanceof z.ZodError
       ? error.errors.map((entry) => `${entry.path.join(".")}: ${entry.message}`).join("; ")
