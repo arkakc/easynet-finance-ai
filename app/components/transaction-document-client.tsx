@@ -314,7 +314,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
       </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
-        {documentLinks.length>0&&<section className="document-chain-compact no-print">
+        {type!=="expense"&&<section className="document-chain-compact no-print">
           <div className="document-chain-title">
             <div><span className="document-section-kicker">Workflow</span><h2>Document Flow</h2></div>
             <Link prefetch={false} className="button-link secondary-link" href={explorerHref}>View Full Relationship</Link>
