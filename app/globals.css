@@ -4926,3 +4926,48 @@ form.panel {
     padding: 11px;
   }
 }
+
+
+/* Compact document flow sizing refinement */
+.document-chain-compact {
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.document-chain-title {
+  margin-bottom: 9px;
+}
+
+.document-chain-title h2 {
+  font-size: 19px;
+}
+
+.document-chain-strip {
+  gap: 7px;
+}
+
+.document-chain-node {
+  padding: 9px 11px;
+  border-radius: 9px;
+}
+
+.document-chain-node span {
+  margin-bottom: 2px;
+  font-size: 10px;
+}
+
+.document-chain-node strong,
+.document-chain-node b,
+.document-chain-node a {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.document-chain-arrow {
+  font-size: 16px;
+}
+
+.document-chain-more {
+  margin-top: 7px;
+  font-size: 11px;
+}
