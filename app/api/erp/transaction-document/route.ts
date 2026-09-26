@@ -310,12 +310,16 @@ export async function GET(request:NextRequest){
     if(!config||!id)return NextResponse.json({ok:false,error:"Invalid document request"},{status:400});
     await requirePermission(config.permission);
 
-    const[result,lineResult]=await Promise.all([
-      findRecords<any>(config.table,{[config.idField]:id},1),
-      config.lineTable&&config.lineIdField?findRecords<any>(config.lineTable,{[config.lineIdField]:id},500):Promise.resolve({rows:[] as any[]}),
-    ]);
+    let result=await findRecords<any>(config.table,{[config.idField]:id},1);
+    if(!result.rows[0]){
+      result=await findRecords<any>(config.table,{[config.numberField]:id},1);
+    }
     const record=result.rows[0];
     if(!record)return NextResponse.json({ok:false,error:"Document not found"},{status:404});
+    const resolvedId=String(record[config.idField]||id);
+    const lineResult=config.lineTable&&config.lineIdField
+      ? await findRecords<any>(config.lineTable,{[config.lineIdField]:resolvedId},500)
+      : {rows:[] as any[]};
 
     if(type==="payment"){
       if(String(record.partyType)==="Customer")await requirePermission("sales.read");
@@ -351,7 +355,7 @@ export async function GET(request:NextRequest){
     return NextResponse.json({
       ok:true,
       type,
-      id,
+      id:resolvedId,
       number:String(record[config.numberField]||id),
       record,
       lines,
