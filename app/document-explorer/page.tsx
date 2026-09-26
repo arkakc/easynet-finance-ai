@@ -272,7 +272,7 @@ export default function DocumentExplorerPage(){
       <div className="form-title-row">
         <div>
           <h3>{sales?"Sales":"Purchase"} Relationship Table</h3>
-          <p className="small">{sales?"SQ → SO → Delivery → Sales Invoice → Advance → Final Receipt":"Supplier Quote → PO → GRN → Supplier Invoice → Advance → Final Payment"}</p>
+          <p className="small">{sales?"Sales Quotation → Customer Advance → Sales Order → Delivery Note → Sales Invoice / Credit Note → Final Receipt":"Supplier Quotation → Purchase Order → Supplier Advance → Purchase Receipt / GRN → Supplier Invoice → Final Payment"}</p>
         </div>
         <span className="auto-badge">{loading?"LOADING":`${chains.length} CHAIN${chains.length===1?"":"S"}`}</span>
       </div>
@@ -295,20 +295,29 @@ export default function DocumentExplorerPage(){
           <thead><tr>
             <th className="relationship-date-col">Date</th>
             <th><strong>{sales?"Sales Quotation":"Supplier Quotation"}</strong></th>
-            <th><strong>{sales?"Sales Order":"Purchase Order"}</strong></th>
+            <th><strong>{sales?"Customer Advance":"Purchase Order"}</strong></th>
+            <th><strong>{sales?"Sales Order":"Supplier Advance"}</strong></th>
             <th><strong>{sales?"Delivery Note":"Purchase Receipt / GRN"}</strong></th>
             <th><strong>{sales?"Sales Invoice / Credit Note":"Supplier Invoice"}</strong></th>
-            <th><strong>{sales?"Customer Advance":"Supplier Advance"}</strong></th>
             <th><strong>{sales?"Final Receipt":"Final Payment"}</strong></th>
           </tr></thead>
           <tbody>
             {visibleChains.length?visibleChains.map(chain=><tr key={chain.chainId}>
               <td className="relationship-date-col"><strong>{shortDate(chain.date)}</strong></td>
               <td>{cellDocuments(chain.documents,"quote")}</td>
-              <td>{cellDocuments(chain.documents,"order")}</td>
-              <td>{cellDocuments(chain.documents,"delivery")}</td>
-              <td>{cellDocuments(chain.documents,"invoice")}</td>
-              <td>{cellDocuments(chain.documents,"advance")}</td>
+              {sales
+                ? <>
+                    <td>{cellDocuments(chain.documents,"advance")}</td>
+                    <td>{cellDocuments(chain.documents,"order")}</td>
+                    <td>{cellDocuments(chain.documents,"delivery")}</td>
+                    <td>{cellDocuments(chain.documents,"invoice")}</td>
+                  </>
+                : <>
+                    <td>{cellDocuments(chain.documents,"order")}</td>
+                    <td>{cellDocuments(chain.documents,"advance")}</td>
+                    <td>{cellDocuments(chain.documents,"delivery")}</td>
+                    <td>{cellDocuments(chain.documents,"invoice")}</td>
+                  </>}
               <td>{cellDocuments(chain.documents,"final")}</td>
             </tr>):<tr><td colSpan={7} className="relationship-empty-row">{loading?"Loading relationship chains…":"No linked relationship loaded."}</td></tr>}
           </tbody>
