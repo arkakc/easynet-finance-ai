@@ -255,9 +255,40 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const salesInvoicePaid=Boolean(record)&&type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
   const orderedDocumentLinks=[...documentLinks].sort((a:any,b:any)=>Number(a.stage||0)-Number(b.stage||0)||String(a.number||"").localeCompare(String(b.number||"")));
-  const previousDocument=orderedDocumentLinks.filter((link:any)=>link.direction==="previous").at(-1)||null;
-  const nextDocument=orderedDocumentLinks.find((link:any)=>link.direction==="next")||null;
-  const explorerHref=`/document-explorer?documentType=${encodeURIComponent(type)}&documentId=${encodeURIComponent(id)}`;
+  const salesFlow=type==="quote"||type==="invoice"||(type==="payment"&&String(record?.partyType||"")==="Customer");
+  const currentStage=
+    type==="quote"?(isSalesOrder?20:10):
+    type==="invoice"?(isCreditNote?45:40):
+    type==="purchaseOrder"?(isSupplierQuotation?10:20):
+    type==="supplierBill"?40:
+    type==="payment"?(String(record?.againstDocumentId||"").trim()?50:(salesFlow?15:25)):
+    0;
+  const flowStages=salesFlow
+    ? [
+        {stage:10,label:"Sales Quotation"},
+        {stage:15,label:"Customer Advance"},
+        {stage:20,label:"Sales Order"},
+        {stage:30,label:"Delivery Note"},
+        {stage:40,label:"Sales Invoice"},
+        {stage:45,label:"Credit Note"},
+        {stage:50,label:"Final Receipt"},
+      ]
+    : [
+        {stage:10,label:"Supplier Quotation"},
+        {stage:20,label:"Purchase Order"},
+        {stage:25,label:"Supplier Advance"},
+        {stage:30,label:"Purchase Receipt / GRN"},
+        {stage:40,label:"Supplier Invoice"},
+        {stage:50,label:"Final Payment"},
+      ];
+  const linksByStage=new Map<number,any[]>();
+  for(const link of orderedDocumentLinks){
+    const stage=Number(link.stage||0);
+    const list=linksByStage.get(stage)||[];
+    list.push(link);
+    linksByStage.set(stage,list);
+  }
+  const explorerHref=`/document-explorer?documentId=${encodeURIComponent(number)}`;
   const showLegacyPrevious=Boolean(previous)&&documentLinks.length===0;
 
   return <div className="document-page">
@@ -315,29 +346,28 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
       </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
-        {type!=="expense"&&<section className="document-chain-compact no-print">
-          <div className="document-chain-title">
-            <div><span className="document-section-kicker">Workflow</span><h2>Document Flow</h2></div>
-            <Link prefetch={false} className="button-link secondary-link" href={explorerHref}>View Full Relationship</Link>
+        {type!=="expense"&&<section className="document-flow-tabs no-print">
+          <div className="document-flow-tabs-head">
+            <div><span className="document-section-kicker">Workflow</span><strong>Document Flow</strong></div>
+            <Link prefetch={false} className="document-flow-explorer-link" href={explorerHref}>View Full Relationship</Link>
           </div>
-          <div className="document-chain-strip">
-            <div className={`document-chain-node ${previousDocument?"linked":"muted"}`}>
-              <span>Previous</span>
-              {previousDocument?<><strong>{previousDocument.label}</strong><Link prefetch={false} href={String(previousDocument.href||"#")}>{previousDocument.number||previousDocument.id}</Link></>:<strong>None</strong>}
-            </div>
-            <div className="document-chain-arrow">→</div>
-            <div className="document-chain-node current">
-              <span>Current</span>
-              <strong>{title}</strong>
-              <b>{number}</b>
-            </div>
-            <div className="document-chain-arrow">→</div>
-            <div className={`document-chain-node ${nextDocument?"linked":"muted"}`}>
-              <span>Next</span>
-              {nextDocument?<><strong>{nextDocument.label}</strong><Link prefetch={false} href={String(nextDocument.href||"#")}>{nextDocument.number||nextDocument.id}</Link></>:<strong>Not created yet</strong>}
-            </div>
+          <div className="document-flow-tab-row">
+            {flowStages.map((stageDef,index)=>{
+              const stageLinks=linksByStage.get(stageDef.stage)||[];
+              const isCurrent=stageDef.stage===currentStage;
+              return <div className="document-flow-stage-wrap" key={stageDef.stage}>
+                <div className={`document-flow-tab ${isCurrent?"current":stageLinks.length?"linked":"empty"}`}>
+                  <span className="document-flow-tab-label">{stageDef.label}</span>
+                  <div className="document-flow-tab-links">
+                    {isCurrent&&<span className="document-flow-current-number">{number}</span>}
+                    {stageLinks.map((link:any,linkIndex:number)=><Link prefetch={false} key={`${link.type}-${link.id}-${linkIndex}`} href={String(link.href||"#")}>{link.number||link.id}</Link>)}
+                    {!isCurrent&&stageLinks.length===0&&<span className="document-flow-placeholder">—</span>}
+                  </div>
+                </div>
+                {index<flowStages.length-1&&<span className="document-flow-mini-arrow">→</span>}
+              </div>;
+            })}
           </div>
-          {documentLinks.length>2&&<div className="small document-chain-more">{documentLinks.length-2} more linked document{documentLinks.length-2===1?"":"s"} in the full relationship view.</div>}
         </section>}
         {(showLegacyPrevious||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
         {showLegacyPrevious&&previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
