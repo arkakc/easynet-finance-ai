@@ -69,6 +69,7 @@ function inferredSection(type:string,number:string,record:any){if(type==="quote"
 
 export default function TransactionDocumentClient({type,id}:{type:string;id:string}){
   const config=CONFIG[type];
+  const invalidDocumentId=!id||["undefined","null","nan"].includes(String(id).trim().toLowerCase());
   const[record,setRecord]=useState<any|null>(null);
   const[lines,setLines]=useState<any[]>([]);
   const[references,setReferences]=useState<any>({customers:[],suppliers:[],projects:[],accounts:[],items:[]});
@@ -165,6 +166,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     : null;
 
   if(!config)return <section className="panel warning-panel"><strong>Unsupported transaction document type.</strong></section>;
+  if(invalidDocumentId)return <section className="panel warning-panel"><strong>Invalid document link.</strong><p className="small">The created document ID was not supplied to this page. Return to the transaction list and open the saved record.</p><Link prefetch={false} href="/transactions">Back to Transactions</Link></section>;
 
   const previous=record?previousLink(type,record):null;
   const hidden=new Set([
