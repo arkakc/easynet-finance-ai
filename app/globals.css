@@ -4595,3 +4595,71 @@ form.panel {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Scalable customer/supplier linked document explorer */
+.party-document-explorer {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 16px;
+}
+
+.party-document-explorer-head {
+  margin-bottom: 12px;
+}
+
+.party-document-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.6fr) minmax(190px, .8fr) minmax(170px, .7fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.party-document-toolbar input,
+.party-document-toolbar select {
+  width: 100%;
+  min-height: 42px;
+}
+
+.party-document-table {
+  max-height: 620px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.party-document-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+}
+
+.party-document-pagination {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.party-doc-status {
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+@media (max-width: 900px) {
+  .party-document-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .party-document-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .party-document-pagination {
+    align-items: stretch;
+  }
+}
