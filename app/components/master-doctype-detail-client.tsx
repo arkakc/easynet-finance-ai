@@ -55,6 +55,10 @@ function displayDate(value: unknown) {
   return date.toLocaleString("en-PG");
 }
 
+function money(value: unknown) {
+  return new Intl.NumberFormat("en-PG",{style:"currency",currency:"PGK",minimumFractionDigits:2}).format(Number(value||0));
+}
+
 export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
   const router = useRouter();
   const config = CONFIG[type];
@@ -64,6 +68,8 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [financial, setFinancial] = useState<any | null>(null);
+  const [financialLoading, setFinancialLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +87,15 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
       });
       if (!found) throw new Error(`${config.title} ${recordId} was not found`);
       setRecord(found);
+      if(type==="customer"||type==="supplier"){
+        setFinancialLoading(true);
+        try{
+          const partyId=text(found[config.idKey]);
+          const financialResponse=await fetch(`/api/erp/party-financial-summary?type=${encodeURIComponent(type)}&partyId=${encodeURIComponent(partyId)}`,{cache:"no-store"});
+          const financialBody=await financialResponse.json();
+          if(financialResponse.ok&&financialBody.ok)setFinancial(financialBody);else setFinancial(null);
+        }catch{setFinancial(null);}finally{setFinancialLoading(false);}
+      }else setFinancial(null);
       if (Array.isArray(body.customers)) {
         setCustomers(body.customers.map((row: MasterRow) => ({
           customerId: text(row.customerId),
@@ -153,6 +168,48 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
 
       {error && <div className="status-banner error">{error}</div>}
       {message && <div className="status-banner success">{message}</div>}
+
+      {(type==="customer"||type==="supplier")&&<section className="panel party-financial-audit">
+        <div className="form-title-row">
+          <div>
+            <h3>{type==="customer"?"Customer Financial Position":"Supplier Financial Position"}</h3>
+            <p className="small">{type==="customer"?"Receivables, customer advances and linked sales documents in one audit view.":"Payables, supplier advances and linked purchase documents in one audit view."}</p>
+          </div>
+          <span className="auto-badge">{financialLoading?"Loading…":"LIVE"}</span>
+        </div>
+        {financial&&<>
+          <div className="document-meta party-financial-summary">
+            <div><span>{type==="customer"?"Outstanding Receivable":"Outstanding Payable"}</span><strong>{money(financial.summary?.outstanding)}</strong></div>
+            <div><span>{type==="customer"?"Customer Advance Available":"Supplier Advance Available"}</span><strong>{money(financial.summary?.advanceBalance)}</strong></div>
+            <div><span>Net Position</span><strong>{money(financial.summary?.netPosition)}</strong><small className="small">{Number(financial.summary?.netPosition||0)>=0?(type==="customer"?"Customer owes us":"We owe supplier"):(type==="customer"?"We hold excess customer advance":"Supplier advance exceeds payable")}</small></div>
+          </div>
+          <div className="grid party-document-counts">
+            {type==="customer"?<>
+              <div className="card"><div className="label">Sales Quotations</div><div className="value">{financial.summary?.salesQuotes||0}</div></div>
+              <div className="card"><div className="label">Sales Orders</div><div className="value">{financial.summary?.salesOrders||0}</div></div>
+              <div className="card"><div className="label">Deliveries</div><div className="value">{financial.summary?.deliveries||0}</div></div>
+              <div className="card"><div className="label">Sales Invoices</div><div className="value">{financial.summary?.invoices||0}</div></div>
+              <div className="card"><div className="label">Payment Entries</div><div className="value">{financial.summary?.payments||0}</div></div>
+            </>:<>
+              <div className="card"><div className="label">Supplier Quotations</div><div className="value">{financial.summary?.supplierQuotes||0}</div></div>
+              <div className="card"><div className="label">Purchase Orders</div><div className="value">{financial.summary?.purchaseOrders||0}</div></div>
+              <div className="card"><div className="label">Purchase Receipts</div><div className="value">{financial.summary?.receipts||0}</div></div>
+              <div className="card"><div className="label">Supplier Invoices</div><div className="value">{financial.summary?.invoices||0}</div></div>
+              <div className="card"><div className="label">Payment Entries</div><div className="value">{financial.summary?.payments||0}</div></div>
+            </>}
+          </div>
+          <div className="table-wrap" style={{marginTop:18}}>
+            <div className="form-title-row" style={{marginBottom:10}}>
+              <div><h4>Linked Documents</h4><p className="small">Complete document history for this {type}.</p></div>
+              <span className="auto-badge">{financial.documents?.length||0} LINKED</span>
+            </div>
+            <table className="data-table">
+              <thead><tr><th>Document Type</th><th>Document</th><th>Status</th><th>Amount</th><th>Outstanding</th></tr></thead>
+              <tbody>{(financial.documents||[]).length?(financial.documents||[]).map((row:any,index:number)=><tr key={`${row.kind}-${row.number}-${index}`}><td>{row.kind}</td><td><Link href={row.href}><strong>{row.number}</strong></Link></td><td>{row.status||"—"}</td><td>{row.amount===null||row.amount===undefined?"—":money(row.amount)}</td><td>{row.outstanding===undefined?"—":money(row.outstanding)}</td></tr>):<tr><td colSpan={5}>No linked transactions yet.</td></tr>}</tbody>
+            </table>
+          </div>
+        </>}
+      </section>}
 
       <section className="panel">
         {loading && <p className="small">Loading {config.title.toLowerCase()}…</p>}
