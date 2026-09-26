@@ -24,7 +24,7 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
   payment:{numberField:"paymentNumber",title:"Payment / Receipt"},
   expense:{numberField:"expenseNumber",title:"Expense"},
 };
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Unallocated",allocationCount:"Allocation Entries"};
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
 const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
@@ -198,7 +198,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     "baseTotalAmount",
   ]);
   const paymentPrimaryKeys=new Set(["partyId","projectId","paymentDate","amount","paymentMethod","cashBankAccountId","reference","journalId"]);
-  const paymentAdvancedKeys=new Set(["partyType","paymentType","internalPartyId","currency","exchangeRate","baseAmount","allocationCount","allocatedAmount","baseAllocatedAmount","unallocatedAmount"]);
+  const paymentAdvancedKeys=new Set(["currency","exchangeRate","baseAmount","allocationCount","allocatedAmount","baseAllocatedAmount","unallocatedAmount"]);
   const rawFields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&!compactHeaderHidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
   const fields=type==="payment"
     ? rawFields.filter(([key,value])=>{
