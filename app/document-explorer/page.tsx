@@ -305,12 +305,12 @@ export default function DocumentExplorerPage(){
         <table className="relationship-matrix">
           <thead><tr>
             <th className="relationship-date-col">Date</th>
-            <th><strong>{sales?"SQ":"SUPQ"}</strong><small>{sales?"Sales Quotation":"Supplier Quotation"}</small></th>
-            <th><strong>{sales?"SO":"PO"}</strong><small>{sales?"Sales Order":"Purchase Order"}</small></th>
-            <th><strong>{sales?"DN":"GRN"}</strong><small>{sales?"Delivery Note":"Purchase Receipt"}</small></th>
-            <th><strong>{sales?"SI":"SUP INV"}</strong><small>{sales?"Sales Invoice / Credit":"Supplier Invoice"}</small></th>
-            <th><strong>PM ADV</strong><small>{sales?"Customer Advance":"Supplier Advance"}</small></th>
-            <th><strong>PM FINAL</strong><small>{sales?"Final Receipt":"Final Payment"}</small></th>
+            <th><strong>{sales?"Sales Quotation":"Supplier Quotation"}</strong></th>
+            <th><strong>{sales?"Sales Order":"Purchase Order"}</strong></th>
+            <th><strong>{sales?"Delivery Note":"Purchase Receipt / GRN"}</strong></th>
+            <th><strong>{sales?"Sales Invoice / Credit Note":"Supplier Invoice"}</strong></th>
+            <th><strong>{sales?"Customer Advance":"Supplier Advance"}</strong></th>
+            <th><strong>{sales?"Final Receipt":"Final Payment"}</strong></th>
           </tr></thead>
           <tbody>
             {visibleChains.length?visibleChains.map(chain=><tr key={chain.chainId}>
