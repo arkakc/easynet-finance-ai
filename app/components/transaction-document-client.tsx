@@ -254,8 +254,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const salesInvoiceSettlementReady=Boolean(record)&&type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)&&salesInvoiceOutstanding>0.001;
   const salesInvoicePaid=Boolean(record)&&type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
-  const previousDocument=documentLinks.filter((link:any)=>link.direction==="previous").at(-1)||null;
-  const nextDocument=documentLinks.find((link:any)=>link.direction==="next")||null;
+  const orderedDocumentLinks=[...documentLinks].sort((a:any,b:any)=>Number(a.stage||0)-Number(b.stage||0)||String(a.number||"").localeCompare(String(b.number||"")));
+  const previousDocument=orderedDocumentLinks.filter((link:any)=>link.direction==="previous").at(-1)||null;
+  const nextDocument=orderedDocumentLinks.find((link:any)=>link.direction==="next")||null;
   const explorerHref=`/document-explorer?documentType=${encodeURIComponent(type)}&documentId=${encodeURIComponent(id)}`;
   const showLegacyPrevious=Boolean(previous)&&documentLinks.length===0;
 
@@ -336,7 +337,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
               {nextDocument?<><strong>{nextDocument.label}</strong><Link prefetch={false} href={String(nextDocument.href||"#")}>{nextDocument.number||nextDocument.id}</Link></>:<strong>Not created yet</strong>}
             </div>
           </div>
-          {documentLinks.length>2&&<div className="small document-chain-more">{documentLinks.length-2} additional related document{documentLinks.length-2===1?"":"s"} available in the Relationship Explorer.</div>}
+          {documentLinks.length>2&&<div className="small document-chain-more">{documentLinks.length-2} more linked document{documentLinks.length-2===1?"":"s"} in the full relationship view.</div>}
         </section>}
         {(showLegacyPrevious||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
         {showLegacyPrevious&&previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
