@@ -129,6 +129,7 @@ export default function DocumentExplorerPage(){
       const resolvedId=String(body.id||cleanId);
       const currentNumber=String(body.number||cleanId);
       const resolvedType=String(body.type||"");
+      const searchedDocument=body.searchedDocument&&body.searchedDocument.number?body.searchedDocument:null;
       const side:Side=resolvedType==="purchaseOrder"||resolvedType==="supplierBill"||String(current.partyType||"")==="Supplier"?"purchase":"sales";
       const kind=currentKind(resolvedType,current,currentNumber);
       const currentDate=String(current.quoteDate||current.invoiceDate||current.poDate||current.billDate||current.paymentDate||current.createdAt||"");
@@ -152,8 +153,8 @@ export default function DocumentExplorerPage(){
         chainId:"document-chain",
       },...mapped]);
       setRelationshipSide(side);
-      setContextLabel(`${kind} · ${currentNumber}`);
-      setDocumentId(currentNumber);
+      setContextLabel(searchedDocument?`${searchedDocument.kind} · ${searchedDocument.number}`:`${kind} · ${currentNumber}`);
+      setDocumentId(searchedDocument?.number||currentNumber);
       setQuery("");setTypeFilter("ALL");setStatusFilter("ALL");setPage(1);
     }catch(reason){setError(reason instanceof Error?reason.message:"Document relationship load failed");}
     finally{setLoading(false);}
