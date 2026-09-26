@@ -4556,3 +4556,42 @@ form.panel {
   margin: 0;
   padding: 0 14px 14px;
 }
+
+
+/* Customer / Supplier financial audit view */
+.party-financial-audit {
+  margin-bottom: 20px;
+}
+
+.party-financial-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.party-financial-summary .small {
+  display: block;
+  margin-top: 4px;
+}
+
+.party-document-counts {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  margin-top: 16px;
+}
+
+.party-document-counts .card {
+  min-height: 86px;
+}
+
+@media (max-width: 1000px) {
+  .party-document-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .party-financial-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .party-document-counts {
+    grid-template-columns: 1fr;
+  }
+}
