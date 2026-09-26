@@ -63,6 +63,7 @@ const groups: readonly NavGroup[] = [
     icon: "📑",
     links: [
       ["Chart of Accounts", "/accounts", "accounts.read"],
+      ["Document Relationship Explorer", "/document-explorer", "dashboard.read"],
       ["Manual Journal Entry", "/manual-journal-entry", "accounts.write"],
       ["Posted Journals", "/journals", "accounts.read"],
       ["Bank / Cash Pay Entry", "/bank-cash-pay", "accounts.write"],
