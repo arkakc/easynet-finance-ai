@@ -304,16 +304,44 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
 }
 export async function GET(request:NextRequest){
   try{
-    const type=String(request.nextUrl.searchParams.get("type")||"");
+    let type=String(request.nextUrl.searchParams.get("type")||"");
     const id=String(request.nextUrl.searchParams.get("id")||"").trim();
-    const config=CONFIG[type];
-    if(!config||!id)return NextResponse.json({ok:false,error:"Invalid document request"},{status:400});
-    await requirePermission(config.permission);
+    if(!id)return NextResponse.json({ok:false,error:"Document number / ID is required"},{status:400});
 
-    let result=await findRecords<any>(config.table,{[config.idField]:id},1);
-    if(!result.rows[0]){
-      result=await findRecords<any>(config.table,{[config.numberField]:id},1);
+    let config=type?CONFIG[type]:undefined;
+    let result:{rows:any[]}={rows:[]};
+
+    if(config){
+      await requirePermission(config.permission);
+      result=await findRecords<any>(config.table,{[config.idField]:id},1);
+      if(!result.rows[0])result=await findRecords<any>(config.table,{[config.numberField]:id},1);
+    }else{
+      await requirePermission("dashboard.read");
+      const matches:Array<{type:string;config:(typeof CONFIG)[string];record:any}>=[];
+      for(const [candidateType,candidateConfig] of Object.entries(CONFIG)){
+        let candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.idField]:id},1);
+        if(!candidate.rows[0])candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.numberField]:id},1);
+        if(candidate.rows[0])matches.push({type:candidateType,config:candidateConfig,record:candidate.rows[0]});
+      }
+      if(matches.length===0)return NextResponse.json({ok:false,error:"Document not found"},{status:404});
+      if(matches.length>1){
+        return NextResponse.json({
+          ok:false,
+          error:"More than one document matched this ID / number. Use the exact document number.",
+          matches:matches.map(match=>({
+            type:match.type,
+            id:String(match.record[match.config.idField]||""),
+            number:String(match.record[match.config.numberField]||""),
+          })),
+        },{status:409});
+      }
+      type=matches[0].type;
+      config=matches[0].config;
+      result={rows:[matches[0].record]};
+      await requirePermission(config.permission);
     }
+
+    if(!config)return NextResponse.json({ok:false,error:"Unsupported document type"},{status:400});
     const record=result.rows[0];
     if(!record)return NextResponse.json({ok:false,error:"Document not found"},{status:404});
     const resolvedId=String(record[config.idField]||id);
