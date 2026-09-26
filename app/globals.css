@@ -4517,3 +4517,42 @@ form.panel {
   color: #1d4ed8;
   text-decoration: underline;
 }
+
+
+/* Compact payment full-view accounting disclosure */
+.payment-advanced-details {
+  margin-top: 16px;
+  border: 1px solid #dbe3ed;
+  border-radius: 11px;
+  background: #fbfcfe;
+  overflow: hidden;
+}
+
+.payment-advanced-details > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .01em;
+}
+
+.payment-advanced-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.payment-advanced-details > summary::after {
+  content: "▾";
+  float: right;
+  color: #64748b;
+}
+
+.payment-advanced-details[open] > summary::after {
+  content: "▴";
+}
+
+.payment-advanced-grid {
+  margin: 0;
+  padding: 0 14px 14px;
+}
