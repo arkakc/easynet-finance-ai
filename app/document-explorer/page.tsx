@@ -18,13 +18,6 @@ type ExplorerRow={
 
 type Side="sales"|"purchase";
 
-const DOCUMENT_TYPES=[
-  {value:"quote",label:"Sales Quotation / Sales Order",side:"sales" as Side},
-  {value:"invoice",label:"Sales Invoice / Credit Note",side:"sales" as Side},
-  {value:"purchaseOrder",label:"Supplier Quotation / Purchase Order",side:"purchase" as Side},
-  {value:"supplierBill",label:"Supplier Invoice",side:"purchase" as Side},
-  {value:"payment",label:"Payment / Advance / Receipt",side:"sales" as Side},
-];
 
 function money(value:unknown){
   return new Intl.NumberFormat("en-PG",{style:"currency",currency:"PGK",minimumFractionDigits:2}).format(Number(value||0));
@@ -84,7 +77,6 @@ export default function DocumentExplorerPage(){
   const[partyId,setPartyId]=useState("");
   const[partyOptions,setPartyOptions]=useState<SearchableSelectOption[]>([]);
   const[partyOptionsLoading,setPartyOptionsLoading]=useState(false);
-  const[documentType,setDocumentType]=useState("quote");
   const[documentId,setDocumentId]=useState("");
   const[contextLabel,setContextLabel]=useState("No relationship loaded");
   const[relationshipSide,setRelationshipSide]=useState<Side>("sales");
@@ -125,19 +117,20 @@ export default function DocumentExplorerPage(){
     finally{setLoading(false);}
   }
 
-  async function loadDocument(nextDocumentType=documentType,nextDocumentId=documentId){
+  async function loadDocument(nextDocumentId=documentId){
     const cleanId=nextDocumentId.trim();
     if(!cleanId){setError("Document number or record ID is required.");return;}
     setLoading(true);setError("");
     try{
-      const response=await fetch(`/api/erp/transaction-document?type=${encodeURIComponent(nextDocumentType)}&id=${encodeURIComponent(cleanId)}`,{cache:"no-store"});
+      const response=await fetch(`/api/erp/transaction-document?id=${encodeURIComponent(cleanId)}`,{cache:"no-store"});
       const body=await response.json();
       if(!response.ok||!body.ok)throw new Error(body.error||"Document relationship load failed");
       const current=body.record||{};
       const resolvedId=String(body.id||cleanId);
       const currentNumber=String(body.number||cleanId);
-      const side:Side=nextDocumentType==="purchaseOrder"||nextDocumentType==="supplierBill"||String(current.partyType||"")==="Supplier"?"purchase":"sales";
-      const kind=currentKind(nextDocumentType,current,currentNumber);
+      const resolvedType=String(body.type||"");
+      const side:Side=resolvedType==="purchaseOrder"||resolvedType==="supplierBill"||String(current.partyType||"")==="Supplier"?"purchase":"sales";
+      const kind=currentKind(resolvedType,current,currentNumber);
       const currentDate=String(current.quoteDate||current.invoiceDate||current.poDate||current.billDate||current.paymentDate||current.createdAt||"");
       const mapped:ExplorerRow[]=(body.documentLinks||[]).map((row:any)=>({
         kind:String(row.label||"Linked Document"),
@@ -154,7 +147,7 @@ export default function DocumentExplorerPage(){
         status:String(current.status||""),
         amount:Number(current.totalAmount??current.amount??0),
         outstanding:current.outstandingAmount===undefined?undefined:Number(current.outstandingAmount),
-        href:`/transactions/${nextDocumentType}/${encodeURIComponent(resolvedId)}`,
+        href:`/transactions/${resolvedType}/${encodeURIComponent(resolvedId)}`,
         date:currentDate,
         chainId:"document-chain",
       },...mapped]);
@@ -170,7 +163,6 @@ export default function DocumentExplorerPage(){
     const params=new URLSearchParams(window.location.search);
     const initialPartyType=params.get("partyType")||"";
     const initialPartyId=params.get("partyId")||"";
-    const initialDocumentType=params.get("documentType")||"";
     const initialDocumentId=params.get("documentId")||"";
     if(initialPartyType&&initialPartyId){
       setPartyType(initialPartyType);
@@ -178,10 +170,9 @@ export default function DocumentExplorerPage(){
       void loadParty(initialPartyType,initialPartyId);
       return;
     }
-    if(initialDocumentType&&initialDocumentId){
-      setDocumentType(initialDocumentType);
+    if(initialDocumentId){
       setDocumentId(initialDocumentId);
-      void loadDocument(initialDocumentType,initialDocumentId);
+      void loadDocument(initialDocumentId);
     }
   // Initial URL context only.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,13 +259,11 @@ export default function DocumentExplorerPage(){
           <button type="submit" disabled={loading||!partyId}>{loading?"Loading…":"Open Party History"}</button>
         </form>
 
-        <form onSubmit={submitDocument} className="relationship-search-card">
+        <form onSubmit={submitDocument} className="relationship-search-card relationship-search-card-single">
           <strong>Document Relationship</strong>
-          <select value={documentType} onChange={e=>setDocumentType(e.target.value)}>
-            {DOCUMENT_TYPES.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}
-          </select>
-          <input value={documentId} onChange={e=>setDocumentId(e.target.value)} placeholder="Document number or record ID" />
-          <button type="submit" disabled={loading||!documentId.trim()}>{loading?"Loading…":"Open Document Chain"}</button>
+          <input value={documentId} onChange={e=>setDocumentId(e.target.value)} placeholder="Enter any document number / ID" />
+          <p className="small">Quotation, Sales Order, Delivery, Invoice, Advance, Receipt, Purchase Order, GRN, Supplier Invoice or Payment. The system detects the document type automatically.</p>
+          <button type="submit" disabled={loading||!documentId.trim()}>{loading?"Searching…":"Open Document Chain"}</button>
         </form>
       </div>
     </section>
