@@ -197,7 +197,26 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     "baseGstAmount",
     "baseTotalAmount",
   ]);
-  const fields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&!compactHeaderHidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
+  const paymentPrimaryKeys=new Set(["partyId","projectId","paymentDate","amount","paymentMethod","cashBankAccountId","reference","journalId"]);
+  const paymentAdvancedKeys=new Set(["partyType","paymentType","internalPartyId","currency","exchangeRate","baseAmount","allocationCount","allocatedAmount","baseAllocatedAmount","unallocatedAmount"]);
+  const rawFields=record?Object.entries(record).filter(([key,value])=>!hidden.has(key)&&!compactHeaderHidden.has(key)&&value!==""&&value!==null&&value!==undefined):[];
+  const fields=type==="payment"
+    ? rawFields.filter(([key,value])=>{
+        if(!paymentPrimaryKeys.has(key))return false;
+        if(key==="journalId"&&!String(value||"").trim())return false;
+        return true;
+      })
+    : rawFields;
+  const paymentAdvancedFields=type==="payment"
+    ? rawFields.filter(([key,value])=>{
+        if(!paymentAdvancedKeys.has(key))return false;
+        if(key==="exchangeRate"&&transactionCurrency===baseCurrency)return false;
+        if(key==="baseAmount"&&transactionCurrency===baseCurrency)return false;
+        if((key==="allocationCount"||key==="allocatedAmount"||key==="baseAllocatedAmount")&&n(value)<=0)return false;
+        if(key==="unallocatedAmount"&&n(value)<=0)return false;
+        return true;
+      })
+    : [];
   const linkedValue=(hrefValue:string,label:string)=>hrefValue?<Link prefetch={false} href={hrefValue}>{label}</Link>:label;
   const fieldDisplay=(key:string,value:unknown)=>{
     if(key==="status"&&type==="invoice"&&!isCreditNote)return publicStatus;
@@ -210,6 +229,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     }
     if(key==="projectId")return linkedValue(masterHref("project",value),named(value,projectMap));
     if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);
+    if(key==="reference"&&type==="payment"){
+      const text=String(value||"");
+      return text.replace(/^(SQ|PO):[^|]+\|/,"")||"—";
+    }
     if(key==="exchangeRate"){
       if(transactionCurrency===baseCurrency)return "1.00";
       const rate=n(value).toFixed(6).replace(/0+$/,"").replace(/\.$/,"");
@@ -303,6 +326,12 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         {(previous||fields.length>0)&&<div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Document details</h2></div></div>}
         {previous&&<div className="document-source-link"><span>{previous.label}</span><strong><Link prefetch={false} href={href(previous.type,previous.id)}>{previous.number}</Link></strong></div>}
         {fields.length>0&&<div className="document-meta">{fields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{key==="journalId"?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(value))}`}>{String(value)}</Link>:fieldDisplay(key,value)}</strong></div>)}</div>}
+        {type==="payment"&&paymentAdvancedFields.length>0&&<details className="payment-advanced-details no-print">
+          <summary>Advanced Accounting Details</summary>
+          <div className="document-meta payment-advanced-grid">
+            {paymentAdvancedFields.map(([key,value])=><div key={key}><span>{labels[key]||key.replace(/([A-Z])/g," $1")}</span><strong>{fieldDisplay(key,value)}</strong></div>)}
+          </div>
+        </details>}
         {lines.length>0&&<><div className="document-section-heading document-lines-heading"><div><span className="document-section-kicker">Items</span><h2>Line items</h2></div><span className="document-section-count">{lines.length} line{lines.length===1?"":"s"}</span></div><div className="document-lines"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>UOM</th><th>Moving Avg Cost</th><th>Qty</th><th>Rate</th><th>Net</th><th>GST</th><th>Total</th></tr></thead><tbody>{lines.map((line:any,index:number)=>{const itemId=String(line.itemId||"");const item=itemId?itemMap.get(itemId):null;const itemCode=String(item?.itemCode||item?.itemId||itemId||"");const itemName=String(item?.itemName||line.description||"");const originalTemp=String(line.description||"");const uom=String(line.uom||item?.uom||"Each");const movingAverage=item?`${baseCurrency} ${n(item.defaultRate).toFixed(2)}`:"—";const lineKey=line.invoiceLineId||line.quoteLineId||line.poLineId||line.billLineId||index;return <tr key={lineKey}><td>{line.lineNo||index+1}</td><td>{item?<Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}><strong>{itemCode}</strong></Link>:isSupplierQuotation?<span className="small">TEMP</span>:<span>{itemCode||"UNLINKED"}</span>}</td><td>{item?<><Link prefetch={false} href={`/stock/item/${encodeURIComponent(item.itemId||item.itemCode)}`}>{itemName}</Link>{isSupplierQuotation&&originalTemp&&originalTemp!==itemName?<><br/><span className="small">Original TEMP: {originalTemp}</span></>:null}</>:itemName}</td><td>{uom}</td><td>{movingAverage}</td><td>{line.qty}</td><td>{transactionMoney(line.rate)}</td><td>{transactionMoney(line.netAmount)}</td><td>{transactionMoney(line.gstAmount)}</td><td><strong>{transactionMoney(line.totalAmount)}</strong></td></tr>;})}</tbody></table></div></>}
         {lines.length>0&&(()=>{
           const lineNetTotal = lines.reduce((sum: number, l: any) => sum + n(l.netAmount || (n(l.qty) * n(l.rate))), 0);
