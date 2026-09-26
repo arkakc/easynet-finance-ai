@@ -4663,3 +4663,100 @@ form.panel {
     align-items: stretch;
   }
 }
+
+
+/* Compact transaction document relationship flow */
+.document-chain-compact {
+  margin: 0 0 20px;
+  padding: 16px;
+  border: 1px solid #dbe3ed;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.document-chain-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.document-chain-title h2 {
+  margin: 2px 0 0;
+}
+
+.document-chain-strip {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);
+  align-items: stretch;
+  gap: 10px;
+}
+
+.document-chain-node {
+  min-width: 0;
+  border: 1px solid #dbe3ed;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+.document-chain-node span {
+  display: block;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.document-chain-node strong,
+.document-chain-node b,
+.document-chain-node a {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.document-chain-node.current {
+  border-width: 2px;
+}
+
+.document-chain-node.muted {
+  opacity: .65;
+}
+
+.document-chain-arrow {
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  font-size: 20px;
+}
+
+.document-chain-more {
+  margin-top: 10px;
+}
+
+.party-financial-actions {
+  margin-top: 14px;
+}
+
+/* Dedicated relationship explorer page */
+.document-explorer-page {
+  width: 100%;
+}
+
+@media (max-width: 820px) {
+  .document-chain-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .document-chain-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .document-chain-arrow {
+    transform: rotate(90deg);
+  }
+}
