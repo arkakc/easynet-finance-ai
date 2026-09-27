@@ -54,6 +54,7 @@ export default function DocumentConversionActions({
   const canSupplierPayment = type === "supplierBill" && ["POSTED", "PARTLY_PAID"].includes(normalizedStatus);
   const [receiptInfo, setReceiptInfo] = useState<ReceiptInfo | null>(null);
   const [existingSupplierBill, setExistingSupplierBill] = useState<any | null>(null);
+  const [purchaseReceipts, setPurchaseReceipts] = useState<any[]>([]);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -64,14 +65,19 @@ export default function DocumentConversionActions({
     void (async () => {
       setChecking(true);
       try {
-        const [stockResponse, transactionResponse] = await Promise.all([
+        const [stockResponse, transactionResponse, receiptResponse] = await Promise.all([
           fetch("/api/stock", { cache: "no-store" }),
           fetch("/api/erp/transactions", { cache: "no-store" }),
+          fetch("/api/erp/purchase-receipt", { cache: "no-store" }),
         ]);
-        const body = await stockResponse.json();
+        const [body, transactionBody, receiptBody] = await Promise.all([
+          stockResponse.json(),
+          transactionResponse.json(),
+          receiptResponse.json(),
+        ]);
         if (!stockResponse.ok || !body.ok) throw new Error(body.error || "Unable to check Purchase Receipt balance");
-        const transactionBody = await transactionResponse.json();
         if (!active) return;
+        if (!receiptResponse.ok || !receiptBody.ok) throw new Error(receiptBody.error || "Unable to load Purchase Receipts");
 
         const itemMap = new Map<string, any>((body.items || []).map((item: any) => [String(item.itemId || item.itemCode || ""), item]));
         const orderedByItem = new Map<string, number>();
@@ -111,6 +117,9 @@ export default function DocumentConversionActions({
             && [bill.poId, bill.orderId, bill.sourceDocumentId].some((value) => refs.has(String(value || ""))));
           setExistingSupplierBill(linkedBill || null);
         }
+        setPurchaseReceipts((receiptBody.purchaseReceipts || []).filter((row: any) =>
+          [row.purchaseOrderId, row.sourceDocumentId].some((value: any) => String(value || "") === String(id))
+        ));
       } catch (error) {
         if (active) setMessage(error instanceof Error ? error.message : "Unable to check Purchase Receipt balance");
       } finally {
@@ -121,6 +130,27 @@ export default function DocumentConversionActions({
   }, [documentNumber, id, isPurchaseOrder]);
 
   if (!isPurchaseOrder && !canSupplierPayment) return null;
+
+  async function createPurchaseReceipt() {
+    if (!isPurchaseOrder || busy) return;
+    setBusy(true);
+    setMessage("Creating Draft Purchase Receipt / GRN…");
+    try {
+      const response = await fetch("/api/erp/purchase-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "createDraft", purchaseOrderId: id, receiptDate: today() }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Purchase Receipt / GRN creation failed");
+      router.push(`/transactions/purchaseReceipt/${encodeURIComponent(body.purchaseReceipt.receiptId)}?returnModule=purchase&returnTab=purchaseOrder&returnMode=list`);
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Purchase Receipt / GRN creation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function createSupplierInvoice() {
     if (!isPurchaseOrder || busy || normalizedStatus === "BILLED") return;
@@ -186,19 +216,18 @@ export default function DocumentConversionActions({
     </div>}
 
     <div className="button-row" style={{ marginTop: 12 }}>
-      <button
-        type="button"
-        className="secondary"
-        disabled={busy || checking || poClosed || !receiptInfo?.hasRemaining}
-        onClick={() => router.push(`/stock?mode=movement&sourcePo=${encodeURIComponent(id)}`)}
-      >
-        {receiptButtonLabel}
-      </button>
+      {purchaseReceipts.find((row:any)=>String(row.status||"").toUpperCase()==="DRAFT")
+        ? <Link className="button-link" href={`/transactions/purchaseReceipt/${encodeURIComponent(String(purchaseReceipts.find((row:any)=>String(row.status||"").toUpperCase()==="DRAFT")?.receiptId||""))}`}>Complete Purchase Receipt / GRN</Link>
+        : receiptInfo?.hasRemaining && !poClosed
+          ? <button type="button" className="secondary" disabled={busy || checking} onClick={() => void createPurchaseReceipt()}>{busy ? "Creating…" : "Create Purchase Receipt / GRN"}</button>
+          : null}
       {existingSupplierBill
         ? <span className="auto-badge">Supplier Invoice {["POSTED","PARTLY_PAID","PAID"].includes(String(existingSupplierBill.status || "").toUpperCase()) ? "Posted" : "Draft"}: {existingSupplierBill.billNumber || existingSupplierBill.billId}</span>
-        : <button type="button" disabled={busy || normalizedStatus === "BILLED"} onClick={() => void createSupplierInvoice()}>
-          {busy ? "Saving…" : normalizedStatus === "BILLED" ? "Supplier Invoice Complete" : "Create Supplier Invoice"}
-        </button>}
+        : receiptInfo && !receiptInfo.hasStock
+          ? <button type="button" disabled={busy || normalizedStatus === "BILLED"} onClick={() => void createSupplierInvoice()}>
+              {busy ? "Saving…" : "Create Supplier Invoice"}
+            </button>
+          : null}
     </div>
 
     {poClosed && <div className="status-banner" style={{ marginTop: 12 }}>
