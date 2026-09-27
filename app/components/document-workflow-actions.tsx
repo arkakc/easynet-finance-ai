@@ -54,7 +54,7 @@ export default function DocumentWorkflowActions({
     }
   }
 
-  if (recordType === "invoice" && !controlledCreditNote && ["POSTED", "PARTLY_PAID"].includes(current)) {
+  if (recordType === "invoice" && !controlledCreditNote && ["POSTED", "PARTLY_PAID", "PARTIAL"].includes(current)) {
     return (
       <section className="panel no-print" style={{ marginTop: 16 }}>
         <div className="form-title-row">
