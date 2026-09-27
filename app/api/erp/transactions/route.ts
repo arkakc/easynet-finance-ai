@@ -319,7 +319,7 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
     if (!invoice) throw new Error("Against Sales Invoice not found");
     const invoiceCustomerId = String(invoice.internalCustomerId || invoice.customerId || "");
     if (invoiceCustomerId !== internalPartyId) throw new Error("Payment customer does not match the Sales Invoice customer");
-    if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
+    if (!["POSTED", "PARTLY_PAID", "PARTIAL", "PAID"].includes(String(invoice.status || "").toUpperCase())) throw new Error("Customer receipt can only be allocated against a posted Sales Invoice");
     if (patch.amount > Number(invoice.outstandingAmount || 0) + 0.001) throw new Error("Customer receipt exceeds Sales Invoice outstanding amount");
     if (String(row.againstDocumentType || "") && !String(row.againstDocumentType || "").toLowerCase().includes("sales invoice")) throw new Error("Customer receipt has an invalid against-document type");
   } else {
