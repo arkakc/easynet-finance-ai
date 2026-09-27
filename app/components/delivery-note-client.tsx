@@ -82,6 +82,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
 
   const status=String(note.status||"DRAFT").toUpperCase();
   const posted=status==="POSTED";
+  const linkedInvoice=documentLinks.find((link:any)=>Number(link.stage||0)===40)||null;
   const linksByStage=new Map<number,any[]>();
   for(const link of documentLinks){
     const stage=Number(link.stage||0);
@@ -120,13 +121,14 @@ export default function DeliveryNoteClient({id}:{id:string}){
           {flowStages.map((stageDef,index)=>{
             const stageLinks=linksByStage.get(stageDef.stage)||[];
             const isCurrent=stageDef.stage===30;
+            const visibleStageLinks=isCurrent?stageLinks.filter((link:any)=>String(link.id||"")!==String(note.deliveryId||"")&&String(link.number||"")!==String(note.deliveryNumber||"")):stageLinks;
             return <div className="document-flow-stage-wrap" key={stageDef.stage}>
-              <div className={"document-flow-tab "+(isCurrent?"current":stageLinks.length?"linked":"empty")}>
+              <div className={"document-flow-tab "+(isCurrent?"current":visibleStageLinks.length?"linked":"empty")}>
                 <span className="document-flow-tab-label">{stageDef.label}</span>
                 <div className="document-flow-tab-links">
                   {isCurrent&&<span className="document-flow-current-number">{note.deliveryNumber}</span>}
-                  {stageLinks.map((link:any,linkIndex:number)=><Link key={String(link.type)+"-"+String(link.id)+"-"+linkIndex} href={String(link.href||"#")}>{link.number||link.id}</Link>)}
-                  {!isCurrent&&stageLinks.length===0&&<span className="document-flow-placeholder">—</span>}
+                  {visibleStageLinks.map((link:any,linkIndex:number)=><Link key={String(link.type)+"-"+String(link.id)+"-"+linkIndex} href={String(link.href||"#")}>{link.number||link.id}</Link>)}
+                  {!isCurrent&&visibleStageLinks.length===0&&<span className="document-flow-placeholder">—</span>}
                 </div>
               </div>
               {index<flowStages.length-1&&<span className="document-flow-mini-arrow">→</span>}
@@ -159,7 +161,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
       </div>}
       <div className="button-row" style={{marginTop:14}}>
         {!posted&&<button type="button" disabled={Boolean(busy)||!warehouseId} onClick={()=>void approve()}>{busy==="approve"?"Posting Stock Out…":"Approve & Post Stock Out"}</button>}
-        {posted&&<button type="button" disabled={Boolean(busy)} onClick={()=>void createInvoice()}>{busy==="invoice"?"Creating Sales Invoice…":"Create Sales Invoice"}</button>}
+        {posted&&(linkedInvoice?<Link className="button-link" href={String(linkedInvoice.href||"#")}>Open Sales Invoice</Link>:<button type="button" disabled={Boolean(busy)} onClick={()=>void createInvoice()}>{busy==="invoice"?"Creating Sales Invoice…":"Create Sales Invoice"}</button>)}
       </div>
     </section>
   </div>;
