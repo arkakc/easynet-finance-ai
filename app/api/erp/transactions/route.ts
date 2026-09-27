@@ -64,6 +64,25 @@ async function salesDeliveryNotes(salesOrders: any[]) {
   const movements = await listTable<any>("StockMovements", 500, 0);
   const orderById = new Map(salesOrders.map((row: any) => [String(row.quoteId || ""), row]));
   const grouped = new Map<string, any>();
+
+  const persisted = await prisma.deliveryNote.findMany({ orderBy: { createdAt: "desc" } });
+  for (const note of persisted) {
+    const order = orderById.get(String(note.salesOrderId || ""));
+    grouped.set(note.code, {
+      deliveryId: note.id,
+      deliveryNumber: note.code,
+      deliveryDate: note.deliveryDate?.toISOString?.().slice(0, 10) || "",
+      sourceDocumentId: note.salesOrderId,
+      salesOrderId: note.salesOrderId,
+      customerId: order?.customerId || "",
+      projectId: order?.projectId || "",
+      status: String(note.status || "DRAFT").toUpperCase(),
+      totalAmount: Number(order?.totalAmount || 0),
+      journalId: note.journalId || "",
+      warehouseId: note.warehouseId || "",
+      createdAt: note.createdAt?.toISOString?.() || "",
+    });
+  }
   for (const movement of movements.rows || []) {
     if (String(movement.movementType || "") !== "SALES_DELIVERY") continue;
     const sourceDocumentId = String(movement.sourceDocumentId || "");
@@ -75,6 +94,7 @@ async function salesDeliveryNotes(salesOrders: any[]) {
       deliveryNumber,
       deliveryDate: movement.movementDate,
       sourceDocumentId,
+      salesOrderId: sourceDocumentId,
       customerId: order?.customerId || "",
       projectId: order?.projectId || movement.projectId || "",
       status: "POSTED",
@@ -82,6 +102,7 @@ async function salesDeliveryNotes(salesOrders: any[]) {
       journalId: movement.journalId || "",
       createdAt: movement.createdAt || movement.movementDate,
     };
+    current.status = "POSTED";
     current.totalAmount += Number(movement.value || 0);
     if (!current.journalId && movement.journalId) current.journalId = movement.journalId;
     grouped.set(deliveryNumber, current);
