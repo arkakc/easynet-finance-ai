@@ -24,10 +24,10 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   const[busy,setBusy]=useState(""),[message,setMessage]=useState("");
 
   useEffect(()=>{
-    if(record){setInvoice(record);setContextLoading(false);return;}
     let active=true;
-    setContextLoading(true);
-    void(async()=>{try{const response=await fetch(`/api/erp/sales-invoice-action-context?invoiceId=${encodeURIComponent(invoiceId)}`,{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Sales Invoice action context load failed");if(active)setInvoice(body.invoice);}catch(error){if(active)setMessage(error instanceof Error?error.message:"Sales Invoice action context load failed");}finally{if(active)setContextLoading(false);}})();
+    if(record){setInvoice(record);setContextLoading(false);}
+    else setContextLoading(true);
+    void(async()=>{try{const response=await fetch(`/api/erp/sales-invoice-action-context?invoiceId=${encodeURIComponent(invoiceId)}`,{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Sales Invoice action context load failed");if(active)setInvoice((current:any)=>({...current,...body.invoice}));}catch(error){if(active&&!record)setMessage(error instanceof Error?error.message:"Sales Invoice action context load failed");}finally{if(active)setContextLoading(false);}})();
     return()=>{active=false;};
   },[invoiceId,record]);
 
@@ -35,7 +35,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   const status=String(invoice?.status||"").toUpperCase();
   const posted=["POSTED","PARTLY_PAID","PAID"].includes(status);
   const outstanding=Number(invoice?.outstandingAmount??invoice?.totalAmount??0);
-  const sourceQuoteId=!credit?String(invoice?.sourceDocumentId||"").trim():"";
+  const sourceQuoteId=!credit?String(invoice?.sourceQuoteId||invoice?.sourceDocumentId||"").trim():"";
   const postedAdvances=payments.filter((row)=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));
   const totalAdvance=postedAdvances.reduce((sum,row)=>sum+Number(row.amount||0),0);
   const totalAllocated=Object.values(summaries).reduce((sum,row)=>sum+Number(row.allocatedAmount||0),0);
