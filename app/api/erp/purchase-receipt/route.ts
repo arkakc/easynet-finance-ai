@@ -110,9 +110,11 @@ async function legacyReceipts(){
       receiptId:receiptNumber,receiptNumber,receiptDate:String(movement.movementDate||movement.createdAt||"").slice(0,10),
       sourceDocumentId,purchaseOrderId:sourceDocumentId,status:"POSTED",warehouseId:String(movement.warehouseId||""),
       journalId:String(movement.journalId||""),createdAt:movement.createdAt||movement.movementDate||"",approvedAt:movement.createdAt||movement.movementDate||"",
-      totalAmount:0,lines:[],legacyPosted:true,
+      totalAmount:0,lines:[],legacyPosted:true,receivedByItem:{},
     };
     current.totalAmount+=Number(movement.value||0);
+    const movementItemId=String(movement.itemId||"");
+    if(movementItemId)current.receivedByItem[movementItemId]=(Number(current.receivedByItem[movementItemId]||0)+Number(movement.qtyIn||0));
     if(!current.journalId&&movement.journalId)current.journalId=String(movement.journalId);
     grouped.set(receiptNumber,current);
   }
@@ -125,10 +127,18 @@ async function legacyReceipts(){
       row.projectId=order.project?.code||"";
       row.projectName=order.project?.name||"";
       row.totalAmount=Number(order.total||row.totalAmount||0);
-      row.lines=(order.lines||[]).filter((line:any)=>line.item?.type==="GOOD").map((line:any)=>({
-        lineId:line.id,itemId:line.itemId||"",itemCode:line.item?.code||line.itemId||"",itemName:line.item?.name||line.description||"",
-        itemType:"STOCK",uom:line.unit||line.item?.unit||"Each",orderedQty:Number(line.quantity||0),qty:Number(line.quantity||0),
+      const sourceByItem=new Map<string,any>();
+      for(const line of (order.lines||[]).filter((line:any)=>line.item?.type==="GOOD"&&line.itemId)){
+        const itemId=String(line.itemId);
+        const current=sourceByItem.get(itemId)||{line,orderedQty:0};
+        current.orderedQty+=Number(line.quantity||0);
+        sourceByItem.set(itemId,current);
+      }
+      row.lines=[...sourceByItem.entries()].filter(([itemId])=>Number(row.receivedByItem?.[itemId]||0)>0).map(([itemId,value]:any)=>({
+        lineId:value.line.id,itemId,itemCode:value.line.item?.code||itemId,itemName:value.line.item?.name||value.line.description||"",
+        itemType:"STOCK",uom:value.line.unit||value.line.item?.unit||"Each",orderedQty:Number(value.orderedQty||0),qty:Number(row.receivedByItem?.[itemId]||0),
       }));
+      delete row.receivedByItem;
     }
   }
   return [...grouped.values()];
