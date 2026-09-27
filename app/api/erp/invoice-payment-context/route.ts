@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     if (!invoice) return NextResponse.json({ ok: false, error: "Sales Invoice not found" }, { status: 404 });
 
     const status = String(invoice.status || "").toUpperCase();
-    if (!["POSTED", "PARTLY_PAID", "APPROVED"].includes(status)) {
+    if (!["POSTED", "PARTLY_PAID", "PARTIAL", "APPROVED"].includes(status)) {
       return NextResponse.json({ ok: false, error: `Sales Invoice must be approved and accounting-posted before creating a Payment Entry. Current status: ${status || "UNKNOWN"}` }, { status: 400 });
     }
 
