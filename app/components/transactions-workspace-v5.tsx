@@ -43,7 +43,7 @@ const emptyMaster:Master={customers:[],suppliers:[],projects:[]};
 const emptyTx:TxData={quotes:[],salesOrders:[],deliveryNotes:[],supplierQuotes:[],purchaseOrders:[],purchaseReceipts:[],invoices:[],supplierBills:[],payments:[],expenses:[]};
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
 const moneyIn=(value:unknown,currency:string)=>`${String(currency||"PGK").toUpperCase()} ${Number(value||0).toFixed(2)}`;
-const paymentEligible=(value:unknown)=>["POSTED","PARTLY_PAID"].includes(String(value||"").toUpperCase());
+const paymentEligible=(value:unknown)=>["POSTED","PARTLY_PAID","PARTIAL"].includes(String(value||"").toUpperCase());
 const poInvoiceEligible=(value:unknown)=>["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED","CLOSED_PARTIAL"].includes(String(value||"").toUpperCase());
 const APPROVAL_READY_STATUSES=new Set(["DRAFT","PENDING_APPROVAL","PENDING APPROVAL","PENDING FOR APPROVAL"]);
 const QUOTE_CONVERSION_STATUSES=new Set(["APPROVED","PART INVOICED"]);
