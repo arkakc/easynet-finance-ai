@@ -146,7 +146,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const isSupplierQuotation=type==="purchaseOrder"&&number.startsWith("SUPQ-");
   const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
   const rowStatus=String(record?.status||"DRAFT").toUpperCase();
-  const publicStatus=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID"].includes(rowStatus)?"APPROVED":rowStatus;
+  const publicStatus=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID","PARTIAL"].includes(rowStatus)?"APPROVED":rowStatus;
   let title=config?.title||"Transaction Document";
   if(isSalesOrder)title="Sales Order";
   if(isSupplierQuotation)title="Supplier Quotation";
