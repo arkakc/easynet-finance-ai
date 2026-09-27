@@ -33,7 +33,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
 
   const credit=isCreditNote(invoice);
   const status=String(invoice?.status||"").toUpperCase();
-  const posted=["POSTED","PARTLY_PAID","PAID"].includes(status);
+  const posted=["POSTED","PARTLY_PAID","PARTIAL","PAID"].includes(status);
   const outstanding=Number(invoice?.outstandingAmount??invoice?.totalAmount??0);
   const sourceQuoteId=!credit?String(invoice?.sourceQuoteId||invoice?.sourceDocumentId||"").trim():"";
   const postedAdvances=payments.filter((row)=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));
