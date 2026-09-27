@@ -156,10 +156,60 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: true, deliveryNotes: merged });
     }
     const note = await prisma.deliveryNote.findFirst({ where: { OR: [{ id }, { code: id }] } });
-    if (!note) throw new Error("Delivery Note not found");
-    const order = await resolveSalesOrder(note.salesOrderId);
-    if (!order) throw new Error("Source Sales Order not found");
-    return NextResponse.json({ ok: true, deliveryNote: mapDeliveryNote(note, order) });
+    if (note) {
+      const order = await resolveSalesOrder(note.salesOrderId);
+      if (!order) throw new Error("Source Sales Order not found");
+      return NextResponse.json({ ok: true, deliveryNote: mapDeliveryNote(note, order) });
+    }
+
+    // Backward compatibility: older approved Delivery Notes existed only as
+    // SALES_DELIVERY stock movements. Reconstruct their full view on demand.
+    const movementResult = await listTable<any>("StockMovements", 500, 0);
+    const legacyMovements = (movementResult.rows || []).filter((movement: any) => {
+      if (String(movement.movementType || "").toUpperCase() !== "SALES_DELIVERY") return false;
+      const movementId = String(movement.movementId || "");
+      const deliveryNumber = movementId.replace(/-\d{3}$/, "") || movementId;
+      return deliveryNumber === id;
+    });
+    if (!legacyMovements.length) throw new Error("Delivery Note not found");
+
+    const sourceSalesOrderId = String(legacyMovements[0].sourceDocumentId || "");
+    const order = await resolveSalesOrder(sourceSalesOrderId);
+    if (!order) throw new Error("Source Sales Order not found for legacy Delivery Note");
+
+    const totalCost = legacyMovements.reduce((sum: number, movement: any) => sum + Number(movement.value || 0), 0);
+    const legacy = {
+      deliveryId: id,
+      deliveryNumber: id,
+      deliveryDate: String(legacyMovements[0].movementDate || legacyMovements[0].createdAt || "").slice(0, 10),
+      sourceDocumentId: sourceSalesOrderId,
+      salesOrderId: sourceSalesOrderId,
+      salesOrderNumber: order.code,
+      customerId: order.customer?.code || "",
+      customerName: order.customer?.name || "",
+      projectId: order.project?.code || "",
+      projectName: order.project?.name || "",
+      status: "POSTED",
+      warehouseId: String(legacyMovements[0].warehouseId || ""),
+      journalId: String(legacyMovements.find((movement: any) => movement.journalId)?.journalId || ""),
+      note: "Legacy posted Delivery Note reconstructed from Stock Movements",
+      totalAmount: Number(order.total || 0),
+      totalCost,
+      createdAt: legacyMovements[0].createdAt || legacyMovements[0].movementDate || "",
+      approvedAt: legacyMovements[0].createdAt || legacyMovements[0].movementDate || "",
+      legacyPosted: true,
+      lines: (order.lines || []).map((line: any) => ({
+        lineId: line.id,
+        itemId: line.itemId || "",
+        itemCode: line.item?.code || line.itemId || "",
+        itemName: line.item?.name || line.description || "",
+        itemType: line.item?.type === "GOOD" ? "STOCK" : line.item?.type === "SERVICE" ? "SERVICE" : "NON_STOCK",
+        description: line.description || "",
+        qty: Number(line.quantity || 0),
+        uom: line.unit || line.item?.unit || "Each",
+      })),
+    };
+    return NextResponse.json({ ok: true, deliveryNote: legacy, legacy: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Delivery Note load failed";
     return NextResponse.json({ ok: false, error: message }, { status: message === "Forbidden" ? 403 : message === "Unauthorized" ? 401 : 400 });
