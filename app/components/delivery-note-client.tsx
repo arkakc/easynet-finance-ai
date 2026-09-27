@@ -84,6 +84,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
   const posted=status==="POSTED";
   const linkedInvoice=documentLinks.find((link:any)=>Number(link.stage||0)===40)||null;
   const linksByStage=new Map<number,any[]>();
+  linksByStage.set(20,[{id:note.salesOrderId,number:note.salesOrderNumber||note.salesOrderId,href:"/transactions/quote/"+encodeURIComponent(note.salesOrderId),type:"quote",stage:20}]);
   for(const link of documentLinks){
     const stage=Number(link.stage||0);
     const list=linksByStage.get(stage)||[];
