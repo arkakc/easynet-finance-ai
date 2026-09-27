@@ -12,6 +12,24 @@ export async function GET(request: Request) {
     const invoice = result.rows[0];
     if (!invoice) return NextResponse.json({ ok: false, error: "Sales Invoice not found" }, { status: 404 });
 
+    const sourceDocumentId = String(invoice.sourceDocumentId || "").trim();
+    let sourceQuoteId = String(invoice.sourceQuoteId || "").trim();
+    let sourceSalesOrderId = String(invoice.sourceSalesOrderId || invoice.salesOrderId || "").trim();
+
+    if (!sourceQuoteId && sourceDocumentId) {
+      const sourceResult = await findRecords<any>("Quotes", { quoteId: sourceDocumentId }, 1);
+      const source = sourceResult.rows[0];
+      if (source) {
+        const sourceNumber = String(source.quoteNumber || "").toUpperCase();
+        if (sourceNumber.startsWith("SO-")) {
+          sourceSalesOrderId = sourceSalesOrderId || sourceDocumentId;
+          sourceQuoteId = String(source.sourceDocumentId || "").trim();
+        } else {
+          sourceQuoteId = sourceDocumentId;
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       invoice: {
@@ -25,7 +43,9 @@ export async function GET(request: Request) {
         paidAmount: Number(invoice.paidAmount || 0),
         outstandingAmount: Number(invoice.outstandingAmount ?? invoice.totalAmount ?? 0),
         status: String(invoice.status || "DRAFT"),
-        sourceDocumentId: String(invoice.sourceDocumentId || ""),
+        sourceDocumentId,
+        sourceQuoteId,
+        sourceSalesOrderId,
         journalId: String(invoice.journalId || ""),
       },
     });
