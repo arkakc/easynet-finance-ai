@@ -408,6 +408,29 @@ model DeliveryNote {
   @@index([journalId])
 }
 
+model PurchaseReceipt {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  purchaseOrderId String
+  receiptDate     DateTime @default(now())
+  status          String   @default("DRAFT")
+  warehouseId     String?
+  journalId       String?
+  items           String?
+  note            String?
+  createdBy       String
+  approvedBy      String?
+  approvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([purchaseOrderId])
+  @@index([status])
+  @@index([code])
+  @@index([warehouseId])
+  @@index([journalId])
+}
+
 model StockMovement {
   id            String       @id @default(cuid())
   itemId        String
