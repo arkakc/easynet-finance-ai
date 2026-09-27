@@ -50,6 +50,7 @@ function mapDeliveryNote(note: any, order: any = null) {
     deliveryDate: note.deliveryDate?.toISOString?.().slice(0, 10) || String(note.deliveryDate || "").slice(0, 10),
     sourceDocumentId: note.salesOrderId,
     salesOrderId: note.salesOrderId,
+    salesOrderNumber: order?.code || note.salesOrderId,
     customerId: order?.customer?.code || "",
     customerName: order?.customer?.name || "",
     projectId: order?.project?.code || "",
