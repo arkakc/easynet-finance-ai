@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 type SalesOrder = {
   quoteId: string;
@@ -31,13 +30,6 @@ type SalesInvoice = {
   totalAmount?: number;
 };
 
-type Warehouse = {
-  warehouseId: string;
-  warehouseCode: string;
-  warehouseName: string;
-  isDefault?: boolean;
-};
-
 function localDate(plusDays = 0) {
   const date = new Date();
   date.setDate(date.getDate() + plusDays);
@@ -52,7 +44,6 @@ function localDate(plusDays = 0) {
 }
 
 export default function SalesOrderCycle({ orderId }: { orderId: string }) {
-  const router = useRouter();
   const [order, setOrder] = useState<SalesOrder | null>(null);
   const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNote[]>([]);
   const [invoices, setInvoices] = useState<SalesInvoice[]>([]);
@@ -107,33 +98,13 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
     }
   }
 
-  async function createSalesInvoice() {
-    if (!order || busy) return;
-    setBusy("invoice");
-    setMessage("Creating Sales Invoice from delivered Sales Order quantity…");
-    try {
-      const response = await fetch("/api/erp/sales-invoice-conversion", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteId: orderId, mode: "FULL", invoiceDate: localDate(), dueDate: localDate(30) }),
-      });
-      const body = await response.json();
-      if (!response.ok || !body.ok) throw new Error(body.error || "Sales Invoice conversion failed");
-      router.push(`/transactions/invoice/${encodeURIComponent(body.createdId)}?returnModule=sales&returnTab=salesOrder&returnMode=list`);
-      router.refresh();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sales Invoice conversion failed");
-    } finally {
-      setBusy("");
-    }
-  }
+
 
   if (loading) return <section className="conversion-box no-print"><strong>Sales Order Lifecycle</strong><p className="small">Loading Delivery Note, stock posting and Sales Invoice links…</p></section>;
   if (!order) return message ? <div className="status-banner no-print" style={{ marginTop: 16 }}>{message}</div> : null;
 
   const status = String(order.status || "DRAFT").toUpperCase();
   const canDeliver = ["APPROVED", "PART_DELIVERED"].includes(status);
-  const deliveryComplete = status === "DELIVERED";
   const activeInvoice = invoices.find((row) => !["CANCELLED", "REVERSED"].includes(String(row.status || "").toUpperCase()));
 
   return <section className="conversion-box no-print" style={{ marginTop: 16 }}>
@@ -142,10 +113,10 @@ export default function SalesOrderCycle({ orderId }: { orderId: string }) {
       <span className="auto-badge">{status}</span>
     </div>
     {order.sourceDocumentId && <div className="button-row" style={{ marginTop: 12 }}><Link prefetch={false} className="button-link secondary-link" href={`/transactions/quote/${encodeURIComponent(order.sourceDocumentId)}?returnModule=sales&returnTab=salesQuote&returnMode=list`}>Source Sales Quotation</Link></div>}
-    {deliveryNotes.length > 0 && <div className="document-meta" style={{ marginTop: 14 }}>{deliveryNotes.map((delivery) => <div key={delivery.deliveryId}><span>Delivery Note / Stock Out</span><strong>{delivery.deliveryNumber || delivery.deliveryId}</strong>{delivery.journalId && <><br/><Link prefetch={false} href={`/journals/${encodeURIComponent(delivery.journalId)}`}>Journal {delivery.journalId}</Link></>}</div>)}</div>}
+    {deliveryNotes.length > 0 && <div className="document-meta" style={{ marginTop: 14 }}>{deliveryNotes.map((delivery) => <div key={delivery.deliveryId}><span>Delivery Note / Stock Out</span><strong><Link prefetch={false} href={`/transactions/deliveryNote/${encodeURIComponent(delivery.deliveryId)}`}>{delivery.deliveryNumber || delivery.deliveryId}</Link></strong>{delivery.journalId && <><br/><Link prefetch={false} href={`/journals/${encodeURIComponent(delivery.journalId)}`}>Journal {delivery.journalId}</Link></>}</div>)}</div>}
     {activeInvoice && <div className="document-meta" style={{ marginTop: 14 }}><div><span>Linked Sales Invoice</span><strong><Link prefetch={false} href={`/transactions/invoice/${encodeURIComponent(activeInvoice.invoiceId)}`}>{activeInvoice.invoiceNumber || activeInvoice.invoiceId}</Link></strong></div><div><span>Invoice Status</span><strong>{activeInvoice.status}</strong></div></div>}
     <div className="button-row" style={{ marginTop: 14 }}>
-      {canDeliver && !activeInvoice && <button type="button" disabled={Boolean(busy)} onClick={() => void createDeliveryNote()}>{busy === "delivery" ? "Creating Draft…" : "Create Delivery Note"}</button>}
+      {canDeliver && !activeInvoice && (deliveryNotes.length?<Link prefetch={false} className="button-link" href={`/transactions/deliveryNote/${encodeURIComponent(deliveryNotes[0].deliveryId)}`}>Open Delivery Note</Link>:<button type="button" disabled={Boolean(busy)} onClick={() => void createDeliveryNote()}>{busy === "delivery" ? "Creating Draft…" : "Create Delivery Note"}</button>)}
       {status === "DRAFT" && <button type="button" disabled>Approve Sales Order First</button>}
     </div>
     {message && <div className="status-banner" style={{ marginTop: 12 }}>{message}</div>}
