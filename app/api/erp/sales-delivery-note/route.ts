@@ -79,7 +79,14 @@ export async function GET(request: Request) {
   try {
     await requirePermission("sales.read");
     const id = new URL(request.url).searchParams.get("id")?.trim() || "";
-    if (!id) throw new Error("Delivery Note ID / number is required");
+    if (!id) {
+      const notes = await prisma.deliveryNote.findMany({ orderBy: { createdAt: "desc" } });
+      const deliveryNotes = await Promise.all(notes.map(async (note) => {
+        const order = await resolveSalesOrder(note.salesOrderId);
+        return mapDeliveryNote(note, order);
+      }));
+      return NextResponse.json({ ok: true, deliveryNotes });
+    }
     const note = await prisma.deliveryNote.findFirst({ where: { OR: [{ id }, { code: id }] } });
     if (!note) throw new Error("Delivery Note not found");
     const order = await resolveSalesOrder(note.salesOrderId);
