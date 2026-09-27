@@ -11,7 +11,7 @@ type Master={customers:any[];projects:any[]};
 type CashBankAccount={accountId:string;accountCode:string;accountName:string;balance:number};
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
 const normalize=(value:unknown)=>String(value||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"");
-const paymentEligibleStatus=(value:unknown)=>["POSTED","PARTLY_PAID"].includes(String(value||"").toUpperCase());
+const paymentEligibleStatus=(value:unknown)=>["POSTED","PARTLY_PAID","PARTIAL"].includes(String(value||"").toUpperCase());
 const returnQuery="returnModule=sales&returnTab=salesPayment&returnMode=create";
 function localDate(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));return`${v.year}-${v.month}-${v.day}`;}
 function customerId(row:any){return String(row.customerId||"");}
