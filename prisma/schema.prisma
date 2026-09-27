@@ -386,6 +386,28 @@ model WarehouseStockBalance {
   @@index([itemId])
 }
 
+model DeliveryNote {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  salesOrderId   String
+  deliveryDate   DateTime @default(now())
+  status         String   @default("DRAFT")
+  warehouseId    String?
+  journalId      String?
+  note           String?
+  createdBy      String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([salesOrderId])
+  @@index([status])
+  @@index([code])
+  @@index([warehouseId])
+  @@index([journalId])
+}
+
 model StockMovement {
   id            String       @id @default(cuid())
   itemId        String
