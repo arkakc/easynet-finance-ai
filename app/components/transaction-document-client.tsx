@@ -28,9 +28,9 @@ const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",
 const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
 const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
-const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","supplierInvoice","purchasePayment","expense"]);
+const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment","expense"]);
 const VALID_MODES=new Set(["menu","create","list"]);
-const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesOrder:"Sales Order",deliveryNote:"Delivery Note / Stock Out",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
+const SECTION_LABELS:Record<string,string>={salesQuote:"Sales Quotation",salesOrder:"Sales Order",deliveryNote:"Delivery Note / Stock Out",salesInvoice:"Sales Invoice",salesPayment:"Sales Payment Entry / Receipt",supplierQuote:"Supplier Quotation",purchaseOrder:"Purchase Order",purchaseReceipt:"Purchase Receipt / GRN",supplierInvoice:"Supplier Invoice",purchasePayment:"Purchase Payment Entry / Receipt",expense:"Expense"};
 const APPROVED_PO_LIFECYCLE=new Set(["APPROVED","PART_RECEIVED","RECEIVED","PART_BILLED","CONVERTED","BILL_CREATED","BILLED","CLOSED_PARTIAL"]);
 const QUOTE_ACTION_LIFECYCLE=new Set(["APPROVED","PART_INVOICED","CONVERTED","CLOSED_PARTIAL"]);
 
