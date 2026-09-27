@@ -27,7 +27,27 @@ async function assertSourceChain(payment: any, againstDocumentId: string) {
   const invoice = (await findRecords<any>("Invoices", { invoiceId: againstDocumentId }, 1)).rows[0];
   if (!invoice) throw new Error("Sales Invoice not found");
   if (String(invoice.invoiceNumber || "").toUpperCase().startsWith("CN-")) throw new Error("Customer Advances cannot be allocated to Sales Credit Notes");
-  if (String(invoice.sourceDocumentId || "").trim() !== linkedSource) {
+
+  // A modern Sales Invoice is sourced from the Sales Order, while the
+  // customer advance is intentionally linked to the original Sales Quotation.
+  // Resolve the invoice back to that root quotation before validating the chain.
+  let invoiceRootQuote = String(invoice.sourceQuoteId || "").trim();
+  const invoiceSource = String(invoice.sourceDocumentId || "").trim();
+
+  if (!invoiceRootQuote && invoiceSource) {
+    const source = (await findRecords<any>("Quotes", { quoteId: invoiceSource }, 1)).rows[0];
+    if (source) {
+      const sourceNumber = String(source.quoteNumber || "").toUpperCase();
+      invoiceRootQuote = sourceNumber.startsWith("SO-")
+        ? String(source.sourceDocumentId || "").trim()
+        : invoiceSource;
+    }
+  }
+
+  // Legacy invoices may point directly to the quotation.
+  invoiceRootQuote = invoiceRootQuote || invoiceSource;
+
+  if (invoiceRootQuote !== linkedSource) {
     throw new Error("This Customer Advance is linked to a different Sales Quotation and cannot be allocated to this Sales Invoice");
   }
 }
