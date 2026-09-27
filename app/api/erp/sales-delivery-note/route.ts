@@ -7,6 +7,7 @@ import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { postSalesDeliveryAtomic } from "@/lib/accounting/atomic-sales-delivery";
 import { prisma } from "@/src/lib/prisma";
+import { listTable } from "@/lib/backend/apps-script";
 
 const createSchema = z.object({
   action: z.literal("createDraft"),
@@ -80,12 +81,79 @@ export async function GET(request: Request) {
     await requirePermission("sales.read");
     const id = new URL(request.url).searchParams.get("id")?.trim() || "";
     if (!id) {
-      const notes = await prisma.deliveryNote.findMany({ orderBy: { createdAt: "desc" } });
+      const [notes, movementResult] = await Promise.all([
+        prisma.deliveryNote.findMany({ orderBy: { createdAt: "desc" } }),
+        listTable<any>("StockMovements", 500, 0),
+      ]);
+
       const deliveryNotes = await Promise.all(notes.map(async (note) => {
         const order = await resolveSalesOrder(note.salesOrderId);
         return mapDeliveryNote(note, order);
       }));
-      return NextResponse.json({ ok: true, deliveryNotes });
+
+      const byNumber = new Map<string, any>(
+        deliveryNotes.map((row: any) => [String(row.deliveryNumber || row.deliveryId || ""), row]),
+      );
+
+      const legacyGroups = new Map<string, any>();
+      for (const movement of movementResult.rows || []) {
+        if (String(movement.movementType || "").toUpperCase() !== "SALES_DELIVERY") continue;
+        const movementId = String(movement.movementId || "");
+        const deliveryNumber = movementId.replace(/-\d{3}$/, "") || movementId;
+        if (!deliveryNumber || byNumber.has(deliveryNumber)) continue;
+
+        const sourceDocumentId = String(movement.sourceDocumentId || "");
+        const current = legacyGroups.get(deliveryNumber) || {
+          deliveryId: deliveryNumber,
+          deliveryNumber,
+          deliveryDate: String(movement.movementDate || "").slice(0, 10),
+          sourceDocumentId,
+          salesOrderId: sourceDocumentId,
+          customerId: "",
+          customerName: "",
+          projectId: String(movement.projectId || ""),
+          projectName: "",
+          status: "POSTED",
+          warehouseId: String(movement.warehouseId || ""),
+          journalId: String(movement.journalId || ""),
+          totalAmount: 0,
+          createdAt: movement.createdAt || movement.movementDate || "",
+          approvedAt: movement.createdAt || movement.movementDate || "",
+          lines: [],
+          legacyPosted: true,
+        };
+        current.totalAmount += Number(movement.value || 0);
+        if (!current.journalId && movement.journalId) current.journalId = String(movement.journalId);
+        legacyGroups.set(deliveryNumber, current);
+      }
+
+      for (const legacy of legacyGroups.values()) {
+        const order = await resolveSalesOrder(String(legacy.salesOrderId || ""));
+        if (order) {
+          legacy.salesOrderNumber = order.code;
+          legacy.customerId = order.customer?.code || "";
+          legacy.customerName = order.customer?.name || "";
+          legacy.projectId = order.project?.code || legacy.projectId || "";
+          legacy.projectName = order.project?.name || "";
+          legacy.totalAmount = Number(order.total || legacy.totalAmount || 0);
+          legacy.lines = (order.lines || []).map((line: any) => ({
+            lineId: line.id,
+            itemId: line.itemId || "",
+            itemCode: line.item?.code || line.itemId || "",
+            itemName: line.item?.name || line.description || "",
+            itemType: line.item?.type === "GOOD" ? "STOCK" : line.item?.type === "SERVICE" ? "SERVICE" : "NON_STOCK",
+            description: line.description || "",
+            qty: Number(line.quantity || 0),
+            uom: line.unit || line.item?.unit || "Each",
+          }));
+        }
+        byNumber.set(String(legacy.deliveryNumber), legacy);
+      }
+
+      const merged = [...byNumber.values()].sort((a: any, b: any) =>
+        new Date(b.createdAt || b.deliveryDate || 0).getTime() - new Date(a.createdAt || a.deliveryDate || 0).getTime(),
+      );
+      return NextResponse.json({ ok: true, deliveryNotes: merged });
     }
     const note = await prisma.deliveryNote.findFirst({ where: { OR: [{ id }, { code: id }] } });
     if (!note) throw new Error("Delivery Note not found");
