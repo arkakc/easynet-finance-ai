@@ -194,11 +194,12 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
     (type==="payment"&&clean(record.partyType)==="Supplier");
 
   if(purchaseSide){
-    const[ordersResult,billsResult,paymentsResult,movementsResult]=await Promise.all([
+    const[ordersResult,billsResult,paymentsResult,movementsResult,purchaseReceipts]=await Promise.all([
       listTable<any>("PurchaseOrders",500,0),
       listTable<any>("SupplierBills",500,0),
       listTable<any>("Payments",500,0),
       listTable<any>("StockMovements",500,0),
+      prisma.purchaseReceipt.findMany({orderBy:{createdAt:"asc"}}),
     ]);
     const orders=ordersResult.rows||[];
     const bills=billsResult.rows||[];
@@ -279,6 +280,14 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
     }
 
     const receiptNumbers=new Set<string>();
+    for(const receipt of purchaseReceipts){
+      const sourcePo=clean(receipt.purchaseOrderId);
+      if(!poIds.has(sourcePo))continue;
+      const number=clean(receipt.code)||clean(receipt.id);
+      if(!number||receiptNumbers.has(number))continue;
+      receiptNumbers.add(number);
+      add(30,currentStage,"Purchase Receipt / GRN",clean(receipt.id),number,"purchaseReceipt",transactionHref("purchaseReceipt",clean(receipt.id)));
+    }
     for(const movement of movements){
       if(clean(movement.movementType)!=="PURCHASE_RECEIPT")continue;
       const sourcePo=clean(movement.sourceDocumentId);
@@ -286,7 +295,7 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
       const number=movementDocumentNumber(movement);
       if(!number||receiptNumbers.has(number))continue;
       receiptNumbers.add(number);
-      add(30,currentStage,"Purchase Receipt / GRN",number,number,"purchaseReceipt",`/stock?mode=register&sourcePo=${encodeURIComponent(sourcePo)}`);
+      add(30,currentStage,"Purchase Receipt / GRN",number,number,"purchaseReceipt",`/transactions/purchaseReceipt/${encodeURIComponent(number)}`);
     }
 
     const chainBills=bills.filter((bill:any)=>
@@ -342,6 +351,14 @@ export async function GET(request:NextRequest){
           const source=await findRecords<any>("Quotes",{quoteId:deliveryNote.salesOrderId},1);
           if(source.rows[0])matches.push({type:"quote",config:CONFIG.quote,record:source.rows[0]});
           movementSearch={number:deliveryNote.code,kind:"Delivery Note / Stock Out"};
+        }
+      }
+      if(matches.length===0){
+        const purchaseReceipt=await prisma.purchaseReceipt.findFirst({where:{OR:[{id},{code:id}]}});
+        if(purchaseReceipt){
+          const source=await findRecords<any>("PurchaseOrders",{poId:purchaseReceipt.purchaseOrderId},1);
+          if(source.rows[0])matches.push({type:"purchaseOrder",config:CONFIG.purchaseOrder,record:source.rows[0]});
+          movementSearch={number:purchaseReceipt.code,kind:"Purchase Receipt / GRN"};
         }
       }
       if(matches.length===0){
