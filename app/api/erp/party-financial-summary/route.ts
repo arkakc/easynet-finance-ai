@@ -10,7 +10,7 @@ const postedPayment=(row:any)=>clean(row.status).toUpperCase()==="POSTED"&&Boole
 const recognizedDocument=(row:any)=>["POSTED","PARTLY_PAID","PAID"].includes(clean(row.status).toUpperCase());
 const movementDoc=(row:any)=>clean(row.movementId).replace(/-\d{3}$/,"")||clean(row.movementId);
 const paymentMarker=(row:any,prefix:"SQ"|"PO")=>clean(row.reference).match(new RegExp(`^${prefix}:([^|]+)\\|`))?.[1]||"";
-const rowDate=(row:any)=>clean(row.quoteDate||row.invoiceDate||row.poDate||row.billDate||row.paymentDate||row.deliveryDate||row.date||row.createdAt).slice(0,10);
+const rowDate=(row:any)=>clean(row.quoteDate||row.invoiceDate||row.poDate||row.billDate||row.paymentDate||row.deliveryDate||row.receiptDate||row.date||row.createdAt).slice(0,10);
 
 function txHref(type:string,id:string){
   return `/transactions/${type}/${encodeURIComponent(id)}`;
@@ -111,11 +111,12 @@ export async function GET(request:NextRequest){
       },documents});
     }
 
-    const[ordersResult,billsResult,paymentsResult,movementsResult]=await Promise.all([
+    const[ordersResult,billsResult,paymentsResult,movementsResult,purchaseReceipts]=await Promise.all([
       listTable<any>("PurchaseOrders",500,0),
       listTable<any>("SupplierBills",500,0),
       listTable<any>("Payments",500,0),
       listTable<any>("StockMovements",500,0),
+      prisma.purchaseReceipt.findMany({orderBy:{createdAt:"asc"}}),
     ]);
     const orders=(ordersResult.rows||[]).filter((row:any)=>clean(row.supplierId)===partyId&&activeStatus(row.status));
     const bills=(billsResult.rows||[]).filter((row:any)=>clean(row.supplierId)===partyId&&activeStatus(row.status));
@@ -154,12 +155,20 @@ export async function GET(request:NextRequest){
       const id=clean(row.poId);
       documents.push({kind:"Purchase Order",number:clean(row.poNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("purchaseOrder",id),date:rowDate(row),chainId:rootByPoId.get(id)||id});
     }
+    const persistedReceiptNumbers=new Set<string>();
+    for(const receipt of purchaseReceipts){
+      const sourceId=clean(receipt.purchaseOrderId);
+      if(!poIds.has(sourceId))continue;
+      const num=clean(receipt.code)||clean(receipt.id);if(!num)continue;
+      persistedReceiptNumbers.add(num);
+      documents.push({kind:"Purchase Receipt / GRN",number:num,status:clean(receipt.status)||"DRAFT",amount:null,href:txHref("purchaseReceipt",clean(receipt.id)),date:rowDate({...receipt,receiptDate:receipt.receiptDate}),chainId:rootByPoId.get(sourceId)||sourceId});
+    }
     for(const row of movementsResult.rows||[]){
       if(clean(row.movementType)!=="PURCHASE_RECEIPT")continue;
       const sourceId=clean(row.sourceDocumentId);
       if(!poIds.has(sourceId))continue;
-      const num=movementDoc(row);if(!num)continue;
-      documents.push({kind:"Purchase Receipt / GRN",number:num,status:"POSTED",amount:null,href:`/stock?mode=register&sourcePo=${encodeURIComponent(sourceId)}`,date:rowDate(row),chainId:rootByPoId.get(sourceId)||sourceId});
+      const num=movementDoc(row);if(!num||persistedReceiptNumbers.has(num))continue;
+      documents.push({kind:"Purchase Receipt / GRN",number:num,status:"POSTED",amount:null,href:`/transactions/purchaseReceipt/${encodeURIComponent(num)}`,date:rowDate(row),chainId:rootByPoId.get(sourceId)||sourceId});
     }
     for(const row of bills){
       const id=clean(row.billId);
@@ -180,7 +189,7 @@ export async function GET(request:NextRequest){
       recognizedInvoiceCount:recognizedBills.length,
       supplierQuotes:supplierQuotes.length,
       purchaseOrders:purchaseOrders.length,
-      receipts:receiptNumbers.size,
+      receipts:documents.filter((row:any)=>row.kind==="Purchase Receipt / GRN").length,
       invoices:bills.length,
       payments:payments.length,
     },documents});
