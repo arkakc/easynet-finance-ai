@@ -433,8 +433,10 @@ export default function TransactionsWorkspaceV5(){
       >
         <span>{controlledCreateBlocked?"🔗":"➕"}</span> {controlledCreateBlocked?(
           tab==="salesOrder"?"Create from Sales Quotation":
-          tab==="salesInvoice"?"Create from Sales Order":
-          "Create from Supplier Quotation"
+          tab==="salesInvoice"?"Create from Delivery Note":
+          tab==="purchaseOrder"?"Create from Supplier Quotation":
+          tab==="supplierInvoice"?"Create from Purchase Receipt / GRN":
+          section.createLabel
         ):section.createLabel}
       </button>
     </div>
@@ -451,7 +453,7 @@ export default function TransactionsWorkspaceV5(){
       </div>
       <div className="button-row">
         <button type="button" onClick={()=>{
-          const upstream:Tab=tab==="salesOrder"?"salesQuote":tab==="salesInvoice"?"salesOrder":"supplierQuote";
+          const upstream:Tab=tab==="salesOrder"?"salesQuote":tab==="salesInvoice"?"deliveryNote":tab==="supplierInvoice"?"purchaseReceipt":"supplierQuote";
           setTab(upstream);
           setSectionMode("list");
           syncUrl(module,upstream,"list");
