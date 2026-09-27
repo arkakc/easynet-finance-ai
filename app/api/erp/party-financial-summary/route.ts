@@ -10,7 +10,7 @@ const postedPayment=(row:any)=>clean(row.status).toUpperCase()==="POSTED"&&Boole
 const recognizedDocument=(row:any)=>["POSTED","PARTLY_PAID","PAID"].includes(clean(row.status).toUpperCase());
 const movementDoc=(row:any)=>clean(row.movementId).replace(/-\d{3}$/,"")||clean(row.movementId);
 const paymentMarker=(row:any,prefix:"SQ"|"PO")=>clean(row.reference).match(new RegExp(`^${prefix}:([^|]+)\\|`))?.[1]||"";
-const rowDate=(row:any)=>clean(row.quoteDate||row.invoiceDate||row.poDate||row.billDate||row.paymentDate||row.date||row.createdAt).slice(0,10);
+const rowDate=(row:any)=>clean(row.quoteDate||row.invoiceDate||row.poDate||row.billDate||row.paymentDate||row.deliveryDate||row.date||row.createdAt).slice(0,10);
 
 function txHref(type:string,id:string){
   return `/transactions/${type}/${encodeURIComponent(id)}`;
