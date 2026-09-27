@@ -23,6 +23,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
   const[loading,setLoading]=useState(true);
   const[busy,setBusy]=useState("");
   const[message,setMessage]=useState("");
+  const[documentLinks,setDocumentLinks]=useState<any[]>([]);
 
   async function load(){
     setLoading(true);
@@ -34,13 +35,17 @@ export default function DeliveryNoteClient({id}:{id:string}){
       setNote(row);
       setDeliveryDate(String(row.deliveryDate||localDate()));
       setWarehouseId(String(row.warehouseId||""));
-      const warehouseResponse=await fetch("/api/erp/warehouse-options",{cache:"no-store"});
-      const warehouseBody=await warehouseResponse.json();
+      const [warehouseResponse,flowResponse]=await Promise.all([
+        fetch("/api/erp/warehouse-options",{cache:"no-store"}),
+        fetch("/api/erp/transaction-document?type=quote&id="+encodeURIComponent(String(row.salesOrderId||"")),{cache:"no-store"}),
+      ]);
+      const [warehouseBody,flowBody]=await Promise.all([warehouseResponse.json(),flowResponse.json()]);
       if(warehouseResponse.ok&&warehouseBody.ok){
         const options=warehouseBody.warehouses||[];
         setWarehouses(options);
         setWarehouseId(current=>current||String((options.find((w:any)=>w.isDefault)||options[0])?.warehouseId||""));
       }
+      if(flowResponse.ok&&flowBody.ok)setDocumentLinks(Array.isArray(flowBody.documentLinks)?flowBody.documentLinks:[]);
     }catch(error){setMessage(error instanceof Error?error.message:"Delivery Note load failed");}
     finally{setLoading(false);}
   }
@@ -77,6 +82,22 @@ export default function DeliveryNoteClient({id}:{id:string}){
 
   const status=String(note.status||"DRAFT").toUpperCase();
   const posted=status==="POSTED";
+  const linksByStage=new Map<number,any[]>();
+  for(const link of documentLinks){
+    const stage=Number(link.stage||0);
+    const list=linksByStage.get(stage)||[];
+    list.push(link);
+    linksByStage.set(stage,list);
+  }
+  const flowStages=[
+    {stage:10,label:"Sales Quotation"},
+    {stage:15,label:"Customer Advance"},
+    {stage:20,label:"Sales Order"},
+    {stage:30,label:"Delivery Note"},
+    {stage:40,label:"Sales Invoice"},
+    {stage:45,label:"Credit Note"},
+    {stage:50,label:"Final Receipt"},
+  ];
 
   return <div className="document-page">
     <div className="document-toolbar no-print"><div className="document-toolbar-back"><Link href="/transactions?module=sales&tab=deliveryNote&mode=list">← Back to Delivery Notes</Link></div></div>
@@ -96,10 +117,21 @@ export default function DeliveryNoteClient({id}:{id:string}){
           <Link className="document-flow-explorer-link" href={"/document-explorer?documentId="+encodeURIComponent(note.deliveryNumber)}>View Full Relationship</Link>
         </div>
         <div className="document-flow-tab-row">
-          {["Sales Quotation","Customer Advance","Sales Order","Delivery Note","Sales Invoice","Credit Note","Final Receipt"].map((label,index)=><div className="document-flow-stage-wrap" key={label}>
-            <div className={"document-flow-tab "+(label==="Delivery Note"?"current":"empty")}><span className="document-flow-tab-label">{label}</span><div className="document-flow-tab-links">{label==="Delivery Note"?<span className="document-flow-current-number">{note.deliveryNumber}</span>:<span className="document-flow-placeholder">—</span>}</div></div>
-            {index<6&&<span className="document-flow-mini-arrow">→</span>}
-          </div>)}
+          {flowStages.map((stageDef,index)=>{
+            const stageLinks=linksByStage.get(stageDef.stage)||[];
+            const isCurrent=stageDef.stage===30;
+            return <div className="document-flow-stage-wrap" key={stageDef.stage}>
+              <div className={"document-flow-tab "+(isCurrent?"current":stageLinks.length?"linked":"empty")}>
+                <span className="document-flow-tab-label">{stageDef.label}</span>
+                <div className="document-flow-tab-links">
+                  {isCurrent&&<span className="document-flow-current-number">{note.deliveryNumber}</span>}
+                  {stageLinks.map((link:any,linkIndex:number)=><Link key={String(link.type)+"-"+String(link.id)+"-"+linkIndex} href={String(link.href||"#")}>{link.number||link.id}</Link>)}
+                  {!isCurrent&&stageLinks.length===0&&<span className="document-flow-placeholder">—</span>}
+                </div>
+              </div>
+              {index<flowStages.length-1&&<span className="document-flow-mini-arrow">→</span>}
+            </div>;
+          })}
         </div>
       </section>
 
