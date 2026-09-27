@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listTable } from "@/lib/backend/apps-script";
 import { requirePermission } from "@/lib/auth";
+import { prisma } from "@/src/lib/prisma";
 
 const clean=(value:unknown)=>String(value||"").trim();
 const n=(value:unknown)=>{const v=Number(value||0);return Number.isFinite(v)?v:0;};
@@ -23,11 +24,12 @@ export async function GET(request:NextRequest){
     await requirePermission(type==="customer"?"sales.read":"purchase.read");
 
     if(type==="customer"){
-      const[quotesResult,invoicesResult,paymentsResult,movementsResult]=await Promise.all([
+      const[quotesResult,invoicesResult,paymentsResult,movementsResult,deliveryNotes]=await Promise.all([
         listTable<any>("Quotes",500,0),
         listTable<any>("Invoices",500,0),
         listTable<any>("Payments",500,0),
         listTable<any>("StockMovements",500,0),
+        prisma.deliveryNote.findMany({orderBy:{createdAt:"asc"}}),
       ]);
       const quotes=(quotesResult.rows||[]).filter((row:any)=>clean(row.customerId)===partyId&&activeStatus(row.status));
       const invoices=(invoicesResult.rows||[]).filter((row:any)=>clean(row.customerId)===partyId&&activeStatus(row.status));
@@ -68,11 +70,20 @@ export async function GET(request:NextRequest){
         const id=clean(row.quoteId);
         documents.push({kind:"Sales Order",number:clean(row.quoteNumber)||id,status:clean(row.status),amount:n(row.totalAmount),href:txHref("quote",id),date:rowDate(row),chainId:rootByOrderId.get(id)||id});
       }
+      const persistedDeliveryNumbers=new Set<string>();
+      for(const note of deliveryNotes){
+        const sourceId=clean(note.salesOrderId);
+        if(!orderIds.has(sourceId))continue;
+        const num=clean(note.code)||clean(note.id);
+        if(!num)continue;
+        persistedDeliveryNumbers.add(num);
+        documents.push({kind:"Delivery Note / Stock Out",number:num,status:clean(note.status)||"DRAFT",amount:null,href:txHref("deliveryNote",clean(note.id)),date:rowDate(note),chainId:rootByOrderId.get(sourceId)||sourceId});
+      }
       for(const row of movementsResult.rows||[]){
         if(clean(row.movementType)!=="SALES_DELIVERY")continue;
         const sourceId=clean(row.sourceDocumentId);
         if(!quoteIds.has(sourceId)&&!orderIds.has(sourceId))continue;
-        const num=movementDoc(row);if(!num)continue;
+        const num=movementDoc(row);if(!num||persistedDeliveryNumbers.has(num))continue;
         documents.push({kind:"Delivery Note / Stock Out",number:num,status:"POSTED",amount:null,href:`/stock?mode=register&sourceDocumentId=${encodeURIComponent(sourceId)}`,date:rowDate(row),chainId:rootByOrderId.get(sourceId)||sourceId});
       }
       for(const row of invoices){
@@ -94,7 +105,7 @@ export async function GET(request:NextRequest){
         recognizedInvoiceCount:recognizedInvoices.length,
         salesQuotes:salesQuotes.length,
         salesOrders:salesOrders.length,
-        deliveries:deliveryNumbers.size,
+        deliveries:documents.filter((row:any)=>row.kind==="Delivery Note / Stock Out").length,
         invoices:invoices.length,
         payments:payments.length,
       },documents});
