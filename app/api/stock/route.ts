@@ -456,7 +456,7 @@ export async function POST(request: Request) {
 
     if (body.action === "createWarehouse") return NextResponse.json({ ok: true, warehouse: await createWarehouse(body.record) });
     if (body.action === "createTransfer") return NextResponse.json({ ok: true, transfer: await createWarehouseTransfer(body.record) });
-    if (body.action === "createPurchaseReceipt") return NextResponse.json({ ok: true, ...(await createPurchaseReceipt(body.record)) });
+    if (body.action === "createPurchaseReceipt") throw new Error("Direct Purchase Receipt posting is disabled. Create a Draft Purchase Receipt / GRN from the Purchase Order, then complete it from the GRN full view.");
     if (body.action === "createMovement") return NextResponse.json({ ok: true, ...(await createPhysicalMovement(body.record)) });
     if (body.action === "createValueAdjustment") return NextResponse.json({ ok: true, ...(await createValueAdjustment(body.record)) });
     throw new Error("Unsupported stock action");
