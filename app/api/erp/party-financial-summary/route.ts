@@ -161,7 +161,7 @@ export async function GET(request:NextRequest){
       if(!poIds.has(sourceId))continue;
       const num=clean(receipt.code)||clean(receipt.id);if(!num)continue;
       persistedReceiptNumbers.add(num);
-      documents.push({kind:"Purchase Receipt / GRN",number:num,status:clean(receipt.status)||"DRAFT",amount:null,href:txHref("purchaseReceipt",clean(receipt.id)),date:rowDate({...receipt,receiptDate:receipt.receiptDate}),chainId:rootByPoId.get(sourceId)||sourceId});
+      documents.push({kind:"Purchase Receipt / GRN",number:num,status:clean(receipt.status)||"DRAFT",amount:null,href:txHref("purchaseReceipt",clean(receipt.id)),date:receipt.receiptDate?.toISOString?.().slice(0,10)||rowDate(receipt),chainId:rootByPoId.get(sourceId)||sourceId});
     }
     for(const row of movementsResult.rows||[]){
       if(clean(row.movementType)!=="PURCHASE_RECEIPT")continue;
