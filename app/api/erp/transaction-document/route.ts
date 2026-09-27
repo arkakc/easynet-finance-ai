@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findRecords, listTable } from "@/lib/backend/apps-script";
 import { requirePermission, type Permission } from "@/lib/auth";
+import { prisma } from "@/src/lib/prisma";
 
 const CONFIG: Record<string,{table:string;idField:string;numberField:string;lineTable?:string;lineIdField?:string;permission:Permission}>={
   quote:{table:"Quotes",idField:"quoteId",numberField:"quoteNumber",lineTable:"QuoteLines",lineIdField:"quoteId",permission:"sales.read"},
@@ -75,11 +76,12 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
     (type==="payment"&&clean(record.partyType)==="Customer");
 
   if(salesSide){
-    const[quotesResult,invoicesResult,paymentsResult,movementsResult]=await Promise.all([
+    const[quotesResult,invoicesResult,paymentsResult,movementsResult,deliveryNotes]=await Promise.all([
       listTable<any>("Quotes",500,0),
       listTable<any>("Invoices",500,0),
       listTable<any>("Payments",500,0),
       listTable<any>("StockMovements",500,0),
+      prisma.deliveryNote.findMany({orderBy:{createdAt:"asc"}}),
     ]);
     const quotes=quotesResult.rows||[];
     const invoices=invoicesResult.rows||[];
@@ -141,6 +143,14 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
 
       const deliverySources=new Set<string>([rootQuoteId,...orderIds]);
       const deliveryNumbers=new Set<string>();
+      for(const note of deliveryNotes){
+        const sourceId=clean(note.salesOrderId);
+        if(!deliverySources.has(sourceId))continue;
+        const number=clean(note.code)||clean(note.id);
+        if(!number||deliveryNumbers.has(number))continue;
+        deliveryNumbers.add(number);
+        add(30,currentStage,"Delivery Note / Stock Out",clean(note.id),number,"deliveryNote",transactionHref("deliveryNote",clean(note.id)));
+      }
       for(const movement of movements){
         if(clean(movement.movementType)!=="SALES_DELIVERY")continue;
         if(!deliverySources.has(clean(movement.sourceDocumentId)))continue;
@@ -325,6 +335,14 @@ export async function GET(request:NextRequest){
         let candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.idField]:id},1);
         if(!candidate.rows[0])candidate=await findRecords<any>(candidateConfig.table,{[candidateConfig.numberField]:id},1);
         if(candidate.rows[0])matches.push({type:candidateType,config:candidateConfig,record:candidate.rows[0]});
+      }
+      if(matches.length===0){
+        const deliveryNote=await prisma.deliveryNote.findFirst({where:{OR:[{id},{code:id}]}});
+        if(deliveryNote){
+          const source=await findRecords<any>("Quotes",{quoteId:deliveryNote.salesOrderId},1);
+          if(source.rows[0])matches.push({type:"quote",config:CONFIG.quote,record:source.rows[0]});
+          movementSearch={number:deliveryNote.code,kind:"Delivery Note / Stock Out"};
+        }
       }
       if(matches.length===0){
         const movementResult=await listTable<any>("StockMovements",500,0);
