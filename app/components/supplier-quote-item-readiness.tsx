@@ -11,12 +11,13 @@ type Readiness={supplierQuoteId:string;supplierQuoteNumber:string;status:string;
 type Draft={existingItemId:string;itemName:string;itemType:"STOCK"|"SERVICE"|"NON_STOCK";uom:string;revenueAccount:string;costAccount:string;deferredRevenueMonths:string};
 type Account={accountId:string;accountCode:string;accountName:string;accountType:string;parentAccount:string};
 type Suggestion={revenueAccountId:string;costAccountId:string;revenueAccountLabel:string;costAccountLabel:string;confidence:number;reason:string;source:"AI"|"RULE_FALLBACK"};
+type Payment={paymentId:string;paymentNumber?:string;paymentDate?:string;amount?:number|string;paymentMethod?:string;status?:string;journalId?:string;createdAt?:string};
 
 function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||"",costAccount:only?.costAccount||"",deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
 
 export default function SupplierQuoteItemReadiness({supplierQuoteId}:{supplierQuoteId:string}){
   const router=useRouter();
-  const[readiness,setReadiness]=useState<Readiness|null>(null),[drafts,setDrafts]=useState<Record<string,Draft>>({}),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState(""),[accounts,setAccounts]=useState<Account[]>([]);
+  const[readiness,setReadiness]=useState<Readiness|null>(null),[drafts,setDrafts]=useState<Record<string,Draft>>({}),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState(""),[accounts,setAccounts]=useState<Account[]>([]),[payments,setPayments]=useState<Payment[]>([]);
   const[aiBusy,setAiBusy]=useState<Record<string,boolean>>({}),[aiNotes,setAiNotes]=useState<Record<string,string>>({}),[accountOverrides,setAccountOverrides]=useState<Record<string,boolean>>({}),[tempColumnWidths,setTempColumnWidths]=useState<Record<string,number>>({line:70,temp:250,qty:90,existing:220,name:260,type:180,uom:140,revenue:300,cost:300,posting:280,deferred:150});
 
   async function requestSuggestion(lineId:string,itemName:string,itemType:Draft["itemType"]){
