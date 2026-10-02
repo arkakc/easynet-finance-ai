@@ -309,6 +309,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
           </details>
         )}
+        {record && rowStatus === "DRAFT" && (
+          <DocumentWorkflowActions
+            recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"}
+            recordId={id}
+            status={rowStatus}
+            onApproved={() => loadDocument(undefined, true)}
+            placement="toolbar"
+          />
+        )}
         {canEdit && (
           <Link prefetch={false} className="button-link" href={type === "invoice" ? `/transactions/invoice/${encodeURIComponent(id)}/edit` : `/transactions/${encodeURIComponent(type)}/${encodeURIComponent(id)}/edit`}>
             Edit Draft
@@ -414,7 +423,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     </section>
 
     {record&&<>
-      <DocumentWorkflowActions recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"} recordId={id} status={rowStatus} onApproved={() => loadDocument(undefined, true)}/>
       {type==="quote"&&!isSalesOrder&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection title="Sales Quotation Fulfilment" description="Sales order readiness, stock checks, linked documents and customer advances are loaded only when you request them." buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Order":"Open Sales Fulfilment Actions"}><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
       {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
