@@ -11,11 +11,13 @@ export default function DocumentWorkflowActions({
   recordId,
   status,
   onApproved,
+  placement = "default",
 }: {
   recordType: RecordType;
   recordId: string;
   status: string;
   onApproved?: () => Promise<void> | void;
+  placement?: "default" | "toolbar";
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -48,7 +50,9 @@ export default function DocumentWorkflowActions({
       await onApproved?.();
       router.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Approval failed");
+      const failure = error instanceof Error ? error.message : "Approval failed";
+      setMessage(failure);
+      if (placement === "toolbar") window.alert(failure);
     } finally {
       setBusy(false);
     }
@@ -76,6 +80,28 @@ export default function DocumentWorkflowActions({
   }
 
   if (current !== "DRAFT") return null;
+
+  if (placement === "toolbar") {
+    return (
+      <div className="no-print" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <button
+          type="button"
+          onClick={approve}
+          disabled={busy}
+          style={{
+            background: "#16a34a",
+            borderColor: "#15803d",
+            color: "#ffffff",
+            fontWeight: 700,
+          }}
+          title={controlledCreditNote ? "Approve Credit Note / Return" : "Approve this draft document"}
+        >
+          {busy ? "Approving…" : controlledCreditNote ? "Approve Credit Note / Return" : "Approve"}
+        </button>
+        {message && busy ? <span className="small">{message}</span> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="no-print" style={{ marginTop: 16 }}>
