@@ -38,7 +38,25 @@ export default function SupplierAdvanceChainSummary(props:Props){
         {props.billId&&<div><span>Advance Adjusted to This Invoice</span><strong>{money(thisInvoiceAdvance)}</strong></div>}{props.billId&&<div><span>This Invoice Outstanding</span><strong>{money(props.billOutstanding||0)}</strong></div>}
         {currentPayment&&<div><span>This Advance Payment</span><strong>{money(currentPayment.amount)}</strong></div>}{currentSummary&&<div><span>This Payment Allocated</span><strong>{money(currentSummary.allocatedAmount)}</strong></div>}{currentSummary&&<div><span>This Payment Remaining</span><strong>{money(currentSummary.remainingAmount)}</strong></div>}
       </div>
-      {payments.length>0&&<div className="table-wrap" style={{marginTop:18}}><table className="data-table"><thead><tr><th>Advance Payment</th><th>Created</th><th>Amount</th><th>Status</th><th>Allocated</th><th>Remaining</th><th>Adjusted Against</th></tr></thead><tbody>{[...payments].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=>{const summary=summaries[row.paymentId];const allocationBills=(summary?.allocations||[]).map(a=>({id:String(a.againstDocumentId||a.milestone||""),number:String(a.againstDocumentNumber||"")})).filter(a=>a.id);const uniqueAllocations=[...new Map(allocationBills.map(a=>[a.id,a])).values()];return<tr key={row.paymentId}><td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td><td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td><td>{money(row.amount)}</td><td>{row.status||"DRAFT"}</td><td>{summary?money(summary.allocatedAmount):"—"}</td><td>{summary?money(summary.remainingAmount):"—"}</td><td>{uniqueAllocations.length?uniqueAllocations.map((allocation,index)=>{const bill=bills.find(b=>String(b.billId||"")===allocation.id);return<span key={allocation.id}>{index?", ":""}<Link href={`/transactions/supplierBill/${encodeURIComponent(allocation.id)}`}>{allocation.number||bill?.billNumber||allocation.id}</Link></span>}):"Unallocated"}</td></tr>;})}</tbody></table></div>}
+      {props.context==="payment" ? (
+        <div className="table-wrap" style={{marginTop:18}}>
+          <table className="data-table">
+            <thead><tr><th>Purchase Order</th><th>Status</th><th>PO Total</th><th>Advance Finalized</th><th>Advance Allocated</th><th>Advance Remaining</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><Link prefetch={false} href={`/transactions/purchaseOrder/${encodeURIComponent(props.poId)}`}><strong>{po?.poNumber||props.poId}</strong></Link></td>
+                <td>{po?.status||"—"}</td>
+                <td>{money(poTotal)}</td>
+                <td>{money(advancePosted)}</td>
+                <td>{money(advanceAllocated)}</td>
+                <td>{money(advanceAvailable)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : payments.length>0 ? (
+        <div className="table-wrap" style={{marginTop:18}}><table className="data-table"><thead><tr><th>Advance Payment</th><th>Created</th><th>Amount</th><th>Status</th><th>Allocated</th><th>Remaining</th><th>Adjusted Against</th></tr></thead><tbody>{[...payments].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=>{const summary=summaries[row.paymentId];const allocationBills=(summary?.allocations||[]).map(a=>({id:String(a.againstDocumentId||a.milestone||""),number:String(a.againstDocumentNumber||"")})).filter(a=>a.id);const uniqueAllocations=[...new Map(allocationBills.map(a=>[a.id,a])).values()];return<tr key={row.paymentId}><td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td><td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td><td>{money(row.amount)}</td><td>{row.status||"DRAFT"}</td><td>{summary?money(summary.allocatedAmount):"—"}</td><td>{summary?money(summary.remainingAmount):"—"}</td><td>{uniqueAllocations.length?uniqueAllocations.map((allocation,index)=>{const bill=bills.find(b=>String(b.billId||"")===allocation.id);return<span key={allocation.id}>{index?", ":""}<Link href={`/transactions/supplierBill/${encodeURIComponent(allocation.id)}`}>{allocation.number||bill?.billNumber||allocation.id}</Link></span>}):"Unallocated"}</td></tr>;})}</tbody></table></div>
+      ) : null}
     </>}
   </section>;
 }
