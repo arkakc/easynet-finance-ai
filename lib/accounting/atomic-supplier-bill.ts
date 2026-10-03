@@ -6,6 +6,8 @@ import {
 } from "@/lib/accounting/posting-rules";
 import { round2 } from "@/lib/accounting/inventory";
 import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
+import { createPaymentAllocationInTransaction } from "@/lib/accounting/payment-allocation";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 
 export type AtomicSupplierBillInput = {
   billId: string;
@@ -433,6 +435,145 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       },
     });
 
+    const plannedAdvances = Array.isArray(bill.plannedAdvanceAllocations)
+      ? (bill.plannedAdvanceAllocations as Array<any>)
+          .map((row) => ({
+            paymentId: String(row?.paymentId || "").trim(),
+            amount: round2(Number(row?.amount || 0)),
+          }))
+          .filter((row) => row.paymentId && row.amount > 0)
+      : [];
+
+    const advanceAllocationJournalIds: string[] = [];
+    for (const plan of plannedAdvances) {
+      const payment = await tx.payment.findFirst({
+        where: { OR: [{ id: plan.paymentId }, { code: plan.paymentId }] },
+        include: {
+          supplier: { select: { code: true } },
+          project: { select: { code: true } },
+        },
+      });
+      if (!payment) {
+        throw new Error("Planned Supplier Advance Payment Entry was not found");
+      }
+      if (payment.status !== "CLEARED" || !payment.journalId) {
+        throw new Error(
+          `Planned Supplier Advance ${payment.code} is not finalized. Finalize or remove it before Supplier Invoice approval.`,
+        );
+      }
+      if (payment.supplierId !== bill.supplierId) {
+        throw new Error(`Planned Supplier Advance ${payment.code} belongs to a different supplier`);
+      }
+      const sourceRef = String(payment.sourceDocId || "").trim();
+      if (![purchaseOrder.id, purchaseOrder.code].includes(sourceRef)) {
+        throw new Error(`Planned Supplier Advance ${payment.code} is not linked to this Purchase Order`);
+      }
+
+      const allocation = await createPaymentAllocationInTransaction(tx, {
+        paymentId: payment.id,
+        againstDocumentType: "Supplier Invoice",
+        againstDocumentId: bill.id,
+        amount: plan.amount,
+        allocationDate: input.postingDate,
+        allocationType: "ADVANCE",
+        idempotencyKey: `SUPPLIER-BILL-APPROVAL:${bill.id}:${payment.id}`,
+        createdBy: input.createdBy || "supplier-bill-approval",
+      });
+
+      if (!allocation.alreadyAllocated) {
+        const settlementBaseAmount = Number(allocation.settlementBaseAmount || 0);
+        const documentBaseAmount = Number(allocation.documentBaseAmount || 0);
+        const settlementExchangeRate = Number(allocation.settlementExchangeRate || 1);
+        const documentExchangeRate = Number(allocation.documentExchangeRate || 1);
+        const realizedGain = Number(allocation.realizedGain || 0);
+        const realizedLoss = Number(allocation.realizedLoss || 0);
+        const amount = plan.amount;
+        const paymentSupplierRef = payment.supplier?.code || payment.supplierId || supplierRef;
+        const paymentProjectRef = payment.project?.code || payment.projectId || projectRef;
+        const transactionAudit = (side: "debit" | "credit", rate: number) => ({
+          transactionCurrency: allocation.currency,
+          exchangeRate: rate,
+          transactionDebit: side === "debit" ? amount : 0,
+          transactionCredit: side === "credit" ? amount : 0,
+        });
+        const zeroFxAudit = {
+          transactionCurrency: allocation.baseCurrency,
+          exchangeRate: 1,
+          transactionDebit: 0,
+          transactionCredit: 0,
+        };
+        const allocationLines: any[] = [
+          {
+            accountId: input.payableAccountId || INITIAL_ACCOUNT_IDS.accountsPayable,
+            debit: documentBaseAmount,
+            ...transactionAudit("debit", documentExchangeRate),
+            supplierId: paymentSupplierRef,
+            projectId: paymentProjectRef,
+            description: "Settle Accounts Payable from planned supplier advance",
+          },
+          {
+            accountId: INITIAL_ACCOUNT_IDS.supplierAdvances,
+            credit: settlementBaseAmount,
+            ...transactionAudit("credit", settlementExchangeRate),
+            supplierId: paymentSupplierRef,
+            projectId: paymentProjectRef,
+            description: "Apply planned supplier advance",
+          },
+        ];
+        if (realizedGain > 0) {
+          allocationLines.push({
+            accountId: input.exchangeGainAccountId || INITIAL_ACCOUNT_IDS.exchangeGain,
+            credit: realizedGain,
+            ...zeroFxAudit,
+            projectId: paymentProjectRef,
+            description: "Realized foreign exchange gain on supplier advance allocation",
+          });
+        }
+        if (realizedLoss > 0) {
+          allocationLines.push({
+            accountId: input.exchangeLossAccountId || INITIAL_ACCOUNT_IDS.exchangeLoss,
+            debit: realizedLoss,
+            ...zeroFxAudit,
+            projectId: paymentProjectRef,
+            description: "Realized foreign exchange loss on supplier advance allocation",
+          });
+        }
+
+        const allocationJournal = await postJournal({
+          postingDate: input.postingDate,
+          documentType: "SUPPLIER_ADVANCE_ALLOCATION",
+          documentId: allocation.allocation.id,
+          documentNumber: allocation.allocation.code,
+          reference: `Apply ${payment.code} to ${bill.code}`,
+          projectId: paymentProjectRef,
+          currency: allocation.currency,
+          baseCurrency: allocation.baseCurrency,
+          exchangeRate: settlementExchangeRate,
+          createdBy: input.createdBy || "supplier-bill-approval",
+          approvedBy: input.approvedBy || "Finance Controller",
+          lines: allocationLines,
+        });
+
+        await tx.paymentAllocation.update({
+          where: { id: allocation.allocation.id },
+          data: { journalId: allocationJournal.journalId },
+        });
+        advanceAllocationJournalIds.push(allocationJournal.journalId);
+      }
+    }
+
+    if (plannedAdvances.length) {
+      await tx.supplierBill.update({
+        where: { id: bill.id },
+        data: { plannedAdvanceAllocations: [] },
+      });
+    }
+
+    const finalBill = await tx.supplierBill.findUnique({
+      where: { id: bill.id },
+      select: { status: true, amountPaid: true, outstanding: true, baseOutstanding: true },
+    });
+
     return {
       billId: bill.id,
       journalId: journal.journalId,
@@ -446,7 +587,12 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       baseCurrency: fx.baseCurrency,
       exchangeRate: fx.exchangeRate,
       baseTotal,
-      baseOutstanding,
+      baseOutstanding: Number(finalBill?.baseOutstanding || baseOutstanding),
+      amountPaid: Number(finalBill?.amountPaid || 0),
+      outstanding: Number(finalBill?.outstanding || bill.outstanding || 0),
+      billStatus: finalBill?.status || "SENT",
+      appliedAdvanceCount: plannedAdvances.length,
+      advanceAllocationJournalIds,
     };
   });
 }
