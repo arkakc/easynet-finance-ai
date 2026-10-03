@@ -102,15 +102,17 @@ export default function CustomerAdvanceChainSummary(props:Props){
       </div>
       {props.context==="invoice"&&settlementReceipts.length>0&&(
         <div className="table-wrap" style={{marginTop:18}}>
-          <div className="form-title-row"><div><strong>Customer Receipt History</strong><p className="small">Every finalized receipt against this Sales Invoice is retained as a separate accounting document.</p></div><span className="auto-badge">{settlementReceipts.length} Receipt{settlementReceipts.length===1?"":"s"}</span></div>
+          <div className="form-title-row"><div><strong>Customer Receipt History</strong><p className="small">Every finalized receipt against this Sales Invoice is retained as a separate accounting document.</p></div><span className="auto-badge">{settlementReceipts.length+posted.length} Receipt{settlementReceipts.length+posted.length===1?"":"s"}</span></div>
           <table className="data-table" style={{marginTop:12}}>
-            <thead><tr><th>Receipt Entry</th><th>Created</th><th>Amount</th><th>Status</th><th>Journal Entry</th></tr></thead>
+            <thead><tr><th>Receipt Entry</th><th>Created</th><th>Amount</th><th>Status</th><th>Allocated</th><th>Remaining</th><th>Adjusted Against</th></tr></thead>
             <tbody>{[...settlementReceipts].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=><tr key={row.paymentId}>
-              <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td>
+              <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}>{row.paymentNumber||row.paymentId}</Link></td>
               <td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td>
-              <td><strong>{money(row.amount)}</strong></td>
+              <td>{money(row.amount)}</td>
               <td>{row.status||"POSTED"}</td>
-              <td>{row.journalId?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(row.journalId))}`}>{row.journalId}</Link>:"—"}</td>
+              <td>{money(row.amount)}</td>
+              <td>{money(0)}</td>
+              <td>{props.invoiceId?<Link prefetch={false} href={`/transactions/invoice/${encodeURIComponent(props.invoiceId)}`}>{props.invoiceNumber||props.invoiceId}</Link>:"—"}</td>
             </tr>)}</tbody>
           </table>
         </div>
@@ -139,7 +141,7 @@ export default function CustomerAdvanceChainSummary(props:Props){
           <table className="data-table">
             <thead><tr><th>Advance Receipt</th><th>Created</th><th>Amount</th><th>Status</th><th>Allocated</th><th>Remaining</th><th>Adjusted Against</th></tr></thead>
             <tbody>{[...payments].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=>{const summary=summaries[row.paymentId];const allocations=(summary?.allocations||[]).map(a=>({id:String(a.againstDocumentId||a.milestone||""),number:String(a.againstDocumentNumber||"")})).filter(a=>a.id);const unique=[...new Map(allocations.map(a=>[a.id,a])).values()];return <tr key={row.paymentId}>
-              <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td>
+              <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}>{row.paymentNumber||row.paymentId}</Link></td>
               <td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td>
               <td>{money(row.amount)}</td><td>{row.status||"DRAFT"}</td><td>{summary?money(summary.allocatedAmount):"—"}</td><td>{summary?money(summary.remainingAmount):"—"}</td>
               <td>{unique.length?unique.map((allocation,index)=>{const invoice=invoices.find(row=>String(row.invoiceId||"")===allocation.id);return <span key={allocation.id}>{index?", ":""}<Link href={`/transactions/invoice/${encodeURIComponent(allocation.id)}`}>{allocation.number||invoice?.invoiceNumber||allocation.id}</Link></span>}):"Unallocated"}</td>
