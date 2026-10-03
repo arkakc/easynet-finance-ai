@@ -8,8 +8,12 @@ const round2 = (value: number) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 function normalizePlan(value: unknown): PlannedAdvance[] {
-  if (!Array.isArray(value)) return [];
-  return value
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); } catch { parsed = []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
     .map((row: any) => ({
       paymentId: String(row?.paymentId || "").trim(),
       amount: round2(Number(row?.amount || 0)),
@@ -153,7 +157,7 @@ export async function POST(request: NextRequest) {
     await prisma.supplierBill.update({
       where: { id: workspace.bill.id },
       data: {
-        plannedAdvanceAllocations: requested as any,
+        plannedAdvanceAllocations: JSON.stringify(requested),
         updatedBy: "supplier-invoice-advance-plan",
       },
     });
