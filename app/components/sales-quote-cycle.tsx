@@ -22,7 +22,7 @@ function localDate(){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Paci
 function createdValue(row:Payment){const t=new Date(row.createdAt||"").getTime();return Number.isFinite(t)?t:0;}
 function defaultDraft(line:TempLine):Draft{const only=line.existingCandidates.length===1?line.existingCandidates[0]:null;return{existingItemId:only?.itemId||"",itemName:only?.itemName||line.itemName||line.originalTempItemName,itemType:only?.itemType||"STOCK",uom:only?.uom||line.uom||"Each",revenueAccount:only?.revenueAccount||"",costAccount:only?.costAccount||"",deferredRevenueMonths:String(only?.deferredRevenueMonths||0)}}
 
-export default function SalesQuoteCycle({quoteId}:{quoteId:string}){
+export default function SalesQuoteCycle({quoteId,onReadinessChange}:{quoteId:string;onReadinessChange?:(readiness:Readiness)=>void}){
   const router=useRouter();
   const[readiness,setReadiness]=useState<Readiness|null>(null),[salesOrder,setSalesOrder]=useState<SalesOrderRef|null>(null),[drafts,setDrafts]=useState<Record<string,Draft>>({}),[accounts,setAccounts]=useState<Account[]>([]),[payments,setPayments]=useState<Payment[]>([]),[allocationSummaries,setAllocationSummaries]=useState<Record<string,AllocationSummary>>({});
   const[loading,setLoading]=useState(true),[busy,setBusy]=useState(""),[message,setMessage]=useState(""),[aiBusy,setAiBusy]=useState<Record<string,boolean>>({}),[aiNotes,setAiNotes]=useState<Record<string,string>>({}),[accountOverrides,setAccountOverrides]=useState<Record<string,boolean>>({}),[tempColumnWidths,setTempColumnWidths]=useState<Record<string,number>>({line:70,temp:250,qty:90,existing:220,name:260,type:180,uom:140,revenue:300,cost:300,posting:280,deferred:150});
@@ -50,7 +50,7 @@ export default function SalesQuoteCycle({quoteId}:{quoteId:string}){
     const[readinessBody,transactionsBody]=await Promise.all([readinessResponse.json(),transactionsResponse.json()]);
     if(!readinessResponse.ok||!readinessBody.ok)throw new Error(readinessBody.error||"Sales Quotation readiness load failed");
     if(!transactionsResponse.ok||!transactionsBody.ok)throw new Error(transactionsBody.error||"Sales Order link load failed");
-    const next=readinessBody.readiness as Readiness;setReadiness(next);
+    const next=readinessBody.readiness as Readiness;setReadiness(next);onReadinessChange?.(next);
     const orders=(transactionsBody.salesOrders||[]) as SalesOrderRef[];
     const linked=orders.find((row)=>String(row.sourceDocumentId||"")===quoteId)||orders.find((row)=>String(row.customerId||"")===String(next.quote.customerId||"")&&String(row.projectId||"")===String(next.quote.projectId||"")&&Math.abs(Number(row.totalAmount||0)-Number(next.quote.totalAmount||0))<0.01)||null;
     setSalesOrder(linked);
