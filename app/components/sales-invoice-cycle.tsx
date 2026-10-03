@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 type Props={invoiceId:string;record?:any};
 type Payment={paymentId:string;paymentNumber?:string;paymentType?:string;partyType?:string;partyId?:string;projectId?:string;amount?:number|string;status?:string;journalId?:string;sourceDocumentId?:string;againstDocumentId?:string;reference?:string;createdAt?:string};
-type AllocationSummary={allocatedAmount:number;remainingAmount:number;allocations:Array<{milestone?:string;amount?:number|string}>};
+type AllocationSummary={allocatedAmount:number;remainingAmount:number;allocations:Array<{milestone?:string;againstDocumentId?:string;againstDocumentNumber?:string;amount?:number|string}>};
 type CashBank={accountId:string;accountName:string;accountCode:string;balance:number};
 
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
@@ -40,7 +40,7 @@ export default function SalesInvoiceCycle({invoiceId,record}:Props){
   const totalAdvance=postedAdvances.reduce((sum,row)=>sum+Number(row.amount||0),0);
   const totalAllocated=Object.values(summaries).reduce((sum,row)=>sum+Number(row.allocatedAmount||0),0);
   const availableAdvance=Object.values(summaries).reduce((sum,row)=>sum+Number(row.remainingAmount||0),0);
-  const thisInvoiceAdvance=Object.values(summaries).reduce((sum,row)=>sum+(row.allocations||[]).filter((a)=>String(a.milestone||"")===invoiceId).reduce((s,a)=>s+Number(a.amount||0),0),0);
+  const thisInvoiceAdvance=Object.values(summaries).reduce((sum,row)=>sum+(row.allocations||[]).filter((a)=>String(a.againstDocumentId||a.milestone||"")===invoiceId).reduce((s,a)=>s+Number(a.amount||0),0),0);
 
   async function loadAdvances(){
     if(!invoice||!sourceQuoteId||busy)return;
