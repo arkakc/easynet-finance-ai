@@ -535,6 +535,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
 
     {record&&<>
       {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
+      {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
       {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
@@ -674,7 +675,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
             <button type="button" className="secondary" onClick={() => setPoAdvanceOpen(false)}>Close</button>
           </div>
-          {String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
           <SupplierAdvanceFromPo poId={id} poNumber={number} supplierId={String(record.supplierId||"")} supplierName={supplierName} projectId={String(record.projectId||"")} projectName={projectName} totalAmount={n(record.totalAmount)}/>
         </div>
       </div>
