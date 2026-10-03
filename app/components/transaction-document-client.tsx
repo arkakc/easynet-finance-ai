@@ -529,7 +529,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
           );
         })()}
-        <div className="document-footer"><span>System generated document</span><span>Record ID: {id}</span></div>
+        <div className="document-footer"><span>System generated document</span><span>Document No: {number}{id!==number?` · Internal Record ID: ${id}`:""}</span></div>
       </>:null}
     </section>
 
