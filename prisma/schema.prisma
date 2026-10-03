@@ -595,6 +595,7 @@ model Invoice {
   sourceDocId         String?       @unique // Original quote or PO
   journalId           String? // Accounting journal reference
   glPosted            Boolean       @default(false)
+  plannedAdvanceAllocations String?
   taxReportRef        String? // Tax report reference
   createdBy           String
   approvedBy          String?
