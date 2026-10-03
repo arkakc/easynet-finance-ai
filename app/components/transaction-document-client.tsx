@@ -714,7 +714,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
             <button type="button" className="secondary" onClick={() => setSalesQuoteFulfilmentOpen(false)}>Close</button>
           </div>
-          <SalesQuoteCycle quoteId={id} onReadinessChange={(next)=>{setSalesQuoteReadiness(next);if(next.allItemsPermanent&&salesQuoteFulfilmentOpen)setSalesQuoteFulfilmentOpen(false);}}/>
+          <SalesQuoteCycle quoteId={id} onReadinessChange={setSalesQuoteReadiness}/>
         </div>
       </div>
     )}
