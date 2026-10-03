@@ -108,7 +108,6 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           <div><span>Posting Date</span><strong>{formatAccountingDate(header.date.toISOString())}</strong></div>
           <div><span>Document Type</span><strong>{header.sourceDocType || "JOURNAL"}</strong></div>
           <div><span>Document Number</span><strong>{sourceDocumentNumber}</strong></div>
-          {sourceRecordId && sourceRecordId !== sourceDocumentNumber ? <div><span>Source Record ID</span><strong>{sourceRecordId}</strong></div> : null}
           <div><span>Source Currency</span><strong>{sourceCurrency}</strong></div>
           <div><span>Base Currency</span><strong>{baseCurrency}</strong></div>
           <div><span>Exchange Rate</span><strong>{sourceCurrency === baseCurrency ? "1.00000000" : `1 ${sourceCurrency} = ${Number(header.exchangeRate || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} ${baseCurrency}`}</strong></div>
