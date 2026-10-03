@@ -320,7 +320,7 @@ async function finalizeStandardPayment(row: any, patch: { paymentDate: string; a
     if (!bill) throw new Error("Against Supplier Invoice not found");
     const billSupplierId = String(bill.internalSupplierId || bill.supplierId || "");
     if (billSupplierId !== internalPartyId) throw new Error("Payment supplier does not match the Supplier Invoice supplier");
-    if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
+    if (!["POSTED", "PARTLY_PAID", "PARTIAL", "PAID"].includes(String(bill.status || "").toUpperCase())) throw new Error("Supplier payment can only be allocated against a posted Supplier Invoice");
     if (patch.amount > Number(bill.outstandingAmount || 0) + 0.001) throw new Error("Supplier payment exceeds Supplier Invoice outstanding amount");
     const againstType = String(row.againstDocumentType || "").toLowerCase();
     if (againstType && !againstType.includes("supplier invoice") && !againstType.includes("supplier bill")) throw new Error("Supplier payment has an invalid against-document type");
