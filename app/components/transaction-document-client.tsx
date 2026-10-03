@@ -159,7 +159,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       }catch{}
     })();
     return()=>{active=false;};
-  },[type,id,isCreditNote,record?.status,record?.outstandingAmount]);
+  },[type,id,record?.invoiceNumber,record?.status,record?.outstandingAmount]);
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
