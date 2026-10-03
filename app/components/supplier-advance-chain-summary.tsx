@@ -41,7 +41,7 @@ export default function SupplierAdvanceChainSummary(props:Props){
       {props.context==="payment" ? (
         <div className="table-wrap" style={{marginTop:18}}>
           <table className="data-table">
-            <thead><tr><th>Purchase Order</th><th>Status</th><th>PO Total</th><th>Advance Finalized</th><th>Advance Allocated</th><th>Advance Remaining</th></tr></thead>
+            <thead><tr><th>Purchase Order</th><th>Status</th><th>PO Total</th><th>Advance Finalized</th><th>Advance Allocated</th><th>Advance Remaining</th><th>Adjusted Against</th></tr></thead>
             <tbody>
               <tr>
                 <td><Link prefetch={false} href={`/transactions/purchaseOrder/${encodeURIComponent(props.poId)}`}><strong>{po?.poNumber||props.poId}</strong></Link></td>
@@ -50,6 +50,16 @@ export default function SupplierAdvanceChainSummary(props:Props){
                 <td>{money(advancePosted)}</td>
                 <td>{money(advanceAllocated)}</td>
                 <td>{money(advanceAvailable)}</td>
+                <td>{(()=>{
+                  const allocations=posted.flatMap(row=>(summaries[row.paymentId]?.allocations||[]).map(a=>({
+                    id:String(a.againstDocumentId||a.milestone||""),
+                    number:String(a.againstDocumentNumber||"")
+                  }))).filter(a=>a.id);
+                  const unique=[...new Map(allocations.map(a=>[a.id,a])).values()];
+                  return unique.length
+                    ? unique.map((allocation,index)=>{const bill=bills.find(b=>String(b.billId||"")===allocation.id);return <span key={allocation.id}>{index?", ":""}<Link href={`/transactions/supplierBill/${encodeURIComponent(allocation.id)}`}>{allocation.number||bill?.billNumber||allocation.id}</Link></span>;})
+                    : "Unallocated";
+                })()}</td>
               </tr>
             </tbody>
           </table>
