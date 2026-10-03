@@ -12,9 +12,10 @@ type Props={
   invoiceId?:string;
   invoiceNumber?:string;
   invoiceOutstanding?:number;
+  invoiceTotal?:number;
   paymentId?:string;
 };
-type Payment={paymentId:string;paymentNumber?:string;paymentType?:string;partyType?:string;partyId?:string;amount?:number|string;status?:string;journalId?:string;createdAt?:string};
+type Payment={paymentId:string;paymentNumber?:string;paymentType?:string;partyType?:string;partyId?:string;amount?:number|string;status?:string;journalId?:string;againstDocumentId?:string;againstDocumentType?:string;createdAt?:string};
 type Invoice={invoiceId:string;invoiceNumber?:string;sourceDocumentId?:string;sourceQuoteId?:string;totalAmount?:number|string;outstandingAmount?:number|string;status?:string};
 type Quote={quoteId:string;quoteNumber?:string;totalAmount?:number|string;status?:string};
 type Summary={allocatedAmount:number;remainingAmount:number;allocations:Array<{milestone?:string;againstDocumentId?:string;againstDocumentNumber?:string;amount?:number|string}>};
@@ -23,6 +24,7 @@ const createdValue=(row:Payment)=>{const t=new Date(row.createdAt||"").getTime()
 
 export default function CustomerAdvanceChainSummary(props:Props){
   const[payments,setPayments]=useState<Payment[]>([]);
+  const[settlementReceipts,setSettlementReceipts]=useState<Payment[]>([]);
   const[summaries,setSummaries]=useState<Record<string,Summary>>({});
   const[invoices,setInvoices]=useState<Invoice[]>([]);
   const[quote,setQuote]=useState<Quote|null>(null);
@@ -39,7 +41,10 @@ export default function CustomerAdvanceChainSummary(props:Props){
     if(!transactionsResponse.ok||!transactionsBody.ok)throw new Error(transactionsBody.error||"Sales document links load failed");
     if(!active)return;
     const linked=((paymentsBody.payments||[]) as Payment[]).filter(row=>!["CANCELLED","REVERSED"].includes(String(row.status||"").toUpperCase()));
-    setPayments(linked);
+    setPayments(linked.filter(row=>!String(row.againstDocumentId||"").trim()));
+    const invoiceRefs=new Set([props.invoiceId,props.invoiceNumber].map(value=>String(value||"").trim()).filter(Boolean));
+    const directReceipts=props.invoiceId?((transactionsBody.payments||[]) as Payment[]).filter(row=>String(row.partyType||"")==="Customer"&&String(row.paymentType||"").toUpperCase()==="RECEIVE"&&String(row.partyId||"")===props.customerId&&Boolean(String(row.journalId||"").trim())&&["POSTED","CLEARED"].includes(String(row.status||"").toUpperCase())&&invoiceRefs.has(String(row.againstDocumentId||"").trim())):[];
+    setSettlementReceipts(directReceipts);
     setInvoices(((transactionsBody.invoices||[]) as Invoice[]).filter(row=>String(row.sourceQuoteId||"")===props.sourceQuoteId||String(row.sourceDocumentId||"")===props.sourceQuoteId));
     setQuote(((transactionsBody.quotes||[]) as Quote[]).find(row=>String(row.quoteId||"")===props.sourceQuoteId)||null);
     const posted=linked.filter(row=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));
@@ -63,15 +68,18 @@ export default function CustomerAdvanceChainSummary(props:Props){
   const thisInvoiceAdvance=props.invoiceId?posted.reduce((sum,row)=>sum+(summaries[row.paymentId]?.allocations||[]).filter(a=>String(a.againstDocumentId||a.milestone||"")===props.invoiceId).reduce((s,a)=>s+Number(a.amount||0),0),0):0;
   const currentPayment=props.paymentId?payments.find(row=>row.paymentId===props.paymentId)||null:null;
   const currentSummary=currentPayment?summaries[currentPayment.paymentId]||null:null;
-  if(!loading&&payments.length===0)return null;
+  const normalCustomerReceipts=useMemo(()=>settlementReceipts.reduce((sum,row)=>sum+Number(row.amount||0),0),[settlementReceipts]);
+  const invoiceTotal=Number(props.invoiceTotal||0),invoiceOutstanding=Number(props.invoiceOutstanding||0);
+  const totalSettled=props.invoiceId?Math.max(0,invoiceTotal-invoiceOutstanding):0;
+  if(!loading&&payments.length===0&&settlementReceipts.length===0&&props.context!=="invoice")return null;
 
   return <section className="panel no-print" style={{marginTop:20}}>
     <div className="form-title-row">
       <div>
-        <h3>Customer Advance Receipt Status</h3>
-        <p className="small">Tracks customer advances from Sales Quotation through Sales Invoice allocation. Unused advance remains available for later invoices from the same quotation.</p>
+        <h3>{props.context==="invoice"?"Sales Invoice Settlement Summary":"Customer Advance Receipt Status"}</h3>
+        <p className="small">{props.context==="invoice"?"Shows customer advance adjustments, posted receipts, total settled and the remaining invoice balance.":"Tracks customer advances from Sales Quotation through Sales Invoice allocation. Unused advance remains available for later invoices from the same quotation."}</p>
       </div>
-      <span className="auto-badge">{loading?"Loading…":`Customer Advance ${money(advancePosted)}`}</span>
+      <span className="auto-badge">{loading?"Loading…":props.context==="invoice"?`Settled ${money(totalSettled)}`:`Customer Advance ${money(advancePosted)}`}</span>
     </div>
     {message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}
     {!loading&&<>
@@ -83,12 +91,30 @@ export default function CustomerAdvanceChainSummary(props:Props){
         <div><span>Advance Adjusted to Invoice(s)</span><strong>{money(advanceAllocated)}</strong></div>
         <div><span>Unallocated Advance Remaining</span><strong>{money(advanceAvailable)}</strong></div>
         <div><span>Quotation Value Remaining After Advance</span><strong>{money(quoteRemaining)}</strong></div>
-        {props.invoiceId&&<div><span>Advance Adjusted to This Invoice</span><strong>{money(thisInvoiceAdvance)}</strong></div>}
-        {props.invoiceId&&<div><span>This Invoice Outstanding</span><strong>{money(props.invoiceOutstanding||0)}</strong></div>}
+        {props.invoiceId&&<div><span>Invoice Total</span><strong>{money(invoiceTotal)}</strong></div>}
+        {props.invoiceId&&<div><span>Advance Settled</span><strong>{money(thisInvoiceAdvance)}</strong></div>}
+        {props.invoiceId&&<div><span>Customer Receipts Settled</span><strong>{money(normalCustomerReceipts)}</strong></div>}
+        {props.invoiceId&&<div><span>Total Settled / Received</span><strong>{money(totalSettled)}</strong></div>}
+        {props.invoiceId&&<div><span>This Invoice Outstanding</span><strong>{money(invoiceOutstanding)}</strong></div>}
         {currentPayment&&<div><span>This Advance Receipt</span><strong>{money(currentPayment.amount)}</strong></div>}
         {currentSummary&&<div><span>This Receipt Allocated</span><strong>{money(currentSummary.allocatedAmount)}</strong></div>}
         {currentSummary&&<div><span>This Receipt Remaining</span><strong>{money(currentSummary.remainingAmount)}</strong></div>}
       </div>
+      {props.context==="invoice"&&settlementReceipts.length>0&&(
+        <div className="table-wrap" style={{marginTop:18}}>
+          <div className="form-title-row"><div><strong>Customer Receipt History</strong><p className="small">Every finalized receipt against this Sales Invoice is retained as a separate accounting document.</p></div><span className="auto-badge">{settlementReceipts.length} Receipt{settlementReceipts.length===1?"":"s"}</span></div>
+          <table className="data-table" style={{marginTop:12}}>
+            <thead><tr><th>Receipt Entry</th><th>Created</th><th>Amount</th><th>Status</th><th>Journal Entry</th></tr></thead>
+            <tbody>{[...settlementReceipts].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=><tr key={row.paymentId}>
+              <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td>
+              <td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td>
+              <td><strong>{money(row.amount)}</strong></td>
+              <td>{row.status||"POSTED"}</td>
+              <td>{row.journalId?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(row.journalId))}`}>{row.journalId}</Link>:"—"}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+      )}
       {props.context==="payment"?(
         <div className="table-wrap" style={{marginTop:18}}>
           <table className="data-table">
