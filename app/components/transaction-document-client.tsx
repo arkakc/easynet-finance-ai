@@ -10,6 +10,8 @@ import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-rea
 import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
+import CustomerAdvanceChainSummary from "@/app/components/customer-advance-chain-summary";
+import CustomerInvoiceAdvancePlan from "@/app/components/customer-invoice-advance-plan";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
 import SalesOrderCycle from "@/app/components/sales-order-cycle";
@@ -24,8 +26,8 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
   payment:{numberField:"paymentNumber",title:"Payment / Receipt"},
   expense:{numberField:"expenseNumber",title:"Expense"},
 };
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",plannedAdvanceAmount:"Supplier Advance Planned",projectedOutstandingAmount:"Projected Outstanding After Approval",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
-const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","plannedAdvanceAmount","projectedOutstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",plannedAdvanceAmount:"Supplier Advance Planned",projectedOutstandingAmount:"Projected Outstanding After Approval",customerAdvancePlanned:"Customer Advance Planned",customerProjectedOutstanding:"Projected Outstanding After Approval",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
+const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","plannedAdvanceAmount","projectedOutstandingAmount","customerAdvancePlanned","customerProjectedOutstanding","amount","allocatedAmount","unallocatedAmount"]);
 const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment","expense"]);
@@ -80,12 +82,17 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[deleteBusy,setDeleteBusy]=useState(false);
   const[supplierQuoteItemsOpen,setSupplierQuoteItemsOpen]=useState(false);
   const[salesQuoteFulfilmentOpen,setSalesQuoteFulfilmentOpen]=useState(false);
+  const[salesOrderActionsOpen,setSalesOrderActionsOpen]=useState(false);
+  const[salesInvoiceSettlementOpen,setSalesInvoiceSettlementOpen]=useState(false);
+  const[salesQuoteReadiness,setSalesQuoteReadiness]=useState<any|null>(null);
+  const[salesQuoteConvertBusy,setSalesQuoteConvertBusy]=useState(false);
   const[supplierQuoteReadiness,setSupplierQuoteReadiness]=useState<any|null>(null);
   const[supplierQuoteConvertBusy,setSupplierQuoteConvertBusy]=useState(false);
   const[poAdvanceOpen,setPoAdvanceOpen]=useState(false);
   const[poReceiptOpen,setPoReceiptOpen]=useState(false);
   const[supplierBillSettlementOpen,setSupplierBillSettlementOpen]=useState(false);
   const[supplierBillPlanSummary,setSupplierBillPlanSummary]=useState<{plannedTotal:number;projectedOutstanding:number}|null>(null);
+  const[salesInvoicePlanSummary,setSalesInvoicePlanSummary]=useState<{plannedTotal:number;projectedOutstanding:number}|null>(null);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -142,6 +149,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   },[type,id,record?.status,record?.outstandingAmount]);
 
   useEffect(()=>{
+    if(type!=="invoice"||isCreditNote){setSalesInvoicePlanSummary(null);return;}
+    let active=true;
+    void(async()=>{
+      try{
+        const response=await fetch(`/api/erp/sales-invoice-advance-plan?invoiceId=${encodeURIComponent(id)}`,{cache:"no-store"});
+        const body=await response.json();
+        if(active&&response.ok&&body.ok)setSalesInvoicePlanSummary({plannedTotal:Number(body.plannedTotal||0),projectedOutstanding:Number(body.projectedOutstanding||0)});
+      }catch{}
+    })();
+    return()=>{active=false;};
+  },[type,id,isCreditNote,record?.status,record?.outstandingAmount]);
+
+  useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
     setReturnContext({returnModule:params.get("returnModule")||undefined,returnTab:params.get("returnTab")||undefined,returnMode:params.get("returnMode")||undefined});
     const controller=new AbortController();
@@ -179,6 +199,38 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   },[isSupplierQuotation,id]);
 
   useEffect(()=>{if(isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus))void loadSupplierQuoteReadiness();},[isSupplierQuotation,rowStatus,loadSupplierQuoteReadiness]);
+
+  useEffect(()=>{
+    if(type!=="quote"||isSalesOrder){setSalesQuoteReadiness(null);return;}
+    let active=true;
+    void(async()=>{
+      try{
+        const response=await fetch(`/api/erp/sales-quote-readiness?quoteId=${encodeURIComponent(id)}`,{cache:"no-store"});
+        const body=await response.json();
+        if(active&&response.ok&&body.ok)setSalesQuoteReadiness(body.readiness||null);
+      }catch{}
+    })();
+    return()=>{active=false;};
+  },[type,id,isSalesOrder,rowStatus]);
+
+  async function handleCreateSalesOrder(){
+    if(salesQuoteConvertBusy)return;
+    setSalesQuoteConvertBusy(true);
+    try{
+      const response=await fetch("/api/erp/sales-order-conversion",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({quoteId:id,orderDate:new Intl.DateTimeFormat("en-CA",{timeZone:"Pacific/Port_Moresby"}).format(new Date())}),
+      });
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Sales Quotation conversion failed");
+      window.location.assign(`/transactions/quote/${encodeURIComponent(body.createdId)}?returnModule=sales&returnTab=salesOrder&returnMode=list`);
+    }catch(error){
+      window.alert(error instanceof Error?error.message:"Sales Quotation conversion failed");
+    }finally{
+      setSalesQuoteConvertBusy(false);
+    }
+  }
 
   async function handleCreatePurchaseOrder(){
     if(supplierQuoteConvertBusy)return;
@@ -262,6 +314,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     fields.push(["plannedAdvanceAmount",supplierBillPlanSummary?.plannedTotal||0]);
     fields.push(["projectedOutstandingAmount",supplierBillPlanSummary?.projectedOutstanding||0]);
   }
+  if(type==="invoice"&&!isCreditNote&&String(record?.status||"").toUpperCase()==="DRAFT"&&Number(salesInvoicePlanSummary?.plannedTotal||0)>0){
+    fields.push(["customerAdvancePlanned",salesInvoicePlanSummary?.plannedTotal||0]);
+    fields.push(["customerProjectedOutstanding",salesInvoicePlanSummary?.projectedOutstanding||0]);
+  }
   const paymentAdvancedFields=type==="payment"
     ? rawFields.filter(([key,value])=>{
         if(!paymentAdvancedKeys.has(key))return false;
@@ -309,6 +365,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const projectName=record?String(projectMap.get(String(record.projectId||""))||record.projectId||""):"";
   const supplierBillPoId=record&&type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
   const paymentPoId=record&&type==="payment"&&String(record.partyType||"")==="Supplier"?(sourceMarkerFromPayment(record,"PO")||String(record.sourceDocumentId||"")):"";
+  const paymentQuoteId=record&&type==="payment"&&String(record.partyType||"")==="Customer"?(sourceMarkerFromPayment(record,"SQ")||String(record.sourceDocumentId||"")):"";
+  const salesOrderSourceQuoteId=record&&isSalesOrder?String(record.sourceDocumentId||""):"";
+  const salesInvoiceSourceQuoteId=record&&type==="invoice"&&!isCreditNote?String(record.sourceQuoteId||""):"";
   const salesInvoicePaid=Boolean(record)&&type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
   const orderedDocumentLinks=[...documentLinks].sort((a:any,b:any)=>Number(a.stage||0)-Number(b.stage||0)||String(a.number||"").localeCompare(String(b.number||"")));
@@ -402,13 +461,51 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </button>
           )
         )}
-        {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && (
+        {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && !documentLinks.some((link:any)=>Number(link.stage||0)===20) && (
+          <>
+            {salesQuoteReadiness?.temporaryLines?.length ? (
+              <button
+                type="button"
+                onClick={() => setSalesQuoteFulfilmentOpen(true)}
+                title="Save temporary Sales Quotation items to Item Master"
+              >
+                Save Temp Items
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={salesQuoteConvertBusy}
+                onClick={() => void handleCreateSalesOrder()}
+                title="Create Sales Order from this Sales Quotation"
+              >
+                {salesQuoteConvertBusy ? "Creating Sales Order…" : "Create Sales Order"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSalesQuoteFulfilmentOpen(true)}
+              title="Create or review Customer Advance Receipt"
+            >
+              Customer Advance
+            </button>
+          </>
+        )}
+        {isSalesOrder && ["APPROVED","PART_DELIVERED","DELIVERED","PART_INVOICED","INVOICED"].includes(rowStatus) && (
           <button
             type="button"
-            onClick={() => setSalesQuoteFulfilmentOpen(true)}
-            title="Open Sales Quotation fulfilment and conversion actions"
+            onClick={() => setSalesOrderActionsOpen(true)}
+            title="Create or open Delivery Note / Stock Out"
           >
-            Sales Fulfilment
+            Delivery Note
+          </button>
+        )}
+        {type === "invoice" && !isCreditNote && (
+          <button
+            type="button"
+            onClick={() => setSalesInvoiceSettlementOpen(true)}
+            title="Open Customer Advance, receipt and Sales Invoice settlement actions"
+          >
+            Invoice Settlement
           </button>
         )}
         {realApprovedPo && (
@@ -550,14 +647,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     </section>
 
     {record&&<>
-      {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
+      {isSalesOrder&&salesOrderSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="order" sourceQuoteId={salesOrderSourceQuoteId} customerId={String(record.customerId||"")} quoteTotal={n(record.totalAmount)}/>}
       {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
-      {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
+      {type==="invoice"&&isCreditNote&&<LazyDocumentSection title="Credit Note / Refund Actions" description="Refundable credit controls are loaded only when requested." buttonLabel="Open Refund / Credit Actions"><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&(
         <>
           {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>}
+          {paymentQuoteId&&<CustomerAdvanceChainSummary context="payment" sourceQuoteId={paymentQuoteId} customerId={String(record.partyId||"")} paymentId={id}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
         </>
       )}
@@ -647,7 +745,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
             <button type="button" className="secondary" onClick={() => setSalesQuoteFulfilmentOpen(false)}>Close</button>
           </div>
-          <SalesQuoteCycle quoteId={id}/>
+          <SalesQuoteCycle quoteId={id} onReadinessChange={setSalesQuoteReadiness}/>
         </div>
       </div>
     )}
@@ -737,6 +835,46 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
           </div>
           <PoPartialSupplyClose poId={id} poNumber={number}/>
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
+        </div>
+      </div>
+    )}
+
+    {salesOrderActionsOpen && isSalesOrder && record && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales Order Fulfilment"
+        onClick={() => setSalesOrderActionsOpen(false)}
+        style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(15, 23, 42, 0.48)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 24px",overflowY:"auto"}}
+      >
+        <div onClick={(event)=>event.stopPropagation()} style={{width:"min(1300px,95vw)",maxHeight:"90vh",overflowY:"auto",background:"var(--surface, #ffffff)",border:"1px solid var(--border, #dbe4f0)",borderRadius:16,boxShadow:"0 24px 80px rgba(15, 23, 42, 0.25)",padding:18}}>
+          <div className="form-title-row" style={{marginBottom:12}}>
+            <div><strong>Sales Order Fulfilment</strong><p className="small">Create or review Delivery Note / Stock Out and downstream Sales Invoice links.</p></div>
+            <button type="button" className="secondary" onClick={()=>setSalesOrderActionsOpen(false)}>Close</button>
+          </div>
+          <SalesOrderCycle orderId={id}/>
+        </div>
+      </div>
+    )}
+
+    {salesInvoiceSettlementOpen && type === "invoice" && !isCreditNote && record && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales Invoice Settlement"
+        onClick={() => setSalesInvoiceSettlementOpen(false)}
+        style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(15, 23, 42, 0.48)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 24px",overflowY:"auto"}}
+      >
+        <div onClick={(event)=>event.stopPropagation()} style={{width:"min(1450px,96vw)",maxHeight:"90vh",overflowY:"auto",background:"var(--surface, #ffffff)",border:"1px solid var(--border, #dbe4f0)",borderRadius:16,boxShadow:"0 24px 80px rgba(15, 23, 42, 0.25)",padding:18}}>
+          <div className="form-title-row" style={{marginBottom:12}}>
+            <div><strong>Sales Invoice Settlement</strong><p className="small">Review Customer Advance, receipt, return and settlement actions.</p></div>
+            <button type="button" className="secondary" onClick={()=>setSalesInvoiceSettlementOpen(false)}>Close</button>
+          </div>
+          {salesInvoiceSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="invoice" sourceQuoteId={salesInvoiceSourceQuoteId} customerId={String(record.customerId||"")} invoiceId={id} invoiceNumber={number} invoiceOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
+          <CustomerInvoiceAdvancePlan invoiceId={id} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus} onPlanChange={setSalesInvoicePlanSummary}/>
+          <SalesInvoiceCycle invoiceId={id} record={record}/>
         </div>
       </div>
     )}

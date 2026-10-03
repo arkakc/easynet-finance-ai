@@ -49,6 +49,50 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
   }
 }
 
+async function assertSalesInvoiceAdvanceWorkflow(invoice: any) {
+  const customerId = String(invoice.customerId || "").trim();
+  if (!customerId) return;
+
+  let sourceQuoteId = String(invoice.sourceQuoteId || "").trim();
+  const sourceDocumentId = String(invoice.sourceSalesOrderId || invoice.salesOrderId || invoice.sourceDocumentId || "").trim();
+
+  if (!sourceQuoteId && sourceDocumentId) {
+    const source = (await findRecords<any>("Quotes", { quoteId: sourceDocumentId }, 1)).rows[0];
+    if (source) {
+      const sourceNumber = String(source.quoteNumber || "").toUpperCase();
+      sourceQuoteId = sourceNumber.startsWith("SO-")
+        ? String(source.sourceDocumentId || source.sourceQuoteId || source.salesQuoteId || "").trim()
+        : sourceDocumentId;
+    }
+  }
+  if (!sourceQuoteId) return;
+
+  const payments = await listTable<any>("Payments", 500, 0);
+  const linked = payments.rows.filter((row: any) => {
+    const status = String(row.status || "DRAFT").toUpperCase();
+    if (["CANCELLED", "REVERSED"].includes(status)) return false;
+    if (String(row.partyType || "") !== "Customer") return false;
+    if (String(row.paymentType || "").toUpperCase() !== "RECEIVE") return false;
+    if (String(row.partyId || "") !== customerId) return false;
+    const sourceId = String(row.sourceDocumentId || "").trim();
+    const reference = String(row.reference || "");
+    return sourceId === sourceQuoteId || reference.startsWith(`SQ:${sourceQuoteId}|`);
+  });
+
+  const unfinished = linked.find((row: any) => {
+    const status = String(row.status || "DRAFT").toUpperCase();
+    const journalId = String(row.journalId || "").trim();
+    return status === "DRAFT" || status === "APPROVED" || !journalId;
+  });
+  if (!unfinished) return;
+
+  const paymentNo = String(unfinished.paymentNumber || unfinished.paymentId || "linked Customer Advance");
+  const paymentStatus = String(unfinished.status || "DRAFT").toUpperCase();
+  throw new Error(
+    `Cannot approve Sales Invoice while linked Customer Advance ${paymentNo} is still ${paymentStatus} / not finalized. Finalize the advance receipt first, or cancel it if it should not be used.`,
+  );
+}
+
 async function assertSupplierInvoiceAdvanceWorkflow(bill: any) {
   const poId = String(bill.poId || bill.orderId || bill.sourceDocumentId || "").trim();
   const supplierId = String(bill.supplierId || "").trim();
@@ -147,6 +191,7 @@ export async function POST(request: Request) {
     if (input.recordType === "invoice" && !creditNote) {
       await assertCustomerCreditPolicy(row);
       await assertSalesInvoiceStockPolicy(row);
+      await assertSalesInvoiceAdvanceWorkflow(row);
     }
     if (input.recordType === "supplierBill") {
       await assertSupplierInvoiceAdvanceWorkflow(row);
