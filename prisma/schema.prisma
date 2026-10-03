@@ -792,7 +792,7 @@ model SupplierBill {
   sourceDocId        String?             @unique // Original PO or supplier quote
   journalId          String? // Accounting journal reference
   glPosted           Boolean             @default(false)
-  plannedAdvanceAllocations Json?
+  plannedAdvanceAllocations String?
   taxReportRef       String?
   createdBy          String
   approvedBy         String?
