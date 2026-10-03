@@ -20,6 +20,21 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
   });
   if (!header) notFound();
 
+  const paymentSourceTypes = new Set(["CUSTOMER_ADVANCE","SUPPLIER_ADVANCE","CUSTOMER_RECEIPT","SUPPLIER_PAYMENT","CUSTOMER_REFUND","SUPPLIER_REFUND"]);
+  const sourceDocument = paymentSourceTypes.has(String(header.sourceDocType || "").toUpperCase())
+    ? await prisma.payment.findFirst({
+        where: { OR: [{ id: header.sourceDocId || "" }, { code: header.sourceDocId || "" }] },
+        select: { id: true, code: true },
+      })
+    : String(header.sourceDocType || "").toUpperCase() === "SUPPLIER_BILL"
+      ? await prisma.supplierBill.findFirst({
+          where: { OR: [{ id: header.sourceDocId || "" }, { code: header.sourceDocId || "" }] },
+          select: { id: true, code: true },
+        })
+      : null;
+  const sourceDocumentNumber = sourceDocument?.code || header.sourceDocId || "—";
+  const sourceRecordId = sourceDocument?.id || header.sourceDocId || "";
+
   const [customers, suppliers, projects, reversalJournal, originalJournal] = await Promise.all([
     prisma.customer.findMany({ select: { id: true, name: true } }),
     prisma.supplier.findMany({ select: { id: true, name: true } }),
@@ -92,7 +107,8 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
         <div className="document-meta">
           <div><span>Posting Date</span><strong>{formatAccountingDate(header.date.toISOString())}</strong></div>
           <div><span>Document Type</span><strong>{header.sourceDocType || "JOURNAL"}</strong></div>
-          <div><span>Document Number</span><strong>{header.sourceDocId || "—"}</strong></div>
+          <div><span>Document Number</span><strong>{sourceDocumentNumber}</strong></div>
+          {sourceRecordId && sourceRecordId !== sourceDocumentNumber ? <div><span>Source Record ID</span><strong>{sourceRecordId}</strong></div> : null}
           <div><span>Source Currency</span><strong>{sourceCurrency}</strong></div>
           <div><span>Base Currency</span><strong>{baseCurrency}</strong></div>
           <div><span>Exchange Rate</span><strong>{sourceCurrency === baseCurrency ? "1.00000000" : `1 ${sourceCurrency} = ${Number(header.exchangeRate || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} ${baseCurrency}`}</strong></div>
