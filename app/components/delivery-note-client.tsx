@@ -102,7 +102,15 @@ export default function DeliveryNoteClient({id}:{id:string}){
   ];
 
   return <div className="document-page">
-    <div className="document-toolbar no-print"><div className="document-toolbar-back"><Link href="/transactions?module=sales&tab=deliveryNote&mode=list">← Back to Delivery Notes</Link></div></div>
+    <div className="document-toolbar no-print">
+      <div className="document-toolbar-back"><Link href="/transactions?module=sales&tab=deliveryNote&mode=list">← Back to Delivery Notes</Link></div>
+      <div className="row-actions">
+        {posted&&(linkedInvoice
+          ? <Link className="button-link" href={String(linkedInvoice.href||"#")}>Open Sales Invoice</Link>
+          : <button type="button" disabled={Boolean(busy)} onClick={()=>void createInvoice()}>{busy==="invoice"?"Creating Sales Invoice…":"Create Sales Invoice"}</button>
+        )}
+      </div>
+    </div>
     <section className="document-sheet">
       <header className="document-header">
         <div className="document-header-main">
@@ -156,17 +164,17 @@ export default function DeliveryNoteClient({id}:{id:string}){
       </tbody></table></div>
     </section>
 
-    <section className="conversion-box no-print" style={{marginTop:16}}>
-      <div className="form-title-row"><div><strong>Delivery Note Actions</strong><p className="small">{posted?"Stock Out / COGS is posted. You can now create the Sales Invoice.":"Draft only. No stock or ledger effect until approval."}</p></div><span className="auto-badge">{status}</span></div>
+    {!posted&&<section className="conversion-box no-print" style={{marginTop:16}}>
+      <div className="form-title-row"><div><strong>Delivery Note Actions</strong><p className="small">Draft only. No stock or ledger effect until approval.</p></div><span className="auto-badge">{status}</span></div>
       {message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}
-      {!posted&&<div className="form-grid" style={{marginTop:14}}>
+      <div className="form-grid" style={{marginTop:14}}>
         <label>Delivery Date<input type="date" value={deliveryDate} onChange={e=>setDeliveryDate(e.target.value)} disabled={Boolean(busy)}/></label>
         <label>Fulfil From Warehouse<select value={warehouseId} onChange={e=>setWarehouseId(e.target.value)} required disabled={Boolean(busy)}><option value="">Select warehouse</option>{warehouses.map(row=><option key={row.warehouseId} value={row.warehouseId}>{row.warehouseCode+" — "+row.warehouseName}</option>)}</select></label>
-      </div>}
-      <div className="button-row" style={{marginTop:14}}>
-        {!posted&&<button type="button" disabled={Boolean(busy)||!warehouseId} onClick={()=>void approve()}>{busy==="approve"?"Posting Stock Out…":"Approve & Post Stock Out"}</button>}
-        {posted&&(linkedInvoice?<Link className="button-link" href={String(linkedInvoice.href||"#")}>Open Sales Invoice</Link>:<button type="button" disabled={Boolean(busy)} onClick={()=>void createInvoice()}>{busy==="invoice"?"Creating Sales Invoice…":"Create Sales Invoice"}</button>)}
       </div>
-    </section>
+      <div className="button-row" style={{marginTop:14}}>
+        <button type="button" disabled={Boolean(busy)||!warehouseId} onClick={()=>void approve()}>{busy==="approve"?"Posting Stock Out…":"Approve & Post Stock Out"}</button>
+      </div>
+    </section>}
+    {posted&&message&&<div className="status-banner no-print" style={{marginTop:16}}>{message}</div>}
   </div>;
 }
