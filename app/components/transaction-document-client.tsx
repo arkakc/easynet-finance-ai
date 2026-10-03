@@ -11,6 +11,7 @@ import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
 import CustomerAdvanceChainSummary from "@/app/components/customer-advance-chain-summary";
+import CustomerInvoiceAdvancePlan from "@/app/components/customer-invoice-advance-plan";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
 import SalesOrderCycle from "@/app/components/sales-order-cycle";
@@ -25,8 +26,8 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
   payment:{numberField:"paymentNumber",title:"Payment / Receipt"},
   expense:{numberField:"expenseNumber",title:"Expense"},
 };
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",plannedAdvanceAmount:"Supplier Advance Planned",projectedOutstandingAmount:"Projected Outstanding After Approval",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
-const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","plannedAdvanceAmount","projectedOutstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",plannedAdvanceAmount:"Supplier Advance Planned",projectedOutstandingAmount:"Projected Outstanding After Approval",customerAdvancePlanned:"Customer Advance Planned",customerProjectedOutstanding:"Projected Outstanding After Approval",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
+const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","plannedAdvanceAmount","projectedOutstandingAmount","customerAdvancePlanned","customerProjectedOutstanding","amount","allocatedAmount","unallocatedAmount"]);
 const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment","expense"]);
@@ -90,6 +91,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[poReceiptOpen,setPoReceiptOpen]=useState(false);
   const[supplierBillSettlementOpen,setSupplierBillSettlementOpen]=useState(false);
   const[supplierBillPlanSummary,setSupplierBillPlanSummary]=useState<{plannedTotal:number;projectedOutstanding:number}|null>(null);
+  const[salesInvoicePlanSummary,setSalesInvoicePlanSummary]=useState<{plannedTotal:number;projectedOutstanding:number}|null>(null);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -144,6 +146,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     })();
     return()=>{active=false;};
   },[type,id,record?.status,record?.outstandingAmount]);
+
+  useEffect(()=>{
+    if(type!=="invoice"||isCreditNote){setSalesInvoicePlanSummary(null);return;}
+    let active=true;
+    void(async()=>{
+      try{
+        const response=await fetch(`/api/erp/sales-invoice-advance-plan?invoiceId=${encodeURIComponent(id)}`,{cache:"no-store"});
+        const body=await response.json();
+        if(active&&response.ok&&body.ok)setSalesInvoicePlanSummary({plannedTotal:Number(body.plannedTotal||0),projectedOutstanding:Number(body.projectedOutstanding||0)});
+      }catch{}
+    })();
+    return()=>{active=false;};
+  },[type,id,isCreditNote,record?.status,record?.outstandingAmount]);
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
@@ -278,6 +293,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   if(type==="supplierBill"&&String(record?.status||"").toUpperCase()==="DRAFT"&&Number(supplierBillPlanSummary?.plannedTotal||0)>0){
     fields.push(["plannedAdvanceAmount",supplierBillPlanSummary?.plannedTotal||0]);
     fields.push(["projectedOutstandingAmount",supplierBillPlanSummary?.projectedOutstanding||0]);
+  }
+  if(type==="invoice"&&!isCreditNote&&String(record?.status||"").toUpperCase()==="DRAFT"&&Number(salesInvoicePlanSummary?.plannedTotal||0)>0){
+    fields.push(["customerAdvancePlanned",salesInvoicePlanSummary?.plannedTotal||0]);
+    fields.push(["customerProjectedOutstanding",salesInvoicePlanSummary?.projectedOutstanding||0]);
   }
   const paymentAdvancedFields=type==="payment"
     ? rawFields.filter(([key,value])=>{
@@ -823,6 +842,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <button type="button" className="secondary" onClick={()=>setSalesInvoiceSettlementOpen(false)}>Close</button>
           </div>
           {salesInvoiceSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="invoice" sourceQuoteId={salesInvoiceSourceQuoteId} customerId={String(record.customerId||"")} invoiceId={id} invoiceNumber={number} invoiceOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
+          <CustomerInvoiceAdvancePlan invoiceId={id} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus} onPlanChange={setSalesInvoicePlanSummary}/>
           <SalesInvoiceCycle invoiceId={id} record={record}/>
         </div>
       </div>
