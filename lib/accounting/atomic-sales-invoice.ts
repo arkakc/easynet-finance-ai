@@ -10,6 +10,8 @@ import {
 import { prisma } from "@/src/lib/prisma";
 import { resolveWarehouse, syncWarehouseBalance, warehouseInventoryState } from "@/lib/accounting/warehouse-stock";
 import { resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
+import { createPaymentAllocationInTransaction } from "@/lib/accounting/payment-allocation";
+import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
 
 export type AtomicSalesInvoiceRevenueLine = {
   accountId: string;
@@ -261,6 +263,156 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       },
     });
 
+    let plannedAdvanceRows: any[] = [];
+    try {
+      const parsed = invoice.plannedAdvanceAllocations
+        ? JSON.parse(String(invoice.plannedAdvanceAllocations))
+        : [];
+      plannedAdvanceRows = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      plannedAdvanceRows = [];
+    }
+    const plannedAdvances = plannedAdvanceRows
+      .map((row) => ({
+        paymentId: String(row?.paymentId || "").trim(),
+        amount: round2(Number(row?.amount || 0)),
+      }))
+      .filter((row) => row.paymentId && row.amount > 0);
+
+    const advanceAllocationJournalIds: string[] = [];
+    for (const plan of plannedAdvances) {
+      const payment = await tx.payment.findFirst({
+        where: { OR: [{ id: plan.paymentId }, { code: plan.paymentId }] },
+        include: {
+          customer: { select: { code: true } },
+          project: { select: { code: true } },
+        },
+      });
+      if (!payment) throw new Error("Planned Customer Advance Receipt was not found");
+      if (payment.status !== "CLEARED" || !payment.journalId) {
+        throw new Error(`Planned Customer Advance ${payment.code} is not finalized. Finalize or remove it before Sales Invoice approval.`);
+      }
+      if (payment.customerId !== invoice.customerId) {
+        throw new Error(`Planned Customer Advance ${payment.code} belongs to a different customer`);
+      }
+
+      const sourceRef = String(payment.sourceDocId || "").trim();
+      const sourceDocument = input.sourceDocumentId
+        ? await tx.quote.findFirst({
+            where: { OR: [{ id: input.sourceDocumentId }, { code: input.sourceDocumentId }] },
+            select: { id: true, code: true, sourceDocId: true },
+          })
+        : null;
+      const sourceQuoteId = String(sourceDocument?.sourceDocId || sourceDocument?.id || input.sourceDocumentId || "").trim();
+      if (sourceQuoteId && sourceRef !== sourceQuoteId) {
+        throw new Error(`Planned Customer Advance ${payment.code} is not linked to this Sales Quotation`);
+      }
+
+      const allocation = await createPaymentAllocationInTransaction(tx, {
+        paymentId: payment.id,
+        againstDocumentType: "Sales Invoice",
+        againstDocumentId: invoice.id,
+        amount: plan.amount,
+        allocationDate: input.postingDate,
+        allocationType: "ADVANCE",
+        idempotencyKey: `SALES-INVOICE-APPROVAL:${invoice.id}:${payment.id}`,
+        createdBy: input.createdBy || "sales-invoice-approval",
+      });
+
+      if (!allocation.alreadyAllocated) {
+        const settlementBaseAmount = Number(allocation.settlementBaseAmount || 0);
+        const documentBaseAmount = Number(allocation.documentBaseAmount || 0);
+        const settlementExchangeRate = Number(allocation.settlementExchangeRate || 1);
+        const documentExchangeRate = Number(allocation.documentExchangeRate || 1);
+        const realizedGain = Number(allocation.realizedGain || 0);
+        const realizedLoss = Number(allocation.realizedLoss || 0);
+        const amount = plan.amount;
+        const customerRef = payment.customer?.code || payment.customerId || input.customerId;
+        const projectRef = payment.project?.code || payment.projectId || input.projectId || "";
+        const transactionAudit = (side: "debit" | "credit", rate: number) => ({
+          transactionCurrency: allocation.currency,
+          exchangeRate: rate,
+          transactionDebit: side === "debit" ? amount : 0,
+          transactionCredit: side === "credit" ? amount : 0,
+        });
+        const zeroFxAudit = {
+          transactionCurrency: allocation.baseCurrency,
+          exchangeRate: 1,
+          transactionDebit: 0,
+          transactionCredit: 0,
+        };
+        const allocationLines: any[] = [
+          {
+            accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
+            debit: settlementBaseAmount,
+            ...transactionAudit("debit", settlementExchangeRate),
+            customerId: customerRef,
+            projectId: projectRef,
+            description: "Apply planned customer advance",
+          },
+          {
+            accountId: input.receivableAccountId || INITIAL_ACCOUNT_IDS.accountsReceivable,
+            credit: documentBaseAmount,
+            ...transactionAudit("credit", documentExchangeRate),
+            customerId: customerRef,
+            projectId: projectRef,
+            description: "Settle Accounts Receivable from planned customer advance",
+          },
+        ];
+        if (realizedGain > 0) {
+          allocationLines.push({
+            accountId: INITIAL_ACCOUNT_IDS.exchangeGain,
+            credit: realizedGain,
+            ...zeroFxAudit,
+            projectId: projectRef,
+            description: "Realized foreign exchange gain on customer advance allocation",
+          });
+        }
+        if (realizedLoss > 0) {
+          allocationLines.push({
+            accountId: INITIAL_ACCOUNT_IDS.exchangeLoss,
+            debit: realizedLoss,
+            ...zeroFxAudit,
+            projectId: projectRef,
+            description: "Realized foreign exchange loss on customer advance allocation",
+          });
+        }
+
+        const allocationJournal = await postJournal({
+          postingDate: input.postingDate,
+          documentType: "CUSTOMER_ADVANCE_ALLOCATION",
+          documentId: allocation.allocation.id,
+          documentNumber: allocation.allocation.code,
+          reference: `Apply ${payment.code} to ${invoice.code}`,
+          projectId: projectRef,
+          currency: allocation.currency,
+          baseCurrency: allocation.baseCurrency,
+          exchangeRate: settlementExchangeRate,
+          createdBy: input.createdBy || "sales-invoice-approval",
+          approvedBy: input.approvedBy || "Finance Controller",
+          lines: allocationLines,
+        });
+
+        await tx.paymentAllocation.update({
+          where: { id: allocation.allocation.id },
+          data: { journalId: allocationJournal.journalId },
+        });
+        advanceAllocationJournalIds.push(allocationJournal.journalId);
+      }
+    }
+
+    if (plannedAdvances.length) {
+      await tx.invoice.update({
+        where: { id: invoice.id },
+        data: { plannedAdvanceAllocations: null },
+      });
+    }
+
+    const finalInvoice = await tx.invoice.findUnique({
+      where: { id: invoice.id },
+      select: { status: true, amountPaid: true, outstanding: true, baseOutstanding: true },
+    });
+
     return {
       invoiceId: invoice.id,
       journalId: journal.journalId,
@@ -273,7 +425,12 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
       baseCurrency: fx.baseCurrency,
       exchangeRate: fx.exchangeRate,
       baseTotal,
-      baseOutstanding,
+      baseOutstanding: Number(finalInvoice?.baseOutstanding || baseOutstanding),
+      amountPaid: Number(finalInvoice?.amountPaid || 0),
+      outstanding: Number(finalInvoice?.outstanding || invoice.outstanding || 0),
+      invoiceStatus: finalInvoice?.status || "SENT",
+      appliedAdvanceCount: plannedAdvances.length,
+      advanceAllocationJournalIds,
     };
   });
 }
