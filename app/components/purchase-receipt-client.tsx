@@ -131,7 +131,10 @@ export default function PurchaseReceiptClient({id}:{id:string}){
           <h1>Purchase Receipt / GRN</h1>
           <div className="document-header-subline"><span className="document-number">{receipt.receiptNumber}</span><span className="document-type-note">Finance document</span></div>
         </div>
-        <div className={"status-pill status-"+(submitted?"submitted":status.toLowerCase())}>{submitted?"SUBMITTED":status}</div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {receipt.journalId&&<Link className="button-link secondary-link no-print" href={"/journals/"+encodeURIComponent(receipt.journalId)}>Journal Entry · {receipt.journalId}</Link>}
+          <div className={"status-pill status-"+(submitted?"submitted":status.toLowerCase())}>{submitted?"SUBMITTED":status}</div>
+        </div>
       </header>
 
       <section className="document-flow-tabs no-print">
