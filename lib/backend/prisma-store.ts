@@ -1,5 +1,5 @@
 import { prisma } from "@/src/lib/prisma";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { documentSeriesId, nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { insertPaymentSchedule, listPaymentSchedules, updatePaymentSchedule } from "@/lib/accounting/payment-schedule-store";
 import { normalizeCurrency, roundCurrency } from "@/lib/accounting/currency";
@@ -955,7 +955,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "PurchaseOrders": {
-      const code = String(record.poNumber || record.poId || generatedCode("PO"));
+      const code = String(record.poNumber || record.poId || await nextDocumentSeriesId("PO"));
       // Resolve supplier
       const supInput = String(record.supplierId || "");
       let supplierId = supInput;
@@ -1020,7 +1020,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "Quotes": {
-      const code = String(record.quoteNumber || record.quoteId || generatedCode("QT"));
+      const code = String(record.quoteNumber || record.quoteId || await nextDocumentSeriesId("SQ"));
       const custInput = String(record.customerId || "");
       let customerId = custInput;
       if (custInput) {
@@ -1086,7 +1086,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "Invoices": {
-      const code = String(record.invoiceNumber || record.invoiceId || generatedCode("INV"));
+      const code = String(record.invoiceNumber || record.invoiceId || await nextDocumentSeriesId("SI"));
       const custInput = String(record.customerId || "");
       let customerId = custInput;
       if (custInput) {
@@ -1154,7 +1154,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "SupplierBills": {
-      const code = String(record.billNumber || record.billId || generatedCode("BILL"));
+      const code = String(record.billNumber || record.billId || await nextDocumentSeriesId("PB"));
       const supInput = String(record.supplierId || "");
       let supplierId = supInput;
       if (supInput) {
@@ -1265,7 +1265,7 @@ export async function prismaAppendRecord<T = any>(
       const created = await prisma.payment.create({
         data: {
           id: record.paymentId ? String(record.paymentId) : undefined,
-          code: String(record.paymentNumber || record.paymentId || generatedCode("PAY")),
+          code: String(record.paymentNumber || record.paymentId || await nextDocumentSeriesId("PE")),
           type: prismaType as any,
           date: record.paymentDate ? new Date(String(record.paymentDate)) : new Date(),
           amount: Number(record.amount || 0),
@@ -1305,7 +1305,7 @@ export async function prismaAppendRecord<T = any>(
       const created = await prisma.expense.create({
         data: {
           id: record.expenseId ? String(record.expenseId) : undefined,
-          code: String(record.expenseNumber || record.expenseId || generatedCode("EXP")),
+          code: String(record.expenseNumber || record.expenseId || await nextDocumentSeriesId("EXP")),
           date: record.expenseDate ? new Date(String(record.expenseDate)) : new Date(),
           supplierId: supplier?.id || null,
           projectId: project?.id || null,

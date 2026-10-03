@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { postSalesDeliveryAtomic } from "@/lib/accounting/atomic-sales-delivery";
 import { prisma } from "@/src/lib/prisma";
@@ -247,7 +247,7 @@ export async function POST(request: Request) {
 
       const created = await prisma.deliveryNote.create({
         data: {
-          code: documentSeriesId("DN", year()),
+          code: await nextDocumentSeriesId("DN", year()),
           salesOrderId: order.id,
           deliveryDate: new Date(`${input.deliveryDate.slice(0, 10)}T00:00:00+10:00`),
           status: "DRAFT",

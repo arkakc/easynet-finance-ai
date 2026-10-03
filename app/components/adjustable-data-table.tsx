@@ -23,6 +23,8 @@ type Props<T extends Record<string, unknown>> = {
   onRowClick?: (row: T, index: number) => void;
   rowAriaLabel?: (row: T, index: number) => string;
   rowClassName?: (row: T, index: number) => string | undefined;
+  defaultSortKey?: string;
+  defaultSortDirection?: SortDirection;
 };
 
 function normalizeSortValue(value: unknown) {
@@ -56,13 +58,15 @@ export default function AdjustableDataTable<T extends Record<string, unknown>>({
   onRowClick,
   rowAriaLabel,
   rowClassName,
+  defaultSortKey,
+  defaultSortDirection = "asc",
 }: Props<T>) {
   const [columnOrder, setColumnOrder] = useState(() => columns.map((column) => column.key));
   const [widths, setWidths] = useState<Record<string, number>>(() =>
     Object.fromEntries(columns.map((column) => [column.key, column.defaultWidth || 170])),
   );
-  const [sortKey, setSortKey] = useState(columns[0]?.key || "");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [sortKey, setSortKey] = useState(defaultSortKey || columns[0]?.key || "");
+  const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection);
   const [dragKey, setDragKey] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [visibleLimit, setVisibleLimit] = useState(25);

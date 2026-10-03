@@ -31,7 +31,7 @@ import {
   splitEvenly,
   weightedRate,
 } from "@/lib/accounting/inventory";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { documentSeriesId, nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoice";
 import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
 import { finalizeExpenseAtomic } from "@/lib/accounting/atomic-expense";
@@ -170,7 +170,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
 
   if (type === "quote") {
     const quoteId = id("QT");
-    const quoteNumber = parsed.documentNumber || quoteId;
+    const quoteNumber = parsed.documentNumber || await nextDocumentSeriesId("SQ");
     await appendRecord("Quotes", {
       quoteId, quoteNumber, customerId: parsed.partyId, projectId: parsed.projectId,
       quoteDate: parsed.documentDate, expiryDate: parsed.expiryDate,
@@ -185,7 +185,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
 
   if (type === "purchaseOrder") {
     const poId = id("PO");
-    const poNumber = parsed.documentNumber || poId;
+    const poNumber = parsed.documentNumber || await nextDocumentSeriesId("PO");
     await appendRecord("PurchaseOrders", {
       poId, poNumber, supplierId: parsed.partyId, projectId: parsed.projectId,
       poDate: parsed.documentDate, currency, exchangeRate, netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
@@ -200,7 +200,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
   if (type === "invoice") {
     const defaults = await loadConfiguredPostingAccounts();
     const invoiceId = id("INV");
-    const invoiceNumber = parsed.documentNumber || invoiceId;
+    const invoiceNumber = parsed.documentNumber || await nextDocumentSeriesId("SI");
     await appendRecord("Invoices", {
       invoiceId, invoiceNumber, customerId: parsed.partyId, projectId: parsed.projectId,
       invoiceDate: parsed.documentDate, dueDate: parsed.dueDate,
@@ -221,7 +221,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
 
   const defaults = await loadConfiguredPostingAccounts();
   const billId = id("BILL");
-  const billNumber = parsed.documentNumber || billId;
+  const billNumber = parsed.documentNumber || await nextDocumentSeriesId("PB");
   await appendRecord("SupplierBills", {
     billId, billNumber, supplierId: parsed.partyId, projectId: parsed.projectId,
     billDate: parsed.documentDate, dueDate: parsed.dueDate, poId: parsed.poId,
@@ -247,7 +247,7 @@ async function createPayment(raw: unknown) {
   const party = await assertParty(parsed.partyType === "Customer" ? "Customers" : "Suppliers", parsed.partyType === "Customer" ? "customerId" : "supplierId", parsed.partyId);
   await assertProject(parsed.projectId);
   const paymentId = id("PAY");
-  const paymentNumber = parsed.paymentNumber || paymentId;
+  const paymentNumber = parsed.paymentNumber || await nextDocumentSeriesId("PE");
   await appendRecord("Payments", {
     ...parsed,
     currency: parsed.currency || String(party.currency || "PGK").toUpperCase(),
@@ -265,7 +265,7 @@ async function createExpense(raw: unknown) {
   if (parsed.supplierId) await assertParty("Suppliers", "supplierId", parsed.supplierId);
   await assertProject(parsed.projectId);
   const expenseId = id("EXP");
-  const expenseNumber = parsed.expenseNumber || expenseId;
+  const expenseNumber = parsed.expenseNumber || await nextDocumentSeriesId("EXP");
   const totalAmount = round2(parsed.netAmount + parsed.gstAmount);
   await appendRecord("Expenses", { ...parsed, expenseId, expenseNumber, totalAmount, sourceDocumentId: "", journalId: "", status: "DRAFT" }, "transaction-ui");
   return { type: "expense", recordId: expenseId, documentNumber: expenseNumber, totalAmount, status: "DRAFT" };

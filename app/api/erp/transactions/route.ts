@@ -9,6 +9,7 @@ import { finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { round2 } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
+import { nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import {
   prismaDeleteQuote,
   prismaDeleteInvoice,
@@ -45,15 +46,7 @@ function pngYear() { return new Intl.DateTimeFormat("en", { timeZone: "Pacific/P
 async function nextNumber(action: string) {
   const config = SERIES[action];
   if (!config) return "";
-  const prefix = `${config.prefix}-${pngYear()}-`;
-  const rows = await listTable<any>(config.table, 500, 0);
-  const max = rows.rows.reduce((current, row) => {
-    const value = String(row[config.field] || "");
-    if (!value.startsWith(prefix)) return current;
-    const sequence = Number(value.slice(prefix.length));
-    return Number.isInteger(sequence) && sequence > current ? sequence : current;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(5, "0")}`;
+  return nextDocumentSeriesId(config.prefix, Number(pngYear()));
 }
 function permissionForAction(action: string, partyType?: string): Permission | undefined {
   if (action === "createPayment" || action === "finalizePayment" || action === "allocateAdvance") return partyType === "Supplier" ? "purchase.write" : "sales.write";

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { documentSeriesId, nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   quoteId: z.string().trim().min(1),
@@ -56,7 +56,7 @@ export async function POST(request: Request) {
     if (temporary.length) throw new Error("All quotation TEMP items must be saved permanently in Item Master before Sales Order conversion");
 
     const orderId = documentSeriesId("SO", year());
-    const orderNumber = orderId;
+    const orderNumber = await nextDocumentSeriesId("SO", year());
     await appendRecord("Quotes", {
       quoteId: orderId,
       quoteNumber: orderNumber,

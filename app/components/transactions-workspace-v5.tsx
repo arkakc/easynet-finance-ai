@@ -499,6 +499,8 @@ export default function TransactionsWorkspaceV5(){
         loadingMessage="Loading live list values…"
         rowKey={(row)=>row.key}
         rowClassName={(row)=>row.rowClassName}
+        defaultSortKey="createdAt"
+        defaultSortDirection="desc"
       />
     </section>}
 

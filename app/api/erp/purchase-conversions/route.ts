@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { resolveTransactionItems } from "@/lib/erp/item-linking";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { documentSeriesId, nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 
 function pngDate() {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -15,7 +15,7 @@ function pngYear() {
 async function nextNumber(table: string, field: string, prefix: string) {
   void table;
   void field;
-  return documentSeriesId(prefix, Number(pngYear()));
+  return nextDocumentSeriesId(prefix, Number(pngYear()));
 }
 
 function isApprovedPurchaseLifecycle(value: unknown) {

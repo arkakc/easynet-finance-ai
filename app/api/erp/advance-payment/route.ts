@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, findRecords, listTable } from "@/lib/backend/apps-script";
 import { round2 } from "@/lib/accounting/inventory";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { documentSeriesId, nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 
 const schema = z.object({
   partyType: z.enum(["Customer", "Supplier"]),
@@ -21,7 +21,7 @@ function year() {
 }
 
 async function nextPaymentNumber() {
-  return documentSeriesId("Payment", Number(year()));
+  return nextDocumentSeriesId("PA", Number(year()));
 }
 
 export async function POST(request: Request) {

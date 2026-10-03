@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { postPurchaseReceiptAtomic } from "@/lib/accounting/atomic-stock";
 import { listTable } from "@/lib/backend/apps-script";
@@ -193,7 +193,7 @@ export async function POST(request:Request){
       const lines=await remainingStockLines(order);
       if(!lines.length)throw new Error("No remaining STOCK quantity is available to receive for this Purchase Order");
       const created=await prisma.purchaseReceipt.create({data:{
-        code:documentSeriesId("PR",year()),purchaseOrderId:order.id,
+        code:await nextDocumentSeriesId("PR",year()),purchaseOrderId:order.id,
         receiptDate:new Date(input.receiptDate.slice(0,10)+"T00:00:00+10:00"),status:"DRAFT",
         items:JSON.stringify(lines),createdBy:"purchase-receipt",
       }});
