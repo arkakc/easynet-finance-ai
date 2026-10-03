@@ -109,7 +109,21 @@ export default function PurchaseReceiptClient({id}:{id:string}){
   ];
 
   return <div className="document-page">
-    <div className="document-toolbar no-print"><div className="document-toolbar-back"><Link href="/transactions?module=purchase&tab=purchaseReceipt&mode=list">← Back to Purchase Receipts / GRN</Link></div></div>
+    <div className="document-toolbar no-print">
+      <div className="document-toolbar-back">
+        <Link href="/transactions?module=purchase&tab=purchaseReceipt&mode=list">← Back to Purchase Receipts / GRN</Link>
+      </div>
+      <div className="row-actions">
+        {submitted&&!linkedInvoice&&(
+          <button type="button" disabled={Boolean(busy)} onClick={()=>void createSupplierInvoice()}>
+            {busy==="invoice"?"Creating Supplier Invoice…":"Create Supplier Invoice"}
+          </button>
+        )}
+        {submitted&&linkedInvoice&&(
+          <Link className="button-link" href={String(linkedInvoice.href||"#")}>Open Supplier Invoice</Link>
+        )}
+      </div>
+    </div>
     <section className="document-sheet">
       <header className="document-header">
         <div className="document-header-main">
@@ -160,18 +174,17 @@ export default function PurchaseReceiptClient({id}:{id:string}){
       </tbody></table></div>
     </section>
 
-    <section className="conversion-box no-print" style={{marginTop:16}}>
-      <div className="form-title-row"><div><strong>Purchase Receipt / GRN Actions</strong><p className="small">{submitted?"Stock In and Inventory / GRNI are posted. Supplier Invoice can now be created if one is not already linked.":"Draft only. No stock or ledger effect until the receipt is completed."}</p></div><span className="auto-badge">{submitted?"SUBMITTED":status}</span></div>
+    {!submitted&&<section className="conversion-box no-print" style={{marginTop:16}}>
+      <div className="form-title-row"><div><strong>Purchase Receipt / GRN Actions</strong><p className="small">Draft only. No stock or ledger effect until the receipt is completed.</p></div><span className="auto-badge">{status}</span></div>
       {message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}
-      {!submitted&&<div className="form-grid" style={{marginTop:14}}>
+      <div className="form-grid" style={{marginTop:14}}>
         <label>Receipt Date<input type="date" value={receiptDate} onChange={e=>setReceiptDate(e.target.value)} disabled={Boolean(busy)}/></label>
         <label>Receive Into Warehouse<select value={warehouseId} onChange={e=>setWarehouseId(e.target.value)} required disabled={Boolean(busy)}><option value="">Select warehouse</option>{warehouses.map(row=><option key={row.warehouseId} value={row.warehouseId}>{row.warehouseCode+" — "+row.warehouseName}</option>)}</select></label>
-      </div>}
-      <div className="button-row" style={{marginTop:14}}>
-        {!submitted&&<button type="button" disabled={Boolean(busy)||!warehouseId} onClick={()=>void completeReceipt()}>{busy==="approve"?"Posting Stock In…":"Complete Purchase Receipt / GRN"}</button>}
-        {submitted&&!linkedInvoice&&<button type="button" disabled={Boolean(busy)} onClick={()=>void createSupplierInvoice()}>{busy==="invoice"?"Creating Supplier Invoice…":"Create Supplier Invoice"}</button>}
-        {submitted&&linkedInvoice&&<Link className="button-link secondary-link" href={String(linkedInvoice.href||"#")}>Open Supplier Invoice</Link>}
       </div>
-    </section>
+      <div className="button-row" style={{marginTop:14}}>
+        <button type="button" disabled={Boolean(busy)||!warehouseId} onClick={()=>void completeReceipt()}>{busy==="approve"?"Posting Stock In…":"Complete Purchase Receipt / GRN"}</button>
+      </div>
+    </section>}
+    {submitted&&message&&<div className="status-banner no-print" style={{marginTop:16}}>{message}</div>}
   </div>;
 }
