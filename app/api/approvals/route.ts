@@ -49,6 +49,37 @@ async function assertSalesInvoiceStockPolicy(invoice: any) {
   }
 }
 
+async function assertSupplierInvoiceAdvanceWorkflow(bill: any) {
+  const poId = String(bill.poId || bill.orderId || bill.sourceDocumentId || "").trim();
+  const supplierId = String(bill.supplierId || "").trim();
+  if (!poId || !supplierId) return;
+
+  const payments = await listTable<any>("Payments", 500, 0);
+  const linked = payments.rows.filter((row: any) => {
+    const status = String(row.status || "DRAFT").toUpperCase();
+    if (["CANCELLED", "REVERSED"].includes(status)) return false;
+    if (String(row.partyType || "") !== "Supplier") return false;
+    if (String(row.paymentType || "").toUpperCase() !== "PAY") return false;
+    if (String(row.partyId || "") !== supplierId) return false;
+    const sourceId = String(row.sourceDocumentId || "").trim();
+    const reference = String(row.reference || "");
+    return sourceId === poId || reference.startsWith(`PO:${poId}|`);
+  });
+
+  const unfinished = linked.find((row: any) => {
+    const status = String(row.status || "DRAFT").toUpperCase();
+    const journalId = String(row.journalId || "").trim();
+    return status === "DRAFT" || status === "APPROVED" || !journalId;
+  });
+  if (!unfinished) return;
+
+  const paymentNo = String(unfinished.paymentNumber || unfinished.paymentId || "linked Supplier Advance");
+  const paymentStatus = String(unfinished.status || "DRAFT").toUpperCase();
+  throw new Error(
+    `Cannot approve Supplier Invoice while linked Supplier Advance ${paymentNo} is still ${paymentStatus} / not finalized. Finalize the advance payment first, or cancel it if it should not be used.`,
+  );
+}
+
 export async function GET() {
   try {
     await requirePermission("post.approve");
@@ -116,6 +147,9 @@ export async function POST(request: Request) {
     if (input.recordType === "invoice" && !creditNote) {
       await assertCustomerCreditPolicy(row);
       await assertSalesInvoiceStockPolicy(row);
+    }
+    if (input.recordType === "supplierBill") {
+      await assertSupplierInvoiceAdvanceWorkflow(row);
     }
 
     if (creditNote) {
