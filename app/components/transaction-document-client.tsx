@@ -872,7 +872,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <div><strong>Sales Invoice Settlement</strong><p className="small">Review Customer Advance, receipt, return and settlement actions.</p></div>
             <button type="button" className="secondary" onClick={()=>setSalesInvoiceSettlementOpen(false)}>Close</button>
           </div>
-          {salesInvoiceSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="invoice" sourceQuoteId={salesInvoiceSourceQuoteId} customerId={String(record.customerId||"")} invoiceId={id} invoiceNumber={number} invoiceOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
+          {salesInvoiceSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="invoice" sourceQuoteId={salesInvoiceSourceQuoteId} customerId={String(record.customerId||"")} invoiceId={id} invoiceNumber={number} invoiceTotal={n(record.totalAmount)} invoiceOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
           <CustomerInvoiceAdvancePlan invoiceId={id} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus} onPlanChange={setSalesInvoicePlanSummary}/>
           <SalesInvoiceCycle invoiceId={id} record={record}/>
         </div>
