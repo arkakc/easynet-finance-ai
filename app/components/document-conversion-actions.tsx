@@ -51,7 +51,7 @@ export default function DocumentConversionActions({
   const normalizedStatus = String(status || "").toUpperCase();
   const isSupplierQuotation = type === "purchaseOrder" && String(documentNumber || "").toUpperCase().startsWith("SUPQ-");
   const isPurchaseOrder = type === "purchaseOrder" && !isSupplierQuotation && PO_LIFECYCLE.has(normalizedStatus);
-  const canSupplierPayment = type === "supplierBill" && ["POSTED", "PARTLY_PAID"].includes(normalizedStatus);
+  const canSupplierPayment = type === "supplierBill" && ["POSTED", "PARTLY_PAID", "PARTIAL"].includes(normalizedStatus);
   const [receiptInfo, setReceiptInfo] = useState<ReceiptInfo | null>(null);
   const [existingSupplierBill, setExistingSupplierBill] = useState<any | null>(null);
   const [purchaseReceipts, setPurchaseReceipts] = useState<any[]>([]);
