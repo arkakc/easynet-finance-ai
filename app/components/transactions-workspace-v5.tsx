@@ -87,6 +87,7 @@ export default function TransactionsWorkspaceV5(){
   const pathname=usePathname();
   const searchParams=useSearchParams();
   const searchParamsKey=searchParams.toString();
+  const sourceBillPaymentFlow=Boolean(searchParams.get("sourceBill"))&&searchParams.get("module")==="purchase"&&searchParams.get("tab")==="purchasePayment"&&searchParams.get("mode")==="create";
   const[initialized,setInitialized]=useState(false);const[module,setModule]=useState<Module>("sales");const[tab,setTab]=useState<Tab>("salesQuote");const[sectionMode,setSectionMode]=useState<SectionMode>("menu");
   const[masters,setMasters]=useState<Master>(emptyMaster);const[mastersLoaded,setMastersLoaded]=useState(false);const[items,setItems]=useState<TransactionItemMaster[]>([]);const[itemsLoaded,setItemsLoaded]=useState(false);const[tx,setTx]=useState<TxData>(emptyTx);const[existingLoaded,setExistingLoaded]=useState(false);const[existingLoading,setExistingLoading]=useState(false);
   const[receiptStates,setReceiptStates]=useState<Record<string,ReceiptState>>({});const[receiptStatesLoaded,setReceiptStatesLoaded]=useState(false);const[receiptStatesLoading,setReceiptStatesLoading]=useState(false);
@@ -394,7 +395,7 @@ export default function TransactionsWorkspaceV5(){
       </div>
     </div>
 
-    {module === "sales" && (
+    {!sourceBillPaymentFlow && module === "sales" && (
       <div className="tabs wrap-tabs">
         {tabButton("salesQuote", "Sales Quotation")}
         {tabButton("salesOrder", "Sales Order")}
@@ -403,7 +404,7 @@ export default function TransactionsWorkspaceV5(){
         {tabButton("salesPayment", "Sales Payment Entry / Receipt")}
       </div>
     )}
-    {module === "purchase" && (
+    {!sourceBillPaymentFlow && module === "purchase" && (
       <div className="tabs wrap-tabs">
         {tabButton("supplierQuote", "Supplier Quotation")}
         {tabButton("purchaseOrder", "Purchase Order")}
@@ -413,7 +414,7 @@ export default function TransactionsWorkspaceV5(){
       </div>
     )}
 
-    <div style={{display:"flex",gap:"10px",margin:"14px 0 16px",flexWrap:"wrap",alignItems:"center"}}>
+    {!sourceBillPaymentFlow&&(<div style={{display:"flex",gap:"10px",margin:"14px 0 16px",flexWrap:"wrap",alignItems:"center"}}>
       <button
         type="button"
         disabled={globallyBusy}
@@ -439,9 +440,9 @@ export default function TransactionsWorkspaceV5(){
           section.createLabel
         ):section.createLabel}
       </button>
-    </div>
+    </div>)}
 
-    {sectionMode==="create"&&<section className={`panel ${styles.contextBar}`}><button type="button" disabled={globallyBusy} className="secondary" onClick={()=>openMode("list")}>← Back to {section.listLabel}</button><span className={styles.contextTitle}>{section.createLabel}</span></section>}
+    {sectionMode==="create"&&!sourceBillPaymentFlow&&<section className={`panel ${styles.contextBar}`}><button type="button" disabled={globallyBusy} className="secondary" onClick={()=>openMode("list")}>← Back to {section.listLabel}</button><span className={styles.contextTitle}>{section.createLabel}</span></section>}
 
     {sectionMode==="create"&&controlledCreateBlocked&&<section className="panel">
       <div className="form-title-row">
