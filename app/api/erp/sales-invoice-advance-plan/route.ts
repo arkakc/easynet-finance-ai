@@ -12,25 +12,29 @@ function normalizePlan(value:unknown):PlannedAdvance[]{
   return parsed.map((row:any)=>({paymentId:String(row?.paymentId||"").trim(),amount:round2(Number(row?.amount||0))})).filter(row=>row.paymentId&&row.amount>0);
 }
 
-async function resolveSourceQuoteId(invoice:any){
+async function resolveSourceQuoteRefs(invoice:any){
   const sourceRef=String(invoice.sourceDocId||"").trim();
-  if(!sourceRef)return"";
+  if(!sourceRef)return{primary:"",refs:[] as string[]};
   const source=await prisma.quote.findFirst({where:{OR:[{id:sourceRef},{code:sourceRef}]},select:{id:true,code:true,sourceDocId:true}});
-  if(!source)return sourceRef;
-  return String(source.sourceDocId||source.id||sourceRef);
+  if(!source)return{primary:sourceRef,refs:[sourceRef]};
+  const quoteRef=String(source.sourceDocId||source.id||sourceRef);
+  const quote=await prisma.quote.findFirst({where:{OR:[{id:quoteRef},{code:quoteRef}]},select:{id:true,code:true}}); 
+  const refs=[quoteRef,quote?.id||"",quote?.code||""].filter(Boolean);
+  return{primary:quote?.code||quote?.id||quoteRef,refs:[...new Set(refs)]};
 }
 
 async function loadWorkspace(invoiceRef:string){
   const invoice=await prisma.invoice.findFirst({where:{OR:[{id:invoiceRef},{code:invoiceRef}]}});
   if(!invoice)throw new Error("Sales Invoice not found");
-  const sourceQuoteId=await resolveSourceQuoteId(invoice);
-  const payments=sourceQuoteId?await prisma.payment.findMany({
+  const sourceQuote=await resolveSourceQuoteRefs(invoice);
+  const sourceQuoteId=sourceQuote.primary;
+  const payments=sourceQuote.refs.length?await prisma.payment.findMany({
     where:{
       customerId:invoice.customerId,
       type:"CUSTOMER_RECEIPT",
       status:"CLEARED",
       journalId:{not:null},
-      sourceDocId:sourceQuoteId,
+      sourceDocId:{in:sourceQuote.refs},
     },
     include:{allocations:{where:{status:"POSTED"},select:{amount:true}}},
     orderBy:{createdAt:"asc"},
