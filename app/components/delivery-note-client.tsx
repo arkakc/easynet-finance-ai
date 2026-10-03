@@ -110,7 +110,10 @@ export default function DeliveryNoteClient({id}:{id:string}){
           <h1>Delivery Note / Stock Out</h1>
           <div className="document-header-subline"><span className="document-number">{note.deliveryNumber}</span><span className="document-type-note">Finance document</span></div>
         </div>
-        <div className={"status-pill status-"+status.toLowerCase()}>{status}</div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {note.journalId&&<Link className="button-link secondary-link no-print" href={"/journals/"+encodeURIComponent(note.journalId)}>Journal Entry · {note.journalId}</Link>}
+          <div className={"status-pill status-"+status.toLowerCase()}>{status}</div>
+        </div>
       </header>
 
       <section className="document-flow-tabs no-print">
