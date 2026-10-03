@@ -539,16 +539,10 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&(
-        <section className="panel no-print" style={{marginTop:16}}>
-          <div className="form-title-row">
-            <div>
-              <h3>{String(record.partyType||"")==="Supplier"?"Purchase Payment Entry / Receipt":"Sales Payment Entry / Receipt"}</h3>
-              <p className="small">Linked advance history and downstream references.</p>
-            </div>
-          </div>
+        <>
           {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
-        </section>
+        </>
       )}
       {type==="expense"&&<DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>} 
     </>}
