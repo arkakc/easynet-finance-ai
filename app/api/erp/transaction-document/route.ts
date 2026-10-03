@@ -158,7 +158,7 @@ async function buildDocumentLinks(type:string,record:any):Promise<DocumentLink[]
         if(!number||deliveryNumbers.has(number))continue;
         deliveryNumbers.add(number);
         const sourceId=clean(movement.sourceDocumentId);
-        add(30,currentStage,"Delivery Note / Stock Out",number,number,"deliveryNote",`/stock?mode=register&sourceDocumentId=${encodeURIComponent(sourceId)}`);
+        add(30,currentStage,"Delivery Note / Stock Out",number,number,"deliveryNote",transactionHref("deliveryNote",number));
       }
 
       const chainInvoices=invoices.filter((invoice:any)=>{
