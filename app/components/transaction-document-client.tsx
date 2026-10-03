@@ -79,6 +79,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[returnContext,setReturnContext]=useState<ReturnContext>({});
   const[deleteBusy,setDeleteBusy]=useState(false);
   const[supplierQuoteItemsOpen,setSupplierQuoteItemsOpen]=useState(false);
+  const[salesQuoteFulfilmentOpen,setSalesQuoteFulfilmentOpen]=useState(false);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -333,6 +334,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             Save Temp Items
           </button>
         )}
+        {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && (
+          <button
+            type="button"
+            onClick={() => setSalesQuoteFulfilmentOpen(true)}
+            title="Open Sales Quotation fulfilment and conversion actions"
+          >
+            Sales Fulfilment
+          </button>
+        )}
         <button
           type="button"
           disabled={deleteBusy}
@@ -433,7 +443,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     </section>
 
     {record&&<>
-      {type==="quote"&&!isSalesOrder&&QUOTE_ACTION_LIFECYCLE.has(rowStatus)&&<LazyDocumentSection title="Sales Quotation Fulfilment" description="Sales order readiness, stock checks, linked documents and customer advances are loaded only when you request them." buttonLabel={rowStatus==="APPROVED"?"Check Fulfilment / Convert to Sales Order":"Open Sales Fulfilment Actions"}><SalesQuoteCycle quoteId={id}/></LazyDocumentSection>}
       {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
       {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
@@ -484,6 +493,50 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <button type="button" className="secondary" onClick={() => setSupplierQuoteItemsOpen(false)}>Close</button>
           </div>
           <SupplierQuoteItemReadiness supplierQuoteId={id}/>
+        </div>
+      </div>
+    )}
+
+    {salesQuoteFulfilmentOpen && type === "quote" && !isSalesOrder && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales Fulfilment"
+        onClick={() => setSalesQuoteFulfilmentOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(15, 23, 42, 0.48)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          padding: "5vh 24px",
+          overflowY: "auto",
+        }}
+      >
+        <div
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            width: "min(1500px, 96vw)",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            background: "var(--surface, #ffffff)",
+            border: "1px solid var(--border, #dbe4f0)",
+            borderRadius: 16,
+            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.25)",
+            padding: 18,
+          }}
+        >
+          <div className="form-title-row" style={{ marginBottom: 12 }}>
+            <div>
+              <strong>Sales Fulfilment</strong>
+              <p className="small">Review temporary items, stock readiness, customer advances and Sales Order conversion.</p>
+            </div>
+            <button type="button" className="secondary" onClick={() => setSalesQuoteFulfilmentOpen(false)}>Close</button>
+          </div>
+          <SalesQuoteCycle quoteId={id}/>
         </div>
       </div>
     )}
