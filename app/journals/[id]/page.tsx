@@ -33,7 +33,14 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
         })
       : null;
   const sourceDocumentNumber = sourceDocument?.code || header.sourceDocId || "—";
-  const sourceRecordId = sourceDocument?.id || header.sourceDocId || "";
+  const sourceType = String(header.sourceDocType || "").toUpperCase();
+  const sourceHref = sourceDocument
+    ? paymentSourceTypes.has(sourceType)
+      ? `/transactions/payment/${encodeURIComponent(sourceDocument.id)}`
+      : sourceType === "SUPPLIER_BILL"
+        ? `/transactions/supplierBill/${encodeURIComponent(sourceDocument.id)}`
+        : ""
+    : "";
 
   const [customers, suppliers, projects, reversalJournal, originalJournal] = await Promise.all([
     prisma.customer.findMany({ select: { id: true, name: true } }),
@@ -107,7 +114,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
         <div className="document-meta">
           <div><span>Posting Date</span><strong>{formatAccountingDate(header.date.toISOString())}</strong></div>
           <div><span>Document Type</span><strong>{header.sourceDocType || "JOURNAL"}</strong></div>
-          <div><span>Document Number</span><strong>{sourceDocumentNumber}</strong></div>
+          <div><span>Document Number</span><strong>{sourceHref ? <Link href={sourceHref}>{sourceDocumentNumber}</Link> : sourceDocumentNumber}</strong></div>
           <div><span>Source Currency</span><strong>{sourceCurrency}</strong></div>
           <div><span>Base Currency</span><strong>{baseCurrency}</strong></div>
           <div><span>Exchange Rate</span><strong>{sourceCurrency === baseCurrency ? "1.00000000" : `1 ${sourceCurrency} = ${Number(header.exchangeRate || 0).toFixed(8).replace(/0+$/, "").replace(/\.$/, "")} ${baseCurrency}`}</strong></div>
@@ -115,7 +122,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           <div><span>Checker / Approved By</span><strong>{header.approvedBy || "Pending checker"}</strong></div>
           <div><span>Submitted At</span><strong>{header.createdAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" })}</strong></div>
           <div><span>Posted At</span><strong>{header.postedAt ? header.postedAt.toLocaleString("en-PG", { timeZone: "Pacific/Port_Moresby" }) : "Not posted"}</strong></div>
-          <div><span>Reference</span><strong>{header.reference || header.description || "—"}</strong></div>
+          <div><span>Reference</span><strong>{sourceHref ? <Link href={sourceHref}>{header.reference || header.description || sourceDocumentNumber}</Link> : (header.reference || header.description || "—")}</strong></div>
           {reversalJournal ? <div><span>Reversal Status</span><strong>REVERSED · <Link href={`/journals/${reversalJournal.code}`}>{reversalJournal.code}</Link></strong></div> : null}
           {originalJournal ? <div><span>Reversal Of</span><strong><Link href={`/journals/${originalJournal.code}`}>{originalJournal.code}</Link> · {originalJournal.sourceDocType || "JOURNAL"} · {originalJournal.sourceDocId || "—"}</strong></div> : null}
         </div>
