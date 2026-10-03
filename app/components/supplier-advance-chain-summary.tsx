@@ -45,13 +45,13 @@ export default function SupplierAdvanceChainSummary(props:Props){
         <div className="table-wrap" style={{marginTop:18}}>
           <div className="form-title-row"><div><strong>Supplier Payment History</strong><p className="small">Every finalized payment against this Supplier Invoice is retained as a separate accounting document.</p></div><span className="auto-badge">{settlementPayments.length} Payment{settlementPayments.length===1?"":"s"}</span></div>
           <table className="data-table" style={{marginTop:12}}>
-            <thead><tr><th>Payment Entry</th><th>Created</th><th>Amount</th><th>Status</th><th>Journal Entry</th></tr></thead>
+            <thead><tr><th>Payment Entry</th><th>Created</th><th>Amount</th><th>Status</th><th>Adjusted Against</th></tr></thead>
             <tbody>{[...settlementPayments].sort((a,b)=>createdValue(b)-createdValue(a)).map(row=><tr key={row.paymentId}>
               <td><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}><strong>{row.paymentNumber||row.paymentId}</strong></Link></td>
               <td>{row.createdAt?new Date(row.createdAt).toLocaleString("en-PG",{timeZone:"Pacific/Port_Moresby"}):"—"}</td>
               <td><strong>{money(row.amount)}</strong></td>
               <td>{row.status||"POSTED"}</td>
-              <td>{row.journalId?<Link prefetch={false} href={`/journals/${encodeURIComponent(String(row.journalId))}`}>{row.journalId}</Link>:"—"}</td>
+              <td>{props.billId?<Link prefetch={false} href={`/transactions/supplierBill/${encodeURIComponent(props.billId)}`}><strong>{props.billNumber||props.billId}</strong></Link>:"—"}</td>
             </tr>)}</tbody>
           </table>
         </div>
