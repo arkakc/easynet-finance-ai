@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Props={
   billId:string;
@@ -77,7 +77,7 @@ export default function SupplierInvoiceAdvanceAdjustment(props:Props){
 
   if(!props.poId||!draftInvoice)return null;
 
-  if(draftInvoice){
+  {
     const enteredTotal=plannedAdvances.reduce((sum,row)=>sum+Number(plannedAmounts[row.paymentId]||0),0);
     return <section className="panel table-wrap no-print" style={{marginTop:20}}>
       <div className="form-title-row">
