@@ -10,6 +10,7 @@ import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-rea
 import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
+import CustomerAdvanceChainSummary from "@/app/components/customer-advance-chain-summary";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
 import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
 import SalesOrderCycle from "@/app/components/sales-order-cycle";
@@ -80,6 +81,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[deleteBusy,setDeleteBusy]=useState(false);
   const[supplierQuoteItemsOpen,setSupplierQuoteItemsOpen]=useState(false);
   const[salesQuoteFulfilmentOpen,setSalesQuoteFulfilmentOpen]=useState(false);
+  const[salesOrderActionsOpen,setSalesOrderActionsOpen]=useState(false);
+  const[salesInvoiceSettlementOpen,setSalesInvoiceSettlementOpen]=useState(false);
+  const[salesQuoteReadiness,setSalesQuoteReadiness]=useState<any|null>(null);
   const[supplierQuoteReadiness,setSupplierQuoteReadiness]=useState<any|null>(null);
   const[supplierQuoteConvertBusy,setSupplierQuoteConvertBusy]=useState(false);
   const[poAdvanceOpen,setPoAdvanceOpen]=useState(false);
@@ -179,6 +183,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   },[isSupplierQuotation,id]);
 
   useEffect(()=>{if(isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus))void loadSupplierQuoteReadiness();},[isSupplierQuotation,rowStatus,loadSupplierQuoteReadiness]);
+
+  useEffect(()=>{
+    if(type!=="quote"||isSalesOrder){setSalesQuoteReadiness(null);return;}
+    let active=true;
+    void(async()=>{
+      try{
+        const response=await fetch(`/api/erp/sales-quote-readiness?quoteId=${encodeURIComponent(id)}`,{cache:"no-store"});
+        const body=await response.json();
+        if(active&&response.ok&&body.ok)setSalesQuoteReadiness(body.readiness||null);
+      }catch{}
+    })();
+    return()=>{active=false;};
+  },[type,id,isSalesOrder,rowStatus]);
 
   async function handleCreatePurchaseOrder(){
     if(supplierQuoteConvertBusy)return;
@@ -309,6 +326,9 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const projectName=record?String(projectMap.get(String(record.projectId||""))||record.projectId||""):"";
   const supplierBillPoId=record&&type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
   const paymentPoId=record&&type==="payment"&&String(record.partyType||"")==="Supplier"?(sourceMarkerFromPayment(record,"PO")||String(record.sourceDocumentId||"")):"";
+  const paymentQuoteId=record&&type==="payment"&&String(record.partyType||"")==="Customer"?(sourceMarkerFromPayment(record,"SQ")||String(record.sourceDocumentId||"")):"";
+  const salesOrderSourceQuoteId=record&&isSalesOrder?String(record.sourceDocumentId||""):"";
+  const salesInvoiceSourceQuoteId=record&&type==="invoice"&&!isCreditNote?String(record.sourceQuoteId||""):"";
   const salesInvoicePaid=Boolean(record)&&type==="invoice"&&!isCreditNote&&rowStatus==="PAID";
   const paymentFinalizationReady=Boolean(record)&&type==="payment"&&(rowStatus==="APPROVED"||Boolean(String(record.journalId||"").trim()));
   const orderedDocumentLinks=[...documentLinks].sort((a:any,b:any)=>Number(a.stage||0)-Number(b.stage||0)||String(a.number||"").localeCompare(String(b.number||"")));
@@ -402,13 +422,40 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </button>
           )
         )}
-        {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && (
+        {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && !documentLinks.some((link:any)=>Number(link.stage||0)===20) && (
+          <>
+            <button
+              type="button"
+              onClick={() => setSalesQuoteFulfilmentOpen(true)}
+              title={salesQuoteReadiness?.temporaryLines?.length ? "Save temporary Sales Quotation items to Item Master" : "Create Sales Order from this Sales Quotation"}
+            >
+              {salesQuoteReadiness?.temporaryLines?.length ? "Save Temp Items" : "Create Sales Order"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSalesQuoteFulfilmentOpen(true)}
+              title="Create or review Customer Advance Receipt"
+            >
+              Customer Advance
+            </button>
+          </>
+        )}
+        {isSalesOrder && ["APPROVED","PART_DELIVERED","DELIVERED","PART_INVOICED","INVOICED"].includes(rowStatus) && (
           <button
             type="button"
-            onClick={() => setSalesQuoteFulfilmentOpen(true)}
-            title="Open Sales Quotation fulfilment and conversion actions"
+            onClick={() => setSalesOrderActionsOpen(true)}
+            title="Create or open Delivery Note / Stock Out"
           >
-            Sales Fulfilment
+            Delivery Note
+          </button>
+        )}
+        {type === "invoice" && !isCreditNote && (
+          <button
+            type="button"
+            onClick={() => setSalesInvoiceSettlementOpen(true)}
+            title="Open Customer Advance, receipt and Sales Invoice settlement actions"
+          >
+            Invoice Settlement
           </button>
         )}
         {realApprovedPo && (
@@ -550,14 +597,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     </section>
 
     {record&&<>
-      {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
+      {isSalesOrder&&salesOrderSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="order" sourceQuoteId={salesOrderSourceQuoteId} customerId={String(record.customerId||"")} quoteTotal={n(record.totalAmount)}/>}
       {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
-      {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
+      {type==="invoice"&&isCreditNote&&<LazyDocumentSection title="Credit Note / Refund Actions" description="Refundable credit controls are loaded only when requested." buttonLabel="Open Refund / Credit Actions"><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&(
         <>
           {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>}
+          {paymentQuoteId&&<CustomerAdvanceChainSummary context="payment" sourceQuoteId={paymentQuoteId} customerId={String(record.partyId||"")} paymentId={id}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
         </>
       )}
@@ -737,6 +785,45 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
           </div>
           <PoPartialSupplyClose poId={id} poNumber={number}/>
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
+        </div>
+      </div>
+    )}
+
+    {salesOrderActionsOpen && isSalesOrder && record && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales Order Fulfilment"
+        onClick={() => setSalesOrderActionsOpen(false)}
+        style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(15, 23, 42, 0.48)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 24px",overflowY:"auto"}}
+      >
+        <div onClick={(event)=>event.stopPropagation()} style={{width:"min(1300px,95vw)",maxHeight:"90vh",overflowY:"auto",background:"var(--surface, #ffffff)",border:"1px solid var(--border, #dbe4f0)",borderRadius:16,boxShadow:"0 24px 80px rgba(15, 23, 42, 0.25)",padding:18}}>
+          <div className="form-title-row" style={{marginBottom:12}}>
+            <div><strong>Sales Order Fulfilment</strong><p className="small">Create or review Delivery Note / Stock Out and downstream Sales Invoice links.</p></div>
+            <button type="button" className="secondary" onClick={()=>setSalesOrderActionsOpen(false)}>Close</button>
+          </div>
+          <SalesOrderCycle orderId={id}/>
+        </div>
+      </div>
+    )}
+
+    {salesInvoiceSettlementOpen && type === "invoice" && !isCreditNote && record && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales Invoice Settlement"
+        onClick={() => setSalesInvoiceSettlementOpen(false)}
+        style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(15, 23, 42, 0.48)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 24px",overflowY:"auto"}}
+      >
+        <div onClick={(event)=>event.stopPropagation()} style={{width:"min(1450px,96vw)",maxHeight:"90vh",overflowY:"auto",background:"var(--surface, #ffffff)",border:"1px solid var(--border, #dbe4f0)",borderRadius:16,boxShadow:"0 24px 80px rgba(15, 23, 42, 0.25)",padding:18}}>
+          <div className="form-title-row" style={{marginBottom:12}}>
+            <div><strong>Sales Invoice Settlement</strong><p className="small">Review Customer Advance, receipt, return and settlement actions.</p></div>
+            <button type="button" className="secondary" onClick={()=>setSalesInvoiceSettlementOpen(false)}>Close</button>
+          </div>
+          {salesInvoiceSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="invoice" sourceQuoteId={salesInvoiceSourceQuoteId} customerId={String(record.customerId||"")} invoiceId={id} invoiceNumber={number} invoiceOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
+          <SalesInvoiceCycle invoiceId={id} record={record}/>
         </div>
       </div>
     )}
