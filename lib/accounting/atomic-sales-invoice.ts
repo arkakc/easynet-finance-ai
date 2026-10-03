@@ -303,8 +303,17 @@ export async function finalizeSalesInvoiceAtomic(input: AtomicSalesInvoiceInput)
             select: { id: true, code: true, sourceDocId: true },
           })
         : null;
-      const sourceQuoteId = String(sourceDocument?.sourceDocId || sourceDocument?.id || input.sourceDocumentId || "").trim();
-      if (sourceQuoteId && sourceRef !== sourceQuoteId) {
+      const quoteRef = String(sourceDocument?.sourceDocId || sourceDocument?.id || input.sourceDocumentId || "").trim();
+      const sourceQuote = quoteRef
+        ? await tx.quote.findFirst({
+            where: { OR: [{ id: quoteRef }, { code: quoteRef }] },
+            select: { id: true, code: true },
+          })
+        : null;
+      const validSourceRefs = new Set(
+        [quoteRef, sourceQuote?.id || "", sourceQuote?.code || ""].filter(Boolean),
+      );
+      if (validSourceRefs.size && !validSourceRefs.has(sourceRef)) {
         throw new Error(`Planned Customer Advance ${payment.code} is not linked to this Sales Quotation`);
       }
 
