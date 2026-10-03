@@ -10,6 +10,7 @@ import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-rea
 import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
 import SupplierInvoiceAdvanceAdjustment from "@/app/components/supplier-invoice-advance-adjustment";
 import SupplierAdvanceChainSummary from "@/app/components/supplier-advance-chain-summary";
+import SupplierPaymentSettlementSummary from "@/app/components/supplier-payment-settlement-summary";
 import CustomerAdvanceChainSummary from "@/app/components/customer-advance-chain-summary";
 import CustomerInvoiceAdvancePlan from "@/app/components/customer-invoice-advance-plan";
 import PoPartialSupplyClose from "@/app/components/po-partial-supply-close";
@@ -365,6 +366,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const projectName=record?String(projectMap.get(String(record.projectId||""))||record.projectId||""):"";
   const supplierBillPoId=record&&type==="supplierBill"?String(record.poId||record.sourceDocumentId||""):"";
   const paymentPoId=record&&type==="payment"&&String(record.partyType||"")==="Supplier"?(sourceMarkerFromPayment(record,"PO")||String(record.sourceDocumentId||"")):"";
+  const paymentSupplierBillRef=record&&type==="payment"&&String(record.partyType||"")==="Supplier"?String(record.againstDocumentId||"").trim():"";
   const paymentQuoteId=record&&type==="payment"&&String(record.partyType||"")==="Customer"?(sourceMarkerFromPayment(record,"SQ")||String(record.sourceDocumentId||"")):"";
   const salesOrderSourceQuoteId=record&&isSalesOrder?String(record.sourceDocumentId||""):"";
   const salesInvoiceSourceQuoteId=record&&type==="invoice"&&!isCreditNote?String(record.sourceQuoteId||""):"";
@@ -654,7 +656,11 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&(
         <>
-          {paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>}
+          {paymentSupplierBillRef
+            ? <SupplierPaymentSettlementSummary billRef={paymentSupplierBillRef} supplierId={String(record.partyId||"")}/>
+            : paymentPoId
+              ? <SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>
+              : null}
           {paymentQuoteId&&<CustomerAdvanceChainSummary context="payment" sourceQuoteId={paymentQuoteId} customerId={String(record.partyId||"")} paymentId={id}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
         </>
