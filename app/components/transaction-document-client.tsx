@@ -24,8 +24,8 @@ const CONFIG:Record<string,{numberField:string;title:string}>={
   payment:{numberField:"paymentNumber",title:"Payment / Receipt"},
   expense:{numberField:"expenseNumber",title:"Expense"},
 };
-const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
-const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
+const labels:Record<string,string>={customerId:"Customer",supplierId:"Supplier",partyId:"Customer / Supplier",projectId:"Project",quoteDate:"Date",invoiceDate:"Date",poDate:"Date",billDate:"Date",paymentDate:"Date",expenseDate:"Date",dueDate:"Due Date",expiryDate:"Valid Till",currency:"Currency",exchangeRate:"Exchange Rate",baseNetAmount:"Base Net Amount",baseGstAmount:"Base GST",baseTotalAmount:"Base Total",basePaidAmount:"Base Paid / Settled",baseOutstandingAmount:"Base Outstanding",baseAmount:"Base Amount",netAmount:"Net Amount",gstAmount:"GST",totalAmount:"Total",paidAmount:"Paid / Settled",outstandingAmount:"Outstanding",plannedAdvanceAmount:"Supplier Advance Planned",projectedOutstandingAmount:"Projected Outstanding After Approval",status:"Status",reference:"Reference",paymentMethod:"Payment Method",description:"Description",journalId:"Journal",cashBankAccountId:"Cash / Bank Account",expenseAccountId:"Expense Account",allocatedAmount:"Allocated",unallocatedAmount:"Available Advance Balance",allocationCount:"Allocation Entries"};
+const moneyFields=new Set(["netAmount","gstAmount","totalAmount","paidAmount","outstandingAmount","plannedAdvanceAmount","projectedOutstandingAmount","amount","allocatedAmount","unallocatedAmount"]);
 const baseMoneyFields=new Set(["baseNetAmount","baseGstAmount","baseTotalAmount","basePaidAmount","baseOutstandingAmount","baseAmount"]);
 const VALID_MODULES=new Set(["sales","purchase","expense"]);
 const VALID_TABS=new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment","expense"]);
@@ -85,6 +85,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[poAdvanceOpen,setPoAdvanceOpen]=useState(false);
   const[poReceiptOpen,setPoReceiptOpen]=useState(false);
   const[supplierBillSettlementOpen,setSupplierBillSettlementOpen]=useState(false);
+  const[supplierBillPlanSummary,setSupplierBillPlanSummary]=useState<{plannedTotal:number;projectedOutstanding:number}|null>(null);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -126,6 +127,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     window.addEventListener("easynet:transaction-document-updated",handleDocumentUpdated);
     return()=>window.removeEventListener("easynet:transaction-document-updated",handleDocumentUpdated);
   },[loadDocument]);
+
+  useEffect(()=>{
+    if(type!=="supplierBill"){setSupplierBillPlanSummary(null);return;}
+    let active=true;
+    void(async()=>{
+      try{
+        const response=await fetch(`/api/erp/supplier-invoice-advance-plan?billId=${encodeURIComponent(id)}`,{cache:"no-store"});
+        const body=await response.json();
+        if(active&&response.ok&&body.ok)setSupplierBillPlanSummary({plannedTotal:Number(body.plannedTotal||0),projectedOutstanding:Number(body.projectedOutstanding||0)});
+      }catch{}
+    })();
+    return()=>{active=false;};
+  },[type,id,record?.status,record?.outstandingAmount]);
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
@@ -243,7 +257,11 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         if(key==="journalId"&&!String(value||"").trim())return false;
         return true;
       })
-    : rawFields;
+    : [...rawFields];
+  if(type==="supplierBill"&&String(record?.status||"").toUpperCase()==="DRAFT"&&Number(supplierBillPlanSummary?.plannedTotal||0)>0){
+    fields.push(["plannedAdvanceAmount",supplierBillPlanSummary?.plannedTotal||0]);
+    fields.push(["projectedOutstandingAmount",supplierBillPlanSummary?.projectedOutstanding||0]);
+  }
   const paymentAdvancedFields=type==="payment"
     ? rawFields.filter(([key,value])=>{
         if(!paymentAdvancedKeys.has(key))return false;
@@ -742,7 +760,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <button type="button" className="secondary" onClick={() => setSupplierBillSettlementOpen(false)}>Close</button>
           </div>
           {supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={n(record.totalAmount)} billOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
-          {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>}
+          {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus} onPlanChange={setSupplierBillPlanSummary}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
         </div>
       </div>
