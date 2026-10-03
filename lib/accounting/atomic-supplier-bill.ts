@@ -435,14 +435,21 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
       },
     });
 
-    const plannedAdvances = Array.isArray(bill.plannedAdvanceAllocations)
-      ? (bill.plannedAdvanceAllocations as Array<any>)
-          .map((row) => ({
-            paymentId: String(row?.paymentId || "").trim(),
-            amount: round2(Number(row?.amount || 0)),
-          }))
-          .filter((row) => row.paymentId && row.amount > 0)
-      : [];
+    let plannedAdvanceRows: any[] = [];
+    try {
+      const parsed = bill.plannedAdvanceAllocations
+        ? JSON.parse(String(bill.plannedAdvanceAllocations))
+        : [];
+      plannedAdvanceRows = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      plannedAdvanceRows = [];
+    }
+    const plannedAdvances = plannedAdvanceRows
+      .map((row) => ({
+        paymentId: String(row?.paymentId || "").trim(),
+        amount: round2(Number(row?.amount || 0)),
+      }))
+      .filter((row) => row.paymentId && row.amount > 0);
 
     const advanceAllocationJournalIds: string[] = [];
     for (const plan of plannedAdvances) {
@@ -565,7 +572,7 @@ export async function finalizeSupplierBillAtomic(input: AtomicSupplierBillInput)
     if (plannedAdvances.length) {
       await tx.supplierBill.update({
         where: { id: bill.id },
-        data: { plannedAdvanceAllocations: [] },
+        data: { plannedAdvanceAllocations: null },
       });
     }
 
