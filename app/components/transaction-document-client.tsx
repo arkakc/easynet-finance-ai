@@ -80,6 +80,8 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[deleteBusy,setDeleteBusy]=useState(false);
   const[supplierQuoteItemsOpen,setSupplierQuoteItemsOpen]=useState(false);
   const[salesQuoteFulfilmentOpen,setSalesQuoteFulfilmentOpen]=useState(false);
+  const[supplierQuoteReadiness,setSupplierQuoteReadiness]=useState<any|null>(null);
+  const[supplierQuoteConvertBusy,setSupplierQuoteConvertBusy]=useState(false);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -149,6 +151,36 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const isCreditNote=type==="invoice"&&number.toUpperCase().startsWith("CN-");
   const rowStatus=String(record?.status||"DRAFT").toUpperCase();
   const publicStatus=type==="invoice"&&!isCreditNote&&["POSTED","PARTLY_PAID","PARTIAL"].includes(rowStatus)?"APPROVED":rowStatus;
+
+  const loadSupplierQuoteReadiness=useCallback(async()=>{
+    if(!isSupplierQuotation)return;
+    try{
+      const response=await fetch(`/api/erp/supplier-quote-readiness?supplierQuoteId=${encodeURIComponent(id)}`,{cache:"no-store"});
+      const body=await response.json();
+      if(response.ok&&body.ok)setSupplierQuoteReadiness(body.readiness||null);
+    }catch{}
+  },[isSupplierQuotation,id]);
+
+  useEffect(()=>{if(isSupplierQuotation&&["APPROVED","CONVERTED"].includes(rowStatus))void loadSupplierQuoteReadiness();},[isSupplierQuotation,rowStatus,loadSupplierQuoteReadiness]);
+
+  async function handleCreatePurchaseOrder(){
+    if(supplierQuoteConvertBusy)return;
+    setSupplierQuoteConvertBusy(true);
+    try{
+      const response=await fetch("/api/erp/purchase-conversions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({supplierQuoteId:id}),
+      });
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Supplier Quotation conversion failed");
+      window.location.assign(`/transactions/purchaseOrder/${encodeURIComponent(body.createdId)}?returnModule=purchase&returnTab=purchaseOrder&returnMode=list`);
+    }catch(error){
+      window.alert(error instanceof Error?error.message:"Supplier Quotation conversion failed");
+    }finally{
+      setSupplierQuoteConvertBusy(false);
+    }
+  }
   let title=config?.title||"Transaction Document";
   if(isSalesOrder)title="Sales Order";
   if(isSupplierQuotation)title="Supplier Quotation";
@@ -325,14 +357,25 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             Edit Draft
           </Link>
         )}
-        {isSupplierQuotation && ["APPROVED","CONVERTED"].includes(rowStatus) && (
-          <button
-            type="button"
-            onClick={() => setSupplierQuoteItemsOpen(true)}
-            title="Review and save temporary Supplier Quotation items"
-          >
-            Save Temp Items
-          </button>
+        {isSupplierQuotation && ["APPROVED","CONVERTED"].includes(rowStatus) && !supplierQuoteReadiness?.existingPo && (
+          supplierQuoteReadiness?.allItemsPermanent ? (
+            <button
+              type="button"
+              disabled={supplierQuoteConvertBusy}
+              onClick={() => void handleCreatePurchaseOrder()}
+              title="Create Purchase Order from this approved Supplier Quotation"
+            >
+              {supplierQuoteConvertBusy ? "Creating Purchase Order…" : "Create Purchase Order"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSupplierQuoteItemsOpen(true)}
+              title="Review and save temporary Supplier Quotation items"
+            >
+              Save Temp Items
+            </button>
+          )
         )}
         {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && (
           <button
@@ -492,7 +535,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
             <button type="button" className="secondary" onClick={() => setSupplierQuoteItemsOpen(false)}>Close</button>
           </div>
-          <SupplierQuoteItemReadiness supplierQuoteId={id}/>
+          <SupplierQuoteItemReadiness supplierQuoteId={id} onReadinessChange={(next)=>{setSupplierQuoteReadiness(next);if(next.allItemsPermanent&&!next.existingPo)setSupplierQuoteItemsOpen(false);}}/>
         </div>
       </div>
     )}
