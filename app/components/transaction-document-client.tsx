@@ -84,6 +84,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[supplierQuoteConvertBusy,setSupplierQuoteConvertBusy]=useState(false);
   const[poAdvanceOpen,setPoAdvanceOpen]=useState(false);
   const[poReceiptOpen,setPoReceiptOpen]=useState(false);
+  const[supplierBillSettlementOpen,setSupplierBillSettlementOpen]=useState(false);
 
   const loadDocument = useCallback(async (signal?: AbortSignal, showLoading = false) => {
     if (showLoading) setLoading(true);
@@ -406,6 +407,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </button>
           </>
         )}
+        {type === "supplierBill" && (
+          <button
+            type="button"
+            onClick={() => setSupplierBillSettlementOpen(true)}
+            title="Open Supplier Invoice settlement actions"
+          >
+            Invoice Settlement
+          </button>
+        )}
         <button
           type="button"
           disabled={deleteBusy}
@@ -509,7 +519,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       {isSalesOrder&&<SalesOrderCycle orderId={id}/>} 
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
       {type==="invoice"&&<LazyDocumentSection title={isCreditNote?"Credit Note / Refund Actions":"More Sales Invoice Actions"} description={isCreditNote?"Refundable credit controls are loaded only when requested.":"Customer advances and sales return controls are loaded only when requested."} buttonLabel={isCreditNote?"Open Refund / Credit Actions":"Open Advance / Return Actions"}><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
-      {type==="supplierBill"&&<LazyDocumentSection title="Supplier Invoice Settlement" description="Advance chain, allocations and downstream payment data are loaded on demand." buttonLabel="Open Supplier Invoice Settlement Actions">{supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={n(record.totalAmount)} billOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>} {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>} <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/></LazyDocumentSection>}
       {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&<LazyDocumentSection title="Payment / Receipt Follow-up" description="Linked advance history and downstream references are loaded only when requested." buttonLabel="Open Payment / Receipt Follow-up">{paymentPoId&&<SupplierAdvanceChainSummary context="payment" poId={paymentPoId} supplierId={String(record.partyId||"")} paymentId={id}/>} <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/></LazyDocumentSection>}
       {type==="expense"&&<DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>} 
@@ -688,6 +697,52 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <button type="button" className="secondary" onClick={() => setPoReceiptOpen(false)}>Close</button>
           </div>
           <PoPartialSupplyClose poId={id} poNumber={number}/>
+          <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
+        </div>
+      </div>
+    )}
+
+    {supplierBillSettlementOpen && type === "supplierBill" && record && (
+      <div
+        className="no-print"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Supplier Invoice Settlement"
+        onClick={() => setSupplierBillSettlementOpen(false)}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(15, 23, 42, 0.48)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          padding: "5vh 24px",
+          overflowY: "auto",
+        }}
+      >
+        <div
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            width: "min(1400px, 96vw)",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            background: "var(--surface, #ffffff)",
+            border: "1px solid var(--border, #dbe4f0)",
+            borderRadius: 16,
+            boxShadow: "0 24px 80px rgba(15, 23, 42, 0.25)",
+            padding: 18,
+          }}
+        >
+          <div className="form-title-row" style={{ marginBottom: 12 }}>
+            <div>
+              <strong>Supplier Invoice Settlement</strong>
+              <p className="small">Review supplier advances, allocations and downstream payment actions.</p>
+            </div>
+            <button type="button" className="secondary" onClick={() => setSupplierBillSettlementOpen(false)}>Close</button>
+          </div>
+          {supplierBillPoId&&<SupplierAdvanceChainSummary context="invoice" poId={supplierBillPoId} supplierId={String(record.supplierId||"")} billId={id} billNumber={number} billTotal={n(record.totalAmount)} billOutstanding={n(record.outstandingAmount??record.totalAmount??0)}/>}
+          {supplierBillPoId&&<SupplierInvoiceAdvanceAdjustment billId={id} billNumber={number} poId={supplierBillPoId} supplierId={String(record.supplierId||"")} outstandingAmount={n(record.outstandingAmount??record.totalAmount??0)} status={rowStatus}/>}
           <DocumentConversionActions type={type} id={id} status={rowStatus} documentNumber={number}/>
         </div>
       </div>
