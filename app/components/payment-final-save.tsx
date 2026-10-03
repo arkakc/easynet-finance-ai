@@ -64,7 +64,8 @@ export default function PaymentFinalSave({record}:{record:PaymentRecord}){
     try{const response=await fetch("/api/erp/advance-allocation",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paymentId:record.paymentId,partyType:record.partyType,againstDocumentType:customer?"Sales Invoice":"Supplier Invoice",againstDocumentId:documentId,amount,allocationDate:localDate(),idempotencyKey:crypto.randomUUID()})});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Advance allocation failed");setMessage(`Allocated ${money(body.result.allocatedAmount)} to ${label}. Advance remaining ${money(body.result.remainingAdvance)}; document outstanding ${money(body.result.documentOutstanding)}.`);await loadAdvanceWorkspace();router.refresh();}catch(error){setMessage(error instanceof Error?error.message:"Advance allocation failed");}finally{setBusy(false);}
   }
 
-  if(!approved&&!finalized)return null;
+  if(finalized)return null;
+  if(!approved)return null;
   const againstId=String(record.againstDocumentId||"");
   const navigation=<div className="button-row" style={{marginTop:14}}>
     {journalId&&<Link prefetch={false} className="button-link" href={`/journals/${encodeURIComponent(journalId)}`}>View Journal Entry · {journalId}</Link>}
