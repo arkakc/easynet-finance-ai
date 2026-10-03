@@ -11,7 +11,7 @@ type PaymentRecord={
 type CashBankAccount={accountId:string;accountCode:string;accountName:string;balance:number};
 type AdvanceSummary={allocatedAmount:number;remainingAmount:number;allocations:any[]};
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
-const eligibleStatus=(value:unknown)=>["POSTED","PARTLY_PAID"].includes(String(value||"").toUpperCase());
+const eligibleStatus=(value:unknown)=>["POSTED","PARTLY_PAID","PARTIAL"].includes(String(value||"").toUpperCase());
 function localDate(){const p=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());const v=Object.fromEntries(p.map(x=>[x.type,x.value]));return`${v.year}-${v.month}-${v.day}`;}
 function marker(record:PaymentRecord,prefix:"SQ"|"PO"){const match=String(record.reference||"").match(new RegExp(`^${prefix}:([^|]+)\\|`));return match?.[1]||"";}
 function partyLabel(record:PaymentRecord,masters:any){const id=String(record.partyId||"");if(!id)return"—";const rows=String(record.partyType||"")==="Supplier"?masters.suppliers||[]:masters.customers||[];const row=rows.find((item:any)=>String(item.supplierId||item.customerId||"")===id);const name=row?String(row.supplierName||row.customerName||id):id;return name!==id?`${name} (${id})`:id;}
