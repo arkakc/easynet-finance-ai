@@ -85,6 +85,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const[salesOrderActionsOpen,setSalesOrderActionsOpen]=useState(false);
   const[salesInvoiceSettlementOpen,setSalesInvoiceSettlementOpen]=useState(false);
   const[salesQuoteReadiness,setSalesQuoteReadiness]=useState<any|null>(null);
+  const[salesQuoteConvertBusy,setSalesQuoteConvertBusy]=useState(false);
   const[supplierQuoteReadiness,setSupplierQuoteReadiness]=useState<any|null>(null);
   const[supplierQuoteConvertBusy,setSupplierQuoteConvertBusy]=useState(false);
   const[poAdvanceOpen,setPoAdvanceOpen]=useState(false);
@@ -211,6 +212,25 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     })();
     return()=>{active=false;};
   },[type,id,isSalesOrder,rowStatus]);
+
+  async function handleCreateSalesOrder(){
+    if(salesQuoteConvertBusy)return;
+    setSalesQuoteConvertBusy(true);
+    try{
+      const response=await fetch("/api/erp/sales-order-conversion",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({quoteId:id,orderDate:new Intl.DateTimeFormat("en-CA",{timeZone:"Pacific/Port_Moresby"}).format(new Date())}),
+      });
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Sales Quotation conversion failed");
+      window.location.assign(`/transactions/quote/${encodeURIComponent(body.createdId)}?returnModule=sales&returnTab=salesOrder&returnMode=list`);
+    }catch(error){
+      window.alert(error instanceof Error?error.message:"Sales Quotation conversion failed");
+    }finally{
+      setSalesQuoteConvertBusy(false);
+    }
+  }
 
   async function handleCreatePurchaseOrder(){
     if(supplierQuoteConvertBusy)return;
@@ -443,13 +463,24 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         )}
         {type === "quote" && !isSalesOrder && QUOTE_ACTION_LIFECYCLE.has(rowStatus) && !documentLinks.some((link:any)=>Number(link.stage||0)===20) && (
           <>
-            <button
-              type="button"
-              onClick={() => setSalesQuoteFulfilmentOpen(true)}
-              title={salesQuoteReadiness?.temporaryLines?.length ? "Save temporary Sales Quotation items to Item Master" : "Create Sales Order from this Sales Quotation"}
-            >
-              {salesQuoteReadiness?.temporaryLines?.length ? "Save Temp Items" : "Create Sales Order"}
-            </button>
+            {salesQuoteReadiness?.temporaryLines?.length ? (
+              <button
+                type="button"
+                onClick={() => setSalesQuoteFulfilmentOpen(true)}
+                title="Save temporary Sales Quotation items to Item Master"
+              >
+                Save Temp Items
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={salesQuoteConvertBusy}
+                onClick={() => void handleCreateSalesOrder()}
+                title="Create Sales Order from this Sales Quotation"
+              >
+                {salesQuoteConvertBusy ? "Creating Sales Order…" : "Create Sales Order"}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSalesQuoteFulfilmentOpen(true)}
