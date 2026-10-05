@@ -150,13 +150,18 @@ export async function GET(request:Request){
     const id=new URL(request.url).searchParams.get("id")?.trim()||"";
     if(!id){
       const [persisted,legacy]=await Promise.all([prisma.purchaseReceipt.findMany({orderBy:{createdAt:"desc"}}),legacyReceipts()]);
-      const mapped=await Promise.all(persisted.map(async receipt=>{
+      const mapped=(await Promise.all(persisted.map(async receipt=>{
         const order=await resolvePurchaseOrder(receipt.purchaseOrderId);
+        if(!order)return null;
         const stored=parseItems(receipt.items);
         return mapReceipt(receipt,order,stored);
-      }));
+      }))).filter(Boolean);
       const byNumber=new Map(mapped.map((row:any)=>[String(row.receiptNumber),row]));
-      for(const row of legacy)if(!byNumber.has(String(row.receiptNumber)))byNumber.set(String(row.receiptNumber),row);
+      for(const row of legacy){
+        const sourceOrder=await resolvePurchaseOrder(String(row.purchaseOrderId||row.sourceDocumentId||""));
+        if(!sourceOrder)continue;
+        if(!byNumber.has(String(row.receiptNumber)))byNumber.set(String(row.receiptNumber),row);
+      }
       const purchaseReceipts=[...byNumber.values()].sort((a:any,b:any)=>new Date(b.createdAt||b.receiptDate||0).getTime()-new Date(a.createdAt||a.receiptDate||0).getTime());
       return NextResponse.json({ok:true,purchaseReceipts});
     }
