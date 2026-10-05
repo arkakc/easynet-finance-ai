@@ -86,10 +86,10 @@ export async function GET(request: Request) {
         listTable<any>("StockMovements", 500, 0),
       ]);
 
-      const deliveryNotes = await Promise.all(notes.map(async (note) => {
+      const deliveryNotes = (await Promise.all(notes.map(async (note) => {
         const order = await resolveSalesOrder(note.salesOrderId);
-        return mapDeliveryNote(note, order);
-      }));
+        return order ? mapDeliveryNote(note, order) : null;
+      }))).filter(Boolean);
 
       const byNumber = new Map<string, any>(
         deliveryNotes.map((row: any) => [String(row.deliveryNumber || row.deliveryId || ""), row]),
@@ -129,24 +129,23 @@ export async function GET(request: Request) {
 
       for (const legacy of legacyGroups.values()) {
         const order = await resolveSalesOrder(String(legacy.salesOrderId || ""));
-        if (order) {
-          legacy.salesOrderNumber = order.code;
-          legacy.customerId = order.customer?.code || "";
-          legacy.customerName = order.customer?.name || "";
-          legacy.projectId = order.project?.code || legacy.projectId || "";
-          legacy.projectName = order.project?.name || "";
-          legacy.totalAmount = Number(order.total || legacy.totalAmount || 0);
-          legacy.lines = (order.lines || []).map((line: any) => ({
-            lineId: line.id,
-            itemId: line.itemId || "",
-            itemCode: line.item?.code || line.itemId || "",
-            itemName: line.item?.name || line.description || "",
-            itemType: line.item?.type === "GOOD" ? "STOCK" : line.item?.type === "SERVICE" ? "SERVICE" : "NON_STOCK",
-            description: line.description || "",
-            qty: Number(line.quantity || 0),
-            uom: line.unit || line.item?.unit || "Each",
-          }));
-        }
+        if (!order) continue;
+        legacy.salesOrderNumber = order.code;
+        legacy.customerId = order.customer?.code || "";
+        legacy.customerName = order.customer?.name || "";
+        legacy.projectId = order.project?.code || legacy.projectId || "";
+        legacy.projectName = order.project?.name || "";
+        legacy.totalAmount = Number(order.total || legacy.totalAmount || 0);
+        legacy.lines = (order.lines || []).map((line: any) => ({
+          lineId: line.id,
+          itemId: line.itemId || "",
+          itemCode: line.item?.code || line.itemId || "",
+          itemName: line.item?.name || line.description || "",
+          itemType: line.item?.type === "GOOD" ? "STOCK" : line.item?.type === "SERVICE" ? "SERVICE" : "NON_STOCK",
+          description: line.description || "",
+          qty: Number(line.quantity || 0),
+          uom: line.unit || line.item?.unit || "Each",
+        }));
         byNumber.set(String(legacy.deliveryNumber), legacy);
       }
 
