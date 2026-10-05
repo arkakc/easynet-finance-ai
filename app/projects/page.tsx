@@ -1,9 +1,10 @@
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
+import ProjectLifecycleActions from "@/app/components/project-lifecycle-actions";
 
 export const dynamic = "force-dynamic";
 
-type Project = { projectId: string; projectName: string; customerId: string; status: string; contractTotal: number | string; expectedCost: number | string };
+type Project = { projectId: string; projectName: string; customerId: string; status: string; contractTotal: number | string; expectedCost: number | string; usageCount?: number };
 type Account = { accountId: string; accountType: string };
 type JournalLine = { accountId: string; projectId: string; debit: number | string; credit: number | string };
 type PurchaseOrder = { poId: string; projectId: string; totalAmount: number | string; status: string };
@@ -26,13 +27,30 @@ export default async function ProjectsPage() {
     const backendConfigured = false;
     if (!backendConfigured) {
       const [p, a, j, po, b] = await Promise.all([
-        prisma.project.findMany(),
+        prisma.project.findMany({
+          include: {
+            _count: {
+              select: {
+                quotes: true,
+                invoices: true,
+                purchaseOrders: true,
+                bills: true,
+                payments: true,
+                creditNotes: true,
+                refunds: true,
+                expenses: true,
+                timeEntries: true,
+                budgets: true,
+              },
+            },
+          },
+        }),
         prisma.chartOfAccounts.findMany(),
         prisma.journalLine.findMany({ include: { journal: true } }),
         prisma.purchaseOrder.findMany(),
         prisma.supplierBill.findMany(),
       ]);
-      projects = p.map((row) => ({ projectId: row.id, projectName: row.name, customerId: row.customerId || "", status: row.status, contractTotal: Number(row.budget || 0), expectedCost: 0 }));
+      projects = p.map((row) => ({ projectId: row.id, projectName: row.name, customerId: row.customerId || "", status: row.status, contractTotal: Number(row.budget || 0), expectedCost: 0, usageCount: Object.values(row._count || {}).reduce((sum, value) => sum + Number(value || 0), 0) }));
       accounts = a.map((row) => ({ accountId: row.id, accountType: row.type }));
       lines = j.filter((row) => row.journal.status === "POSTED").map((row) => ({ accountId: row.accountId, projectId: row.projectId || "", debit: Number(row.debit), credit: Number(row.credit) }));
       pos = po.map((row) => ({ poId: row.id, projectId: row.projectId || "", totalAmount: Number(row.total), status: row.status }));
@@ -73,6 +91,7 @@ export default async function ProjectsPage() {
     return { ...project, revenue, cost, grossProfit, margin, commitments, billTotal, openCommitment };
   });
 
+  const activeProjects = rows.filter((row) => String(row.status || "").toUpperCase() === "ACTIVE").length;
   const totalContract = rows.reduce((sum, r) => sum + n(r.contractTotal), 0);
   const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0);
   const totalCost = rows.reduce((sum, r) => sum + r.cost, 0);
@@ -104,7 +123,7 @@ export default async function ProjectsPage() {
       <div className="grid">
         <div className="card">
           <div className="label">Active Projects</div>
-          <div className="value">{projects.length}</div>
+          <div className="value">{activeProjects}</div>
         </div>
         <div className="card">
           <div className="label">Total Contract Value</div>
@@ -134,6 +153,7 @@ export default async function ProjectsPage() {
               <th>Margin</th>
               <th>PO Commitments</th>
               <th>Open Commitment</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -149,9 +169,10 @@ export default async function ProjectsPage() {
                 <td>{row.margin.toFixed(1)}%</td>
                 <td>{money(row.commitments)}</td>
                 <td>{money(row.openCommitment)}</td>
+                <td><ProjectLifecycleActions projectId={row.projectId} projectName={row.projectName} status={row.status} usageCount={Number(row.usageCount||0)} /></td>
               </tr>
             ))}
-            {!rows.length && !error && <tr><td colSpan={10}>No projects found.</td></tr>}
+            {!rows.length && !error && <tr><td colSpan={11}>No projects found.</td></tr>}
           </tbody>
         </table>
       </section>
