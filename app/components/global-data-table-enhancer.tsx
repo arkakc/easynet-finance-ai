@@ -211,7 +211,17 @@ function ensureDoctypeListToolbar(table: HTMLTableElement, headerRow: HTMLTableR
   count.className = "small";
   count.dataset.doctypeCount = "true";
 
-  toolbar.append(searchLabel, label, directionButton, loadButton, count);
+  const controls=document.createElement("div");
+  controls.className="adjustable-table-controls";
+  controls.append(searchLabel,label,directionButton,loadButton,count);
+  toolbar.append(controls);
+
+  const lifecycleActions = (wrap.querySelector(":scope > .list-lifecycle-actions") || wrap.parentElement?.querySelector(":scope > .list-lifecycle-actions")) as HTMLElement | null;
+  if(lifecycleActions){
+    lifecycleActions.classList.add("adjustable-table-actions");
+    toolbar.append(lifecycleActions);
+  }
+
   if (Array.from(wrap.children).some((child) => child.classList.contains("doctype-list-toolbar"))) return;
   const previous = wrap.previousElementSibling as HTMLElement | null;
   if (previous?.classList.contains("doctype-list-toolbar")) return;
