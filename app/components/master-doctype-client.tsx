@@ -132,7 +132,9 @@ export default function MasterDoctypeClient({ type, title, description, createLa
     void loadRows();
   }, [loadRows]);
 
-  const activeCount = useMemo(() => rows.filter((row) => activeLabel(row.active) === "Active").length, [rows]);
+  const activeCount = useMemo(() => rows.filter((row) => type==="project"
+    ? !["ON_HOLD","CANCELLED"].includes(String(row.status||"").toUpperCase())
+    : activeLabel(row.active) === "Active").length, [rows,type]);
 
   function masterUsage(row:MasterRow){return Number(row.usageCount||0);}
   function projectInactive(row:MasterRow){return ["ON_HOLD","CANCELLED"].includes(String(row.status||"").toUpperCase());}
