@@ -16,6 +16,8 @@ export type TransactionSummary = {
   purchaseOrders: number;
   poLines: number;
   goodsReceipts: number;
+  purchaseReceipts: number;
+  deliveryNotes: number;
   supplierBills: number;
   billLines: number;
   payments: number;
@@ -53,6 +55,8 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     purchaseOrders,
     poLines,
     goodsReceipts,
+    purchaseReceipts,
+    deliveryNotes,
     supplierBills,
     billLines,
     payments,
@@ -86,6 +90,8 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     client.purchaseOrder.count(),
     client.pOLine.count(),
     client.goodsReceipt.count(),
+    client.purchaseReceipt.count(),
+    client.deliveryNote.count(),
     client.supplierBill.count(),
     client.billLine.count(),
     client.payment.count(),
@@ -123,6 +129,8 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     creditNotes +
     purchaseOrders +
     goodsReceipts +
+    purchaseReceipts +
+    deliveryNotes +
     supplierBills +
     payments +
     paymentAllocations +
@@ -153,6 +161,8 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     purchaseOrders,
     poLines,
     goodsReceipts,
+    purchaseReceipts,
+    deliveryNotes,
     supplierBills,
     billLines,
     payments,
@@ -237,7 +247,8 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
     // 8. Time entries
     await tx.timeEntry.deleteMany({});
 
-    // 9. Goods receipts & Purchase Orders & Supplier Bills
+    // 9. Purchase receipts / GRN, legacy goods receipts, Purchase Orders & Supplier Bills
+    await tx.purchaseReceipt.deleteMany({});
     await tx.goodsReceipt.deleteMany({});
     await tx.pOLine.deleteMany({});
     await tx.billLine.deleteMany({});
@@ -249,7 +260,8 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
     await tx.purchaseOrder.deleteMany({});
     await tx.supplierBill.deleteMany({});
 
-    // 10. Quotes
+    // 10. Delivery Notes / Stock Out and Sales Quotations / Sales Orders
+    await tx.deliveryNote.deleteMany({});
     await tx.quoteLine.deleteMany({});
     await tx.quote.deleteMany({});
 
