@@ -471,7 +471,7 @@ async function createWarehouseTransfer(raw: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "bulkDeleteItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "activateItem" | "bulkDeleteItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -502,6 +502,16 @@ export async function POST(request: Request) {
       if (!itemId) throw new Error("Item ID is required");
       const result = await prismaDeleteItem(itemId);
       return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (body.action === "activateItem") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemRef = String(raw.itemId || raw.id || raw.code || "").trim();
+      if (!itemRef) throw new Error("Item ID is required");
+      const item = await prisma.item.findFirst({ where: { OR: [{ id: itemRef }, { code: itemRef }] } });
+      if (!item) throw new Error("Item not found");
+      const updated = item.isActive ? item : await prisma.item.update({ where: { id: item.id }, data: { isActive: true } });
+      return NextResponse.json({ ok: true, activated: true, itemId: updated.id, itemCode: updated.code, itemName: updated.name, active: updated.isActive });
     }
 
     if (body.action === "bulkDeleteItems") {
