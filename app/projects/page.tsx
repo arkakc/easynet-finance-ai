@@ -1,6 +1,6 @@
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
-import ProjectLifecycleActions from "@/app/components/project-lifecycle-actions";
+import ProjectLifecycleTable from "@/app/components/project-lifecycle-table";
 
 export const dynamic = "force-dynamic";
 
@@ -139,43 +139,20 @@ export default async function ProjectsPage() {
         </div>
       </div>
 
-      <section className="panel table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th>Customer</th>
-              <th>Status</th>
-              <th>Contract</th>
-              <th>Revenue</th>
-              <th>Posted Cost</th>
-              <th>Gross Profit</th>
-              <th>Margin</th>
-              <th>PO Commitments</th>
-              <th>Open Commitment</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.projectId}>
-                <td><strong>{row.projectName}</strong><br/><span className="small">{row.projectId}</span></td>
-                <td>{row.customerId || "—"}</td>
-                <td><span className="auto-badge">{row.status}</span></td>
-                <td>{money(n(row.contractTotal))}</td>
-                <td>{money(row.revenue)}</td>
-                <td>{money(row.cost)}</td>
-                <td><strong>{money(row.grossProfit)}</strong></td>
-                <td>{row.margin.toFixed(1)}%</td>
-                <td>{money(row.commitments)}</td>
-                <td>{money(row.openCommitment)}</td>
-                <td><ProjectLifecycleActions projectId={row.projectId} projectName={row.projectName} status={row.status} usageCount={Number(row.usageCount||0)} /></td>
-              </tr>
-            ))}
-            {!rows.length && !error && <tr><td colSpan={11}>No projects found.</td></tr>}
-          </tbody>
-        </table>
-      </section>
+      <ProjectLifecycleTable rows={rows.map((row)=>({
+        projectId:row.projectId,
+        projectName:row.projectName,
+        customerId:row.customerId,
+        status:row.status,
+        contractTotal:n(row.contractTotal),
+        revenue:row.revenue,
+        cost:row.cost,
+        grossProfit:row.grossProfit,
+        margin:row.margin,
+        commitments:row.commitments,
+        openCommitment:row.openCommitment,
+        usageCount:Number(row.usageCount||0),
+      }))} error={error}/>
     </>
   );
 }
