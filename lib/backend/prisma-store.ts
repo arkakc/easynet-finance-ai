@@ -2095,7 +2095,7 @@ export async function prismaBulkDisableItems(itemRefs: string[]) {
 
   return {
     results,
-    disabledCount: 0,
+    disabledCount: results.filter((row: any) => row.ok && row.disabled).length,
     failedCount: results.filter((row: any) => !row.ok).length,
   };
 }
@@ -2122,7 +2122,7 @@ export async function prismaBulkDeleteItems(itemRefs: string[]) {
   return {
     results,
     deletedCount: results.filter((row: any) => row.ok && row.deleted).length,
-    disabledCount: results.filter((row: any) => row.ok && row.disabled).length,
+    disabledCount: 0,
     failedCount: results.filter((row: any) => !row.ok).length,
   };
 }
