@@ -37,6 +37,7 @@ type DoctypeListRow = {
   statusText:string;
   action:ReactNode;
   rowClassName?:string;
+  source?:any;
 };
 
 const emptyMaster:Master={customers:[],suppliers:[],projects:[]};
@@ -94,6 +95,8 @@ export default function TransactionsWorkspaceV5(){
   const[status,setStatus]=useState("");const[selectedParty,setSelectedParty]=useState("");const[partyInput,setPartyInput]=useState("");const[expenseSupplier,setExpenseSupplier]=useState("");const[expenseSupplierInput,setExpenseSupplierInput]=useState("");const[lines,setLines]=useState<TransactionDraftLine[]>([emptyTransactionLine()]);const[gstRate,setGstRate]=useState("10");const[nextDocumentNo,setNextDocumentNo]=useState("AUTO");const[saving,setSaving]=useState(false);const[approvalBusy,setApprovalBusy]=useState("");const[conversionBusy,setConversionBusy]=useState("");const[accountOptions,setAccountOptions]=useState<AccountOption[]>([]);
   const[quickModal,setQuickModal]=useState<MasterType|null>(null);const[selectedProjectId,setSelectedProjectId]=useState<string>("");const[invoiceAccountOverride,setInvoiceAccountOverride]=useState("");const[expenseAccountId,setExpenseAccountId]=useState("");const[cashBankAccountId,setCashBankAccountId]=useState("");const[baseCurrency,setBaseCurrency]=useState("PGK");const[documentCurrency,setDocumentCurrency]=useState("PGK");const[documentExchangeRate,setDocumentExchangeRate]=useState("");
   const[deleteBusy,setDeleteBusy]=useState<string>("");
+  const[selectedListKeys,setSelectedListKeys]=useState<string[]>([]);
+  const[bulkDeleteBusy,setBulkDeleteBusy]=useState(false);
 
   function syncUrl(nextModule:Module,nextTab:Tab,nextMode:SectionMode){const params=new URLSearchParams(searchParams.toString());params.set("module",nextModule);params.set("tab",nextTab);params.set("mode",nextMode);router.replace(`${pathname}?${params.toString()}`,{scroll:false});}
 
@@ -139,6 +142,8 @@ export default function TransactionsWorkspaceV5(){
 
   useEffect(()=>{const params=new URLSearchParams(searchParamsKey);const requestedModule=params.get("module");const resolvedModule:Module=requestedModule==="purchase"||requestedModule==="expense"?requestedModule:"sales";const requestedTab=params.get("tab") as Tab|null;const resolvedTab=requestedTab&&MODULE_TABS[resolvedModule].includes(requestedTab)?requestedTab:defaultTab(resolvedModule);const requestedMode=params.get("mode");const resolvedMode:SectionMode=requestedMode==="create"?requestedMode:"list";setModule(resolvedModule);setTab(resolvedTab);setSectionMode(resolvedMode);setInitialized(true);},[searchParamsKey]);
   useEffect(()=>{if(!initialized)return;if(sectionMode==="list"){void loadTransactions(true);if(!mastersLoaded)void loadMasters();if(tab==="purchaseOrder"&&!receiptStatesLoaded)void loadReceiptStates();}if(sectionMode==="create"){if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder","supplierInvoice","expense"].includes(tab)&&!mastersLoaded)void loadMasters();if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder"].includes(tab)&&!itemsLoaded)void loadItems();if(["supplierInvoice","deliveryNote","purchaseReceipt"].includes(tab)&&!existingLoaded)void loadTransactions();if(tab==="expense"||tab==="salesInvoice")void loadAccountOptions();if(numberMeta[tab])void loadNextDocumentNo(tab);}},[initialized,sectionMode,tab]);
+
+  useEffect(()=>{setSelectedListKeys([]);},[tab,sectionMode]);
 
   const salesSide=module==="sales";const commercial=["salesQuote","supplierQuote"].includes(tab);const controlledCreateBlocked=["salesOrder","salesInvoice","purchaseOrder","supplierInvoice"].includes(tab);const supplierQuotation=tab==="supplierQuote";const partyOptions=salesSide?masters.customers:masters.suppliers;
   const projectOptions=useMemo(()=>{if(!salesSide||!selectedParty)return masters.projects;const linked=masters.projects.filter(project=>String(project.customerId||"")===selectedParty);return linked.length?linked:masters.projects;},[salesSide,selectedParty,masters.projects]);
@@ -343,6 +348,59 @@ export default function TransactionsWorkspaceV5(){
   const section=SECTION_META[tab];const title=module==="sales"?"Sales Transactions":module==="purchase"?"Purchase Transactions":"Expenses";const numberLabel=numberMeta[tab]?.label||"Auto Document No";
 
   function existingCount(){if(tab==="salesQuote")return tx.quotes.length;if(tab==="salesOrder")return tx.salesOrders.length;if(tab==="deliveryNote")return tx.deliveryNotes.length;if(tab==="salesInvoice")return tx.invoices.length;if(tab==="salesPayment")return tx.payments.filter(r=>r.partyType==="Customer").length;if(tab==="supplierQuote")return tx.supplierQuotes.length;if(tab==="purchaseOrder")return tx.purchaseOrders.length;if(tab==="purchaseReceipt")return tx.purchaseReceipts.length;if(tab==="supplierInvoice")return tx.supplierBills.length;if(tab==="purchasePayment")return tx.payments.filter(r=>r.partyType==="Supplier").length;return tx.expenses.length;}
+  function listDeleteMeta(row:DoctypeListRow){
+    const source=row.source||{};
+    const statusKey=normalizedStatus(source.status);
+    const type:RecordType|null=
+      tab==="salesQuote"||tab==="salesOrder"?"quote":
+      tab==="salesInvoice"?"invoice":
+      tab==="supplierQuote"||tab==="purchaseOrder"?"purchaseOrder":
+      tab==="supplierInvoice"?"supplierBill":
+      tab==="salesPayment"||tab==="purchasePayment"?"payment":
+      tab==="expense"?"expense":null;
+    if(!type)return null;
+    const id=String(
+      type==="quote"?source.quoteId:
+      type==="invoice"?source.invoiceId:
+      type==="purchaseOrder"?source.poId:
+      type==="supplierBill"?source.billId:
+      type==="payment"?source.paymentId:
+      source.expenseId||row.docId
+    );
+    const eligible=
+      type==="payment"?statusKey==="PENDING":
+      type==="expense"?!source.journalId&&!source.glPosted&&!source.approvedAt&&!source.approvedBy:
+      statusKey==="DRAFT";
+    return id&&eligible?{type,id,docNumber:row.docNumber}:null;
+  }
+
+  async function bulkDeleteListRows(rowsToDelete:DoctypeListRow[]){
+    const targets=rowsToDelete.map(row=>({row,meta:listDeleteMeta(row)})).filter(entry=>entry.meta) as Array<{row:DoctypeListRow;meta:{type:RecordType;id:string;docNumber:string}}>;
+    if(!targets.length||bulkDeleteBusy)return;
+    if(!window.confirm(`Delete ${targets.length} selected draft/unposted document(s)?\n\nPosted, approved, converted or linked financial documents are never bulk-deleted.`))return;
+    setBulkDeleteBusy(true);setStatus("Deleting selected draft/unposted documents…");
+    let success=0,failed=0,lastError="";
+    for(const target of targets){
+      try{
+        const response=await fetch("/api/erp/transactions",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"deleteDocument",payload:{type:target.meta.type,id:target.meta.id}})
+        });
+        const body=await response.json();
+        if(!response.ok||!body.ok)throw new Error(body.error||"Delete failed");
+        success+=1;
+      }catch(error){
+        failed+=1;
+        lastError=error instanceof Error?error.message:"Delete failed";
+      }
+    }
+    setSelectedListKeys([]);
+    setStatus(`Bulk delete: ${success} deleted, ${failed} failed.${failed&&lastError?` ${lastError}`:""}`);
+    await loadTransactions(true);
+    setBulkDeleteBusy(false);
+  }
+
   const emptyAction=<span className="small">—</span>;
   const listColumns:AdjustableColumn<DoctypeListRow>[]=[
     {key:"docId",label:"Doc ID",mandatory:true,defaultWidth:220,sortValue:row=>row.docNumber,value:row=><Link prefetch={false} href={row.href}><strong>{row.docNumber}</strong></Link>},
@@ -350,14 +408,21 @@ export default function TransactionsWorkspaceV5(){
     {key:"partyProject",label:"Supplier/Customer & project",mandatory:true,defaultWidth:300,sortValue:row=>row.partyProjectText,value:row=>row.partyProject},
     {key:"amount",label:"Total/Amount",defaultWidth:170,sortValue:row=>row.amountValue,value:row=>row.amount},
     {key:"status",label:"Status",defaultWidth:180,sortValue:row=>row.statusText,value:row=>row.status},
-    {key:"action",label:"Action CTA Only Approve & Convert",defaultWidth:340,sortValue:row=>row.statusText,value:row=><div className="row-actions">{row.action||emptyAction}</div>},
+    {key:"action",label:"Action",defaultWidth:340,sortValue:row=>row.statusText,value:row=><div className="row-actions">{row.action||emptyAction}</div>},
   ];
-  const makeListRow=(row:Omit<DoctypeListRow,"createdAtLabel"|"createdAtValue"|"statusText">&{source:any;statusText?:string}):DoctypeListRow=>({
-    ...row,
-    createdAtLabel:createdLabel(row.source),
-    createdAtValue:createdValue(row.source),
-    statusText:row.statusText||normalizedStatus(row.source?.status),
-  });
+  const makeListRow=(row:Omit<DoctypeListRow,"createdAtLabel"|"createdAtValue"|"statusText">&{source:any;statusText?:string}):DoctypeListRow=>{
+    const base:DoctypeListRow={
+      ...row,
+      createdAtLabel:createdLabel(row.source),
+      createdAtValue:createdValue(row.source),
+      statusText:row.statusText||normalizedStatus(row.source?.status),
+    };
+    const meta=listDeleteMeta(base);
+    if(meta){
+      base.action=<>{base.action}{deleteAction(meta.type,meta.id,meta.docNumber)}</>;
+    }
+    return base;
+  };
 
   function existingRows():DoctypeListRow[]{
     if(tab==="salesQuote")return newest(tx.quotes).map(row=>{const linkedOrders=linkedSalesOrdersForQuote(row);const linkedOrder=linkedOrders[0];const statusKey=normalizedStatus(row.status);const convertedStatus=linkedOrder?`${statusKey==="APPROVED"?"APPROVED & ":""}CONVERTED`:statusKey;const canConvert=QUOTE_CONVERSION_STATUSES.has(statusKey)&&!linkedOrder;return makeListRow({source:row,key:String(row.quoteId),docId:String(row.quoteId),docNumber:String(row.quoteNumber||row.quoteId),href:documentHref("quote",row.quoteId,"list"),partyProject:<>{customerLabel(row.customerId)}<br/><span className="small">{projectLabel(row.projectId)}</span></>,partyProjectText:`${customerLabel(row.customerId)} ${projectLabel(row.projectId)}`,amount:money(row.totalAmount),amountValue:Number(row.totalAmount||0),status:<>{convertedStatus}{linkedOrder&&<><br/><span className="small">→ Sales Order {linkedOrder.quoteNumber||linkedOrder.quoteId}</span></>}</>,statusText:convertedStatus,action:approvalAction("quote",row.quoteId,row.status)||(!linkedOrder&&canConvert?<button type="button" disabled={globallyBusy} onClick={()=>void createSalesOrderFromQuote(row,"list")}>{conversionBusy===`so:${row.quoteId}`?"Converting…":"Convert to Sales Order"}</button>:null)});});
@@ -502,6 +567,10 @@ export default function TransactionsWorkspaceV5(){
         rowClassName={(row)=>row.rowClassName}
         defaultSortKey="createdAt"
         defaultSortDirection="desc"
+        selectable
+        selectedKeys={selectedListKeys}
+        onSelectionChange={setSelectedListKeys}
+        toolbarActions={<button type="button" className="danger-button" disabled={bulkDeleteBusy||!existingRows().some(row=>selectedListKeys.includes(row.key)&&Boolean(listDeleteMeta(row)))} onClick={()=>void bulkDeleteListRows(existingRows().filter(row=>selectedListKeys.includes(row.key)&&Boolean(listDeleteMeta(row))))}>{bulkDeleteBusy?"Deleting…":"Delete Selected Drafts"}</button>}
       />
     </section>}
 
