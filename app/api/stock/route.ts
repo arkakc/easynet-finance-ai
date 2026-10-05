@@ -144,7 +144,23 @@ export async function GET(request: Request) {
     if (!backendConfigured) {
       await prisma.$transaction(async (tx) => { await ensureDefaultWarehouse(tx); });
       const [items, movements, purchaseOrders, poLines, warehouses, warehouseBalances] = await Promise.all([
-        prisma.item.findMany({ orderBy: { code: "asc" } }),
+        prisma.item.findMany({
+          include: {
+            _count: {
+              select: {
+                purchaseOrderLines: true,
+                quoteLines: true,
+                invoiceLines: true,
+                billLines: true,
+                stockMovements: true,
+                landedCostItems: true,
+              },
+            },
+            stock: true,
+            warehouseBalances: true,
+          },
+          orderBy: { code: "asc" },
+        }),
         prisma.stockMovement.findMany({ include: { warehouse: true }, orderBy: { createdAt: "desc" } }),
         prisma.purchaseOrder.findMany({ include: { lines: true }, orderBy: { code: "asc" } }),
         prisma.pOLine.findMany(),
@@ -168,6 +184,25 @@ export async function GET(request: Request) {
           };
         }), Number(item.purchasePrice || 0));
         const stockValue = state.value;
+        const usageCount =
+          Number(item._count?.purchaseOrderLines || 0)
+          + Number(item._count?.quoteLines || 0)
+          + Number(item._count?.invoiceLines || 0)
+          + Number(item._count?.billLines || 0)
+          + Number(item._count?.stockMovements || 0)
+          + Number(item._count?.landedCostItems || 0);
+        const nonZeroStock =
+          (item.stock || []).some((row: any) =>
+            Math.abs(Number(row.quantity || 0)) > 0.0001
+            || Math.abs(Number(row.reserved || 0)) > 0.0001
+            || Math.abs(Number(row.available || 0)) > 0.0001
+          )
+          || (item.warehouseBalances || []).some((row: any) =>
+            Math.abs(Number(row.quantity || 0)) > 0.0001
+            || Math.abs(Number(row.reserved || 0)) > 0.0001
+            || Math.abs(Number(row.available || 0)) > 0.0001
+            || Math.abs(Number(row.stockValue || 0)) > 0.005
+          );
         return {
           itemId: item.id,
           itemCode: item.code,
@@ -179,6 +214,8 @@ export async function GET(request: Request) {
           defaultRate: state.rate,
           taxCode: item.taxCode || "",
           active: item.isActive !== false,
+          canDelete: usageCount === 0 && !nonZeroStock,
+          usageCount,
           stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
