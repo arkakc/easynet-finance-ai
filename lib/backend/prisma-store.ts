@@ -2017,7 +2017,7 @@ export async function prismaItemUsage(itemRef: string) {
 
   return {
     item: existing,
-    canDelete: usageCount === 0 && !nonZeroStock,
+    canDelete: usageCount === 0,
     usageCount,
     nonZeroStock,
     reasons,
@@ -2029,19 +2029,9 @@ export async function prismaDeleteItem(itemId: string) {
   const existing = usage.item;
 
   if (!usage.canDelete) {
-    const updated = existing.isActive
-      ? await prisma.item.update({ where: { id: existing.id }, data: { isActive: false } })
-      : existing;
-    return {
-      deleted: false,
-      disabled: true,
-      itemId: existing.id,
-      itemCode: existing.code,
-      itemName: existing.name,
-      active: updated.isActive,
-      reason: `Item is retained for audit/history because it has prior usage: ${usage.reasons.join(", ")}.`,
-      usage: usage.reasons,
-    };
+    throw new Error(
+      `Cannot delete item ${existing.code}: transaction/history exists (${usage.reasons.join(", ")}). Disable the item instead.`,
+    );
   }
 
   await prisma.$transaction(async (tx) => {
@@ -2060,6 +2050,56 @@ export async function prismaDeleteItem(itemId: string) {
   };
 }
 
+export async function prismaDisableItem(itemRef: string) {
+  const usage = await prismaItemUsage(itemRef);
+  const existing = usage.item;
+
+  if (usage.usageCount === 0) {
+    throw new Error(
+      `Cannot disable item ${existing.code}: no transaction/history exists. Delete the unused item instead.`,
+    );
+  }
+
+  const updated = existing.isActive
+    ? await prisma.item.update({ where: { id: existing.id }, data: { isActive: false } })
+    : existing;
+
+  return {
+    disabled: true,
+    deleted: false,
+    itemId: updated.id,
+    itemCode: updated.code,
+    itemName: updated.name,
+    active: updated.isActive,
+    usage: usage.reasons,
+  };
+}
+
+export async function prismaBulkDisableItems(itemRefs: string[]) {
+  const uniqueRefs = [...new Set(itemRefs.map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!uniqueRefs.length) throw new Error("Select at least one Item Master record");
+
+  const results = [];
+  for (const ref of uniqueRefs) {
+    try {
+      results.push({ ref, ok: true, ...(await prismaDisableItem(ref)) });
+    } catch (error) {
+      results.push({
+        ref,
+        ok: false,
+        disabled: false,
+        error: error instanceof Error ? error.message : "Item disable failed",
+      });
+    }
+  }
+
+  return {
+    results,
+    disabledCount: results.filter((row: any) => row.ok && row.disabled).length,
+    failedCount: results.filter((row: any) => !row.ok).length,
+  };
+}
+
 export async function prismaBulkDeleteItems(itemRefs: string[]) {
   const uniqueRefs = [...new Set(itemRefs.map((value) => String(value || "").trim()).filter(Boolean))];
   if (!uniqueRefs.length) throw new Error("Select at least one Item Master record");
@@ -2074,7 +2114,7 @@ export async function prismaBulkDeleteItems(itemRefs: string[]) {
         ok: false,
         deleted: false,
         disabled: false,
-        error: error instanceof Error ? error.message : "Item delete / disable failed",
+        error: error instanceof Error ? error.message : "Item delete failed",
       });
     }
   }
@@ -2082,7 +2122,7 @@ export async function prismaBulkDeleteItems(itemRefs: string[]) {
   return {
     results,
     deletedCount: results.filter((row: any) => row.ok && row.deleted).length,
-    disabledCount: results.filter((row: any) => row.ok && row.disabled).length,
+    disabledCount: 0,
     failedCount: results.filter((row: any) => !row.ok).length,
   };
 }

@@ -18,7 +18,7 @@ import {
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { postPurchaseReceiptAtomic, postStockMovementAtomic, postStockValueAdjustmentAtomic, transferStockAtomic } from "@/lib/accounting/atomic-stock";
 import { ensureDefaultWarehouse } from "@/lib/accounting/warehouse-stock";
-import { prismaBulkDeleteItems, prismaDeleteItem } from "@/lib/backend/prisma-store";
+import { prismaBulkDeleteItems, prismaBulkDisableItems, prismaDeleteItem, prismaDisableItem } from "@/lib/backend/prisma-store";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
@@ -222,7 +222,7 @@ export async function GET(request: Request) {
           defaultRate: state.rate,
           taxCode: item.taxCode || "",
           active: item.isActive !== false,
-          canDelete: usageCount === 0 && !nonZeroStock,
+          canDelete: usageCount === 0,
           usageCount,
           usageReasons,
           stockQty: state.qty,
@@ -480,7 +480,7 @@ async function createWarehouseTransfer(raw: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "activateItem" | "bulkDeleteItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "disableItem" | "activateItem" | "bulkDeleteItems" | "bulkDisableItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -513,6 +513,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ...result });
     }
 
+    if (body.action === "disableItem") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemId = String(raw.itemId || raw.id || raw.code || "").trim();
+      if (!itemId) throw new Error("Item ID is required");
+      const result = await prismaDisableItem(itemId);
+      return NextResponse.json({ ok: true, ...result });
+    }
+
     if (body.action === "activateItem") {
       const raw = (body.record || {}) as Record<string, unknown>;
       const itemRef = String(raw.itemId || raw.id || raw.code || "").trim();
@@ -527,6 +535,13 @@ export async function POST(request: Request) {
       const raw = (body.record || {}) as Record<string, unknown>;
       const itemIds = Array.isArray(raw.itemIds) ? raw.itemIds.map((value) => String(value || "").trim()).filter(Boolean) : [];
       const result = await prismaBulkDeleteItems(itemIds);
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (body.action === "bulkDisableItems") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemIds = Array.isArray(raw.itemIds) ? raw.itemIds.map((value) => String(value || "").trim()).filter(Boolean) : [];
+      const result = await prismaBulkDisableItems(itemIds);
       return NextResponse.json({ ok: true, ...result });
     }
 
