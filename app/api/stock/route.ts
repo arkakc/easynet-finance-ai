@@ -18,6 +18,7 @@ import {
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { postPurchaseReceiptAtomic, postStockMovementAtomic, postStockValueAdjustmentAtomic, transferStockAtomic } from "@/lib/accounting/atomic-stock";
 import { ensureDefaultWarehouse } from "@/lib/accounting/warehouse-stock";
+import { prismaBulkDeleteItems, prismaDeleteItem } from "@/lib/backend/prisma-store";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
@@ -143,7 +144,23 @@ export async function GET(request: Request) {
     if (!backendConfigured) {
       await prisma.$transaction(async (tx) => { await ensureDefaultWarehouse(tx); });
       const [items, movements, purchaseOrders, poLines, warehouses, warehouseBalances] = await Promise.all([
-        prisma.item.findMany({ orderBy: { code: "asc" } }),
+        prisma.item.findMany({
+          include: {
+            _count: {
+              select: {
+                purchaseOrderLines: true,
+                quoteLines: true,
+                invoiceLines: true,
+                billLines: true,
+                stockMovements: true,
+                landedCostItems: true,
+              },
+            },
+            stock: true,
+            warehouseBalances: true,
+          },
+          orderBy: { code: "asc" },
+        }),
         prisma.stockMovement.findMany({ include: { warehouse: true }, orderBy: { createdAt: "desc" } }),
         prisma.purchaseOrder.findMany({ include: { lines: true }, orderBy: { code: "asc" } }),
         prisma.pOLine.findMany(),
@@ -167,6 +184,25 @@ export async function GET(request: Request) {
           };
         }), Number(item.purchasePrice || 0));
         const stockValue = state.value;
+        const usageCount =
+          Number(item._count?.purchaseOrderLines || 0)
+          + Number(item._count?.quoteLines || 0)
+          + Number(item._count?.invoiceLines || 0)
+          + Number(item._count?.billLines || 0)
+          + Number(item._count?.stockMovements || 0)
+          + Number(item._count?.landedCostItems || 0);
+        const nonZeroStock =
+          (item.stock || []).some((row: any) =>
+            Math.abs(Number(row.quantity || 0)) > 0.0001
+            || Math.abs(Number(row.reserved || 0)) > 0.0001
+            || Math.abs(Number(row.available || 0)) > 0.0001
+          )
+          || (item.warehouseBalances || []).some((row: any) =>
+            Math.abs(Number(row.quantity || 0)) > 0.0001
+            || Math.abs(Number(row.reserved || 0)) > 0.0001
+            || Math.abs(Number(row.available || 0)) > 0.0001
+            || Math.abs(Number(row.stockValue || 0)) > 0.005
+          );
         return {
           itemId: item.id,
           itemCode: item.code,
@@ -177,16 +213,22 @@ export async function GET(request: Request) {
           costAccount: item.costAccount || "",
           defaultRate: state.rate,
           taxCode: item.taxCode || "",
+          active: item.isActive !== false,
+          canDelete: usageCount === 0 && !nonZeroStock,
+          usageCount,
           stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
         };
       });
-      if (scope === "items") return NextResponse.json({
-        ok: true, source: "prisma", items: localItems,
-        warehouses: warehouses.map((warehouse) => ({ warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive })),
-        nextItemCode: nextItemCode(localItems),
-      });
+      if (scope === "items") {
+        const activeItems = localItems.filter((item) => item.active !== false);
+        return NextResponse.json({
+          ok: true, source: "prisma", items: activeItems,
+          warehouses: warehouses.map((warehouse) => ({ warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive })),
+          nextItemCode: nextItemCode(localItems),
+        });
+      }
       return NextResponse.json({
         ok: true,
         source: "prisma",
@@ -429,7 +471,7 @@ async function createWarehouseTransfer(raw: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "bulkDeleteItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -452,6 +494,21 @@ export async function POST(request: Request) {
         deferredRevenueMonths: record.itemType === "STOCK" ? 0 : record.deferredRevenueMonths,
       }, "stock-ui");
       return NextResponse.json({ ok: true, row: result.row });
+    }
+
+    if (body.action === "deleteItem") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemId = String(raw.itemId || raw.id || raw.code || "").trim();
+      if (!itemId) throw new Error("Item ID is required");
+      const result = await prismaDeleteItem(itemId);
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (body.action === "bulkDeleteItems") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemIds = Array.isArray(raw.itemIds) ? raw.itemIds.map((value) => String(value || "").trim()).filter(Boolean) : [];
+      const result = await prismaBulkDeleteItems(itemIds);
+      return NextResponse.json({ ok: true, ...result });
     }
 
     if (body.action === "createWarehouse") return NextResponse.json({ ok: true, warehouse: await createWarehouse(body.record) });

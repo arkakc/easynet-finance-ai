@@ -1958,34 +1958,133 @@ export async function prismaDeleteProject(projectId: string) {
   return { deleted: true, projectId: existing.id, projectName: existing.name };
 }
 
-export async function prismaDeleteItem(itemId: string) {
+export async function prismaItemUsage(itemRef: string) {
   const existing = await prisma.item.findFirst({
-    where: { OR: [{ id: itemId }, { code: itemId }] },
+    where: { OR: [{ id: itemRef }, { code: itemRef }] },
   });
   if (!existing) throw new Error("Item not found");
 
-  const [poLineCount, quoteLineCount, invoiceLineCount, billLineCount, movementCount] = await Promise.all([
+  const [
+    poLineCount,
+    quoteLineCount,
+    invoiceLineCount,
+    billLineCount,
+    movementCount,
+    landedCostCount,
+    stockLevel,
+    warehouseBalances,
+  ] = await Promise.all([
     prisma.pOLine.count({ where: { itemId: existing.id } }),
     prisma.quoteLine.count({ where: { itemId: existing.id } }),
     prisma.invoiceLine.count({ where: { itemId: existing.id } }),
     prisma.billLine.count({ where: { itemId: existing.id } }),
     prisma.stockMovement.count({ where: { itemId: existing.id } }),
+    prisma.landedCostItem.count({ where: { itemId: existing.id } }),
+    prisma.stockLevel.findUnique({ where: { itemId: existing.id } }),
+    prisma.warehouseStockBalance.findMany({
+      where: { itemId: existing.id },
+      select: { quantity: true, reserved: true, available: true, stockValue: true },
+    }),
   ]);
 
-  const totalEntries = poLineCount + quoteLineCount + invoiceLineCount + billLineCount + movementCount;
-  if (totalEntries > 0) {
-    const reasons: string[] = [];
-    if (poLineCount > 0) reasons.push(`${poLineCount} purchase order line(s)`);
-    if (quoteLineCount > 0) reasons.push(`${quoteLineCount} quote line(s)`);
-    if (invoiceLineCount > 0) reasons.push(`${invoiceLineCount} invoice line(s)`);
-    if (billLineCount > 0) reasons.push(`${billLineCount} bill line(s)`);
-    if (movementCount > 0) reasons.push(`${movementCount} stock movement(s)`);
-    throw new Error(`Cannot delete item: item already has transactions or stock movements (${reasons.join(", ")}).`);
+  const nonZeroStock =
+    Math.abs(Number(stockLevel?.quantity || 0)) > 0.0001
+    || Math.abs(Number(stockLevel?.reserved || 0)) > 0.0001
+    || Math.abs(Number(stockLevel?.available || 0)) > 0.0001
+    || warehouseBalances.some((row) =>
+      Math.abs(Number(row.quantity || 0)) > 0.0001
+      || Math.abs(Number(row.reserved || 0)) > 0.0001
+      || Math.abs(Number(row.available || 0)) > 0.0001
+      || Math.abs(Number(row.stockValue || 0)) > 0.005
+    );
+
+  const usageCount =
+    poLineCount
+    + quoteLineCount
+    + invoiceLineCount
+    + billLineCount
+    + movementCount
+    + landedCostCount;
+
+  const reasons: string[] = [];
+  if (poLineCount > 0) reasons.push(`${poLineCount} purchase order / supplier quotation line(s)`);
+  if (quoteLineCount > 0) reasons.push(`${quoteLineCount} sales quotation / order line(s)`);
+  if (invoiceLineCount > 0) reasons.push(`${invoiceLineCount} sales invoice line(s)`);
+  if (billLineCount > 0) reasons.push(`${billLineCount} supplier invoice line(s)`);
+  if (movementCount > 0) reasons.push(`${movementCount} stock / accounting movement(s)`);
+  if (landedCostCount > 0) reasons.push(`${landedCostCount} landed-cost allocation(s)`);
+  if (nonZeroStock) reasons.push("non-zero stock quantity, reservation, availability, or book value");
+
+  return {
+    item: existing,
+    canDelete: usageCount === 0 && !nonZeroStock,
+    usageCount,
+    nonZeroStock,
+    reasons,
+  };
+}
+
+export async function prismaDeleteItem(itemId: string) {
+  const usage = await prismaItemUsage(itemId);
+  const existing = usage.item;
+
+  if (!usage.canDelete) {
+    const updated = existing.isActive
+      ? await prisma.item.update({ where: { id: existing.id }, data: { isActive: false } })
+      : existing;
+    return {
+      deleted: false,
+      disabled: true,
+      itemId: existing.id,
+      itemCode: existing.code,
+      itemName: existing.name,
+      active: updated.isActive,
+      reason: `Item is retained for audit/history because it has prior usage: ${usage.reasons.join(", ")}.`,
+      usage: usage.reasons,
+    };
   }
 
-  await prisma.stockLevel.deleteMany({ where: { itemId: existing.id } });
-  await prisma.item.delete({ where: { id: existing.id } });
-  return { deleted: true, itemId: existing.id, itemName: existing.name };
+  await prisma.$transaction(async (tx) => {
+    await tx.stockLevel.deleteMany({ where: { itemId: existing.id } });
+    await tx.warehouseStockBalance.deleteMany({ where: { itemId: existing.id } });
+    await tx.item.delete({ where: { id: existing.id } });
+  });
+
+  return {
+    deleted: true,
+    disabled: false,
+    itemId: existing.id,
+    itemCode: existing.code,
+    itemName: existing.name,
+    usage: [],
+  };
+}
+
+export async function prismaBulkDeleteItems(itemRefs: string[]) {
+  const uniqueRefs = [...new Set(itemRefs.map((value) => String(value || "").trim()).filter(Boolean))];
+  if (!uniqueRefs.length) throw new Error("Select at least one Item Master record");
+
+  const results = [];
+  for (const ref of uniqueRefs) {
+    try {
+      results.push({ ref, ok: true, ...(await prismaDeleteItem(ref)) });
+    } catch (error) {
+      results.push({
+        ref,
+        ok: false,
+        deleted: false,
+        disabled: false,
+        error: error instanceof Error ? error.message : "Item delete / disable failed",
+      });
+    }
+  }
+
+  return {
+    results,
+    deletedCount: results.filter((row: any) => row.ok && row.deleted).length,
+    disabledCount: results.filter((row: any) => row.ok && row.disabled).length,
+    failedCount: results.filter((row: any) => !row.ok).length,
+  };
 }
 
 export async function prismaDeleteQuote(quoteId: string) {
