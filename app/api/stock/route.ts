@@ -18,6 +18,7 @@ import {
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { postPurchaseReceiptAtomic, postStockMovementAtomic, postStockValueAdjustmentAtomic, transferStockAtomic } from "@/lib/accounting/atomic-stock";
 import { ensureDefaultWarehouse } from "@/lib/accounting/warehouse-stock";
+import { prismaBulkDeleteItems, prismaDeleteItem } from "@/lib/backend/prisma-store";
 
 const itemSchema = z.object({
   itemId: z.string().trim().optional().default(""),
@@ -177,6 +178,7 @@ export async function GET(request: Request) {
           costAccount: item.costAccount || "",
           defaultRate: state.rate,
           taxCode: item.taxCode || "",
+          active: item.isActive !== false,
           stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
@@ -429,7 +431,7 @@ async function createWarehouseTransfer(raw: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { secret?: string; action?: "createItem" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
+    const body = await request.json() as { secret?: string; action?: "createItem" | "deleteItem" | "bulkDeleteItems" | "createMovement" | "createPurchaseReceipt" | "createValueAdjustment" | "createWarehouse" | "createTransfer"; record?: unknown };
     requireSecret(body.secret);
 
     if (body.action === "createItem") {
@@ -452,6 +454,21 @@ export async function POST(request: Request) {
         deferredRevenueMonths: record.itemType === "STOCK" ? 0 : record.deferredRevenueMonths,
       }, "stock-ui");
       return NextResponse.json({ ok: true, row: result.row });
+    }
+
+    if (body.action === "deleteItem") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemId = String(raw.itemId || raw.id || raw.code || "").trim();
+      if (!itemId) throw new Error("Item ID is required");
+      const result = await prismaDeleteItem(itemId);
+      return NextResponse.json({ ok: true, ...result });
+    }
+
+    if (body.action === "bulkDeleteItems") {
+      const raw = (body.record || {}) as Record<string, unknown>;
+      const itemIds = Array.isArray(raw.itemIds) ? raw.itemIds.map((value) => String(value || "").trim()).filter(Boolean) : [];
+      const result = await prismaBulkDeleteItems(itemIds);
+      return NextResponse.json({ ok: true, ...result });
     }
 
     if (body.action === "createWarehouse") return NextResponse.json({ ok: true, warehouse: await createWarehouse(body.record) });
