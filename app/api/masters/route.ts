@@ -13,6 +13,8 @@ import {
   prismaDeleteSupplier,
   prismaDeleteCustomer,
   prismaDeleteProject,
+  prismaDisableProject,
+  prismaActivateProject,
   prismaDeleteItem,
 } from "@/lib/backend/prisma-store";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
@@ -169,12 +171,12 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       secret?: string;
       type?: "customer" | "supplier" | "project" | "item";
-      mode?: "create" | "update" | "delete";
+      mode?: "create" | "update" | "delete" | "disable" | "activate";
       record?: unknown;
     };
 
     requireAdminSecret(body.secret);
-    const mode = body.mode === "delete" ? "delete" : body.mode === "update" ? "update" : "create";
+    const mode = body.mode === "delete" ? "delete" : body.mode === "disable" ? "disable" : body.mode === "activate" ? "activate" : body.mode === "update" ? "update" : "create";
     // Core operational data is Prisma-only. Optional Apps Script integrations
     // must never switch this route away from the authoritative database.
     const backendConfigured = false;
@@ -430,18 +432,36 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "project") {
-      if (mode === "delete") {
+      if (mode === "delete" || mode === "disable" || mode === "activate") {
         const raw = (body.record || {}) as Record<string, unknown>;
         const projectId = String(raw.projectId || raw.id || raw.code || "").trim();
-        if (!projectId) throw new Error("Project ID is required for deletion");
+        if (!projectId) throw new Error("Project ID is required");
 
         if (!backendConfigured) {
-          const res = await prismaDeleteProject(projectId);
+          if (mode === "delete") {
+            const res = await prismaDeleteProject(projectId);
+            return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+          }
+          if (mode === "disable") {
+            const res = await prismaDisableProject(projectId);
+            return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+          }
+          const res = await prismaActivateProject(projectId);
           return NextResponse.json({ ok: true, type: body.type, mode, ...res });
         }
 
-        const [existing, pos, bills, quotes, invoices, payments, expenses] = await Promise.all([
-          findRecords("Projects", { projectId }, 1),
+        const existing = await findRecords("Projects", { projectId }, 1);
+        if (!existing.rows.length) throw new Error("Project not found");
+        if (mode === "disable") {
+          await updateRecord("Projects", "projectId", projectId, { status: "ON_HOLD" }, "master-data-ui:disable");
+          return NextResponse.json({ ok: true, type: body.type, mode, disabled: true, projectId, status: "ON_HOLD" });
+        }
+        if (mode === "activate") {
+          await updateRecord("Projects", "projectId", projectId, { status: "ACTIVE" }, "master-data-ui:activate");
+          return NextResponse.json({ ok: true, type: body.type, mode, activated: true, projectId, status: "ACTIVE" });
+        }
+
+        const [pos, bills, quotes, invoices, payments, expenses] = await Promise.all([
           findRecords("PurchaseOrders", { projectId }, 1),
           findRecords("SupplierBills", { projectId }, 1),
           findRecords("Quotes", { projectId }, 1),
@@ -449,16 +469,9 @@ export async function POST(request: Request) {
           findRecords("Payments", { projectId }, 1),
           findRecords("Expenses", { projectId }, 1),
         ]);
-
-        if (!existing.rows.length) throw new Error("Project not found");
-
         const hasLedger = pos.rows.length > 0 || bills.rows.length > 0 || quotes.rows.length > 0 || invoices.rows.length > 0 || payments.rows.length > 0 || expenses.rows.length > 0;
-        if (hasLedger) {
-          throw new Error("Cannot delete project: project already has accounts ledger entries or transactions.");
-        }
-
-        await updateRecord("Projects", "projectId", projectId, { status: "CANCELLED" }, "master-data-ui:delete");
-        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, projectId });
+        if (hasLedger) throw new Error("Cannot delete project: project already has accounts ledger entries or transactions. Disable the project instead.");
+        throw new Error("Project hard delete is only supported on the authoritative database backend.");
       }
 
       const parsed = projectSchema.parse(body.record || {});

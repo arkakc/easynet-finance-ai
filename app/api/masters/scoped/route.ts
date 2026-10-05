@@ -51,14 +51,16 @@ export async function GET(request: NextRequest) {
         listTable("Customers", 500, 0),
         listTable("Projects", 500, 0),
       ]);
-      return NextResponse.json({ ok: true, scope, customers: customers.rows, projects: projects.rows });
+      const activeProjects = projects.rows.filter((row: any) => ["ACTIVE","PLANNING","OPEN"].includes(String(row.status || "ACTIVE").toUpperCase().replace(/\s+/g,"_")));
+      return NextResponse.json({ ok: true, scope, customers: customers.rows, projects: activeProjects });
     }
 
     const [suppliers, projects] = await Promise.all([
       listTable("Suppliers", 500, 0),
       listTable("Projects", 500, 0),
     ]);
-    return NextResponse.json({ ok: true, scope, suppliers: suppliers.rows, projects: projects.rows });
+    const activeProjects = projects.rows.filter((row: any) => ["ACTIVE","PLANNING","OPEN"].includes(String(row.status || "ACTIVE").toUpperCase().replace(/\s+/g,"_")));
+    return NextResponse.json({ ok: true, scope, suppliers: suppliers.rows, projects: activeProjects });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Master-data read failed";
     return NextResponse.json(

@@ -1925,38 +1925,121 @@ export async function prismaDeleteCustomer(customerId: string) {
   return { deleted: true, customerId: existing.id, customerName: existing.name };
 }
 
-export async function prismaDeleteProject(projectId: string) {
+export async function prismaProjectUsage(projectRef: string) {
   const existing = await prisma.project.findFirst({
-    where: { OR: [{ id: projectId }, { code: projectId }] },
+    where: { OR: [{ id: projectRef }, { code: projectRef }] },
   });
   if (!existing) throw new Error("Project not found");
 
-  const [poCount, billCount, quoteCount, invoiceCount, paymentCount, expenseCount, movementCount] = await Promise.all([
+  const [
+    poCount,
+    billCount,
+    quoteCount,
+    invoiceCount,
+    paymentCount,
+    creditNoteCount,
+    refundCount,
+    expenseCount,
+    movementCount,
+    timeEntryCount,
+    budgetCount,
+  ] = await Promise.all([
     prisma.purchaseOrder.count({ where: { projectId: existing.id } }),
     prisma.supplierBill.count({ where: { projectId: existing.id } }),
     prisma.quote.count({ where: { projectId: existing.id } }),
     prisma.invoice.count({ where: { projectId: existing.id } }),
     prisma.payment.count({ where: { projectId: existing.id } }),
+    prisma.creditNote.count({ where: { projectId: existing.id } }),
+    prisma.refund.count({ where: { projectId: existing.id } }),
     prisma.expense.count({ where: { projectId: existing.id } }),
     prisma.stockMovement.count({ where: { projectId: existing.id } }),
+    prisma.timeEntry.count({ where: { projectId: existing.id } }),
+    prisma.budget.count({ where: { projectId: existing.id } }),
   ]);
 
-  const totalEntries = poCount + billCount + quoteCount + invoiceCount + paymentCount + expenseCount + movementCount;
-  if (totalEntries > 0) {
-    const reasons: string[] = [];
-    if (invoiceCount > 0) reasons.push(`${invoiceCount} invoice(s)`);
-    if (quoteCount > 0) reasons.push(`${quoteCount} quotation(s)`);
-    if (poCount > 0) reasons.push(`${poCount} purchase order(s)/quote(s)`);
-    if (billCount > 0) reasons.push(`${billCount} bill(s)`);
-    if (paymentCount > 0) reasons.push(`${paymentCount} payment(s)`);
-    if (expenseCount > 0) reasons.push(`${expenseCount} expense(s)`);
-    if (movementCount > 0) reasons.push(`${movementCount} stock movement(s)`);
-    throw new Error(`Cannot delete project: project already has accounts ledger entries or transactions (${reasons.join(", ")}).`);
+  const usageCount =
+    poCount + billCount + quoteCount + invoiceCount + paymentCount
+    + creditNoteCount + refundCount + expenseCount + movementCount
+    + timeEntryCount + budgetCount;
+
+  const reasons: string[] = [];
+  if (quoteCount > 0) reasons.push(`${quoteCount} sales quotation / order(s)`);
+  if (invoiceCount > 0) reasons.push(`${invoiceCount} sales invoice(s)`);
+  if (poCount > 0) reasons.push(`${poCount} purchase order / supplier quotation(s)`);
+  if (billCount > 0) reasons.push(`${billCount} supplier invoice(s)`);
+  if (paymentCount > 0) reasons.push(`${paymentCount} payment / receipt(s)`);
+  if (creditNoteCount > 0) reasons.push(`${creditNoteCount} credit note(s)`);
+  if (refundCount > 0) reasons.push(`${refundCount} refund(s)`);
+  if (expenseCount > 0) reasons.push(`${expenseCount} expense(s)`);
+  if (movementCount > 0) reasons.push(`${movementCount} stock movement(s)`);
+  if (timeEntryCount > 0) reasons.push(`${timeEntryCount} time entr${timeEntryCount===1?"y":"ies"}`);
+  if (budgetCount > 0) reasons.push(`${budgetCount} project budget record(s)`);
+
+  return {
+    project: existing,
+    usageCount,
+    canDelete: usageCount === 0,
+    reasons,
+  };
+}
+
+export async function prismaDeleteProject(projectId: string) {
+  const usage = await prismaProjectUsage(projectId);
+  const existing = usage.project;
+
+  if (!usage.canDelete) {
+    throw new Error(
+      `Cannot delete project ${existing.code}: transaction/history exists (${usage.reasons.join(", ")}). Disable the project instead.`,
+    );
   }
 
   await prisma.project.delete({ where: { id: existing.id } });
-  return { deleted: true, projectId: existing.id, projectName: existing.name };
+  return { deleted: true, projectId: existing.id, projectCode: existing.code, projectName: existing.name };
 }
+
+export async function prismaDisableProject(projectRef: string) {
+  const usage = await prismaProjectUsage(projectRef);
+  const existing = usage.project;
+
+  if (usage.usageCount === 0) {
+    throw new Error(
+      `Cannot disable project ${existing.code}: no transaction/history exists. Delete the unused project instead.`,
+    );
+  }
+
+  const updated = existing.status === "ON_HOLD"
+    ? existing
+    : await prisma.project.update({ where: { id: existing.id }, data: { status: "ON_HOLD" } });
+
+  return {
+    disabled: true,
+    projectId: updated.id,
+    projectCode: updated.code,
+    projectName: updated.name,
+    status: updated.status,
+    usage: usage.reasons,
+  };
+}
+
+export async function prismaActivateProject(projectRef: string) {
+  const existing = await prisma.project.findFirst({
+    where: { OR: [{ id: projectRef }, { code: projectRef }] },
+  });
+  if (!existing) throw new Error("Project not found");
+
+  const updated = existing.status === "ACTIVE"
+    ? existing
+    : await prisma.project.update({ where: { id: existing.id }, data: { status: "ACTIVE" } });
+
+  return {
+    activated: true,
+    projectId: updated.id,
+    projectCode: updated.code,
+    projectName: updated.name,
+    status: updated.status,
+  };
+}
+
 
 export async function prismaItemUsage(itemRef: string) {
   const existing = await prisma.item.findFirst({
