@@ -25,6 +25,10 @@ type Props<T extends Record<string, unknown>> = {
   rowClassName?: (row: T, index: number) => string | undefined;
   defaultSortKey?: string;
   defaultSortDirection?: SortDirection;
+  selectable?: boolean;
+  selectedKeys?: string[];
+  onSelectionChange?: (keys: string[]) => void;
+  toolbarActions?: ReactNode;
 };
 
 function normalizeSortValue(value: unknown) {
@@ -60,6 +64,10 @@ export default function AdjustableDataTable<T extends Record<string, unknown>>({
   rowClassName,
   defaultSortKey,
   defaultSortDirection = "asc",
+  selectable = false,
+  selectedKeys = [],
+  onSelectionChange,
+  toolbarActions,
 }: Props<T>) {
   const [columnOrder, setColumnOrder] = useState(() => columns.map((column) => column.key));
   const [widths, setWidths] = useState<Record<string, number>>(() =>
@@ -137,12 +145,26 @@ export default function AdjustableDataTable<T extends Record<string, unknown>>({
     window.addEventListener("mouseup", onUp);
   }
 
-  const colSpan = Math.max(orderedColumns.length + 1, 1);
-  const minWidth = 90 + orderedColumns.reduce((sum, column) => sum + (widths[column.key] || column.defaultWidth || 170), 0);
+  const visibleKeys = visibleRows.map((row, index) => rowKey(row, index));
+  const allVisibleSelected = selectable && visibleKeys.length > 0 && visibleKeys.every((key) => selectedKeys.includes(key));
+  const colSpan = Math.max(orderedColumns.length + 1 + (selectable ? 1 : 0), 1);
+  const minWidth = 90 + (selectable ? 70 : 0) + orderedColumns.reduce((sum, column) => sum + (widths[column.key] || column.defaultWidth || 170), 0);
+
+  function toggleVisibleSelection(checked: boolean) {
+    if (!selectable || !onSelectionChange) return;
+    if (checked) onSelectionChange([...new Set([...selectedKeys, ...visibleKeys])]);
+    else onSelectionChange(selectedKeys.filter((key) => !visibleKeys.includes(key)));
+  }
+
+  function toggleRowSelection(key: string, checked: boolean) {
+    if (!selectable || !onSelectionChange) return;
+    onSelectionChange(checked ? [...new Set([...selectedKeys, key])] : selectedKeys.filter((value) => value !== key));
+  }
 
   return (
     <div className="adjustable-table">
       <div className="adjustable-table-toolbar">
+        <div className="adjustable-table-controls">
         <label>
           Global search
           <input
@@ -166,20 +188,24 @@ export default function AdjustableDataTable<T extends Record<string, unknown>>({
         <button type="button" className="secondary" onClick={() => setVisibleLimit((current) => current + 25)} disabled={remainingRows === 0}>
           {remainingRows > 0 ? `Load more (${remainingRows} more)` : "All loaded"}
         </button>
-        <span className="small">Drag column headers to move. Pull the right edge to resize.</span>
+        <span className="small adjustable-table-hint">Drag headers to move · drag edge to resize</span>
+        </div>
+        {toolbarActions ? <div className="adjustable-table-actions">{toolbarActions}</div> : null}
       </div>
 
       <div className="table-wrap">
         <table className="data-table adjustable-data-table" style={{ minWidth }}>
           <colgroup>
-            <col style={{ width: 90 }} />
+            <col style={{ width: 72 }} />
+            {selectable ? <col style={{ width: 64 }} /> : null}
             {orderedColumns.map((column) => (
               <col key={column.key} style={{ width: widths[column.key] || column.defaultWidth || 170 }} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              <th style={{ width: 90 }}>SL No</th>
+              <th style={{ width: 72 }}>SL No</th>
+              {selectable ? <th style={{ width: 64 }} className="selection-column"><input type="checkbox" aria-label="Select all visible rows" checked={allVisibleSelected} onChange={(event)=>toggleVisibleSelection(event.target.checked)} /></th> : null}
               {orderedColumns.map((column) => (
                 <th
                   key={column.key}
@@ -224,7 +250,8 @@ export default function AdjustableDataTable<T extends Record<string, unknown>>({
                   }
                 }}
               >
-                <td><strong>{index + 1}</strong></td>
+                <td>{index + 1}</td>
+                {selectable ? <td className="selection-column" onClick={(event)=>event.stopPropagation()}><input type="checkbox" aria-label="Select row" checked={selectedKeys.includes(rowKey(row,index))} onChange={(event)=>toggleRowSelection(rowKey(row,index),event.target.checked)} /></td> : null}
                 {orderedColumns.map((column) => (
                   <td key={column.key}>{column.value(row, index)}</td>
                 ))}
