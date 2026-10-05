@@ -103,6 +103,9 @@ export default function MasterDoctypeClient({ type, title, description, createLa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedKeys,setSelectedKeys]=useState<string[]>([]);
+  const [lifecycleBusy,setLifecycleBusy]=useState("");
+  const [lifecycleMessage,setLifecycleMessage]=useState("");
 
   const loadRows = useCallback(async () => {
     setLoading(true);
@@ -130,6 +133,47 @@ export default function MasterDoctypeClient({ type, title, description, createLa
   }, [loadRows]);
 
   const activeCount = useMemo(() => rows.filter((row) => activeLabel(row.active) === "Active").length, [rows]);
+
+  function masterUsage(row:MasterRow){return Number(row.usageCount||0);}
+  function projectInactive(row:MasterRow){return ["ON_HOLD","CANCELLED"].includes(String(row.status||"").toUpperCase());}
+  function masterInactive(row:MasterRow){return type==="project"?projectInactive(row):activeLabel(row.active)==="Inactive";}
+  function masterCanDelete(row:MasterRow){return masterUsage(row)===0;}
+  function masterCanDisable(row:MasterRow){return masterUsage(row)>0&&!masterInactive(row);}
+  function masterCanActivate(row:MasterRow){return masterInactive(row);}
+
+  async function runLifecycle(mode:"delete"|"disable"|"activate",targets:MasterRow[]){
+    if(lifecycleBusy||targets.length===0)return;
+    const label=mode==="delete"?"Delete":mode==="disable"?"Disable":"Activate";
+    const note=mode==="delete"
+      ?"Only records with no transaction/history will be deleted. Customer/supplier/project links by themselves are not financial history unless they create a protected relationship."
+      :mode==="disable"
+        ?"Only active records with transaction/history will be disabled and retained for audit."
+        :"Only inactive records will be activated.";
+    if(!window.confirm(`${label} ${targets.length} selected ${title.toLowerCase()} record(s)?\n\n${note}`))return;
+    setLifecycleBusy(mode);setLifecycleMessage("");
+    let success=0,failed=0,lastError="";
+    for(const row of targets){
+      const id=rowId(row,config.idKey,0);
+      try{
+        const response=await fetch("/api/erp/actions",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({target:"masters",body:{type,mode,record:{[config.idKey]:id}}}),
+        });
+        const body=await response.json();
+        if(!response.ok||!body.ok)throw new Error(body.error||`${label} failed`);
+        success+=1;
+      }catch(error){
+        failed+=1;
+        lastError=error instanceof Error?error.message:`${label} failed`;
+      }
+    }
+    setLifecycleMessage(`${label}: ${success} succeeded, ${failed} failed.${failed&&lastError?` ${lastError}`:""}`);
+    setSelectedKeys([]);
+    setLifecycleBusy("");
+    await loadRows();
+    router.refresh();
+  }
 
   const tableColumns = useMemo<AdjustableColumn<MasterRow>[]>(() => [
     {
@@ -162,7 +206,19 @@ export default function MasterDoctypeClient({ type, title, description, createLa
       sortValue: column.sortValue,
       value: (row: MasterRow) => column.value(row),
     })),
-  ], [config]);
+    {
+      key:"lifecycle",
+      label:"Action",
+      mandatory:true,
+      defaultWidth:260,
+      sortValue:(row)=>masterUsage(row),
+      value:(row:MasterRow)=><div className="row-actions" onClick={(event)=>event.stopPropagation()}>
+        {masterCanDelete(row)&&<button type="button" className="danger-button" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("delete",[row])}>Delete</button>}
+        {masterCanDisable(row)&&<button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("disable",[row])}>Disable</button>}
+        {masterCanActivate(row)&&<button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("activate",[row])}>Activate</button>}
+      </div>,
+    },
+  ], [config,type,lifecycleBusy,rows]);
 
   function handleCreated(_createdType: MasterType, _record: CreatedMasterRow) {
     void loadRows();
@@ -192,6 +248,7 @@ export default function MasterDoctypeClient({ type, title, description, createLa
       </div>
 
       {error && <div className="status-banner error">{error}</div>}
+      {lifecycleMessage && <div className="status-banner success">{lifecycleMessage}</div>}
 
       <div className="grid">
         <div className="card">
@@ -208,7 +265,7 @@ export default function MasterDoctypeClient({ type, title, description, createLa
         <div className="form-title-row">
           <div>
             <h3>Existing {title}</h3>
-            <p className="small">Direct doctype view for sales and purchase workflow reference.</p>
+            <p className="small">Clean list view with safe Delete, Disable and Activate lifecycle controls. Used records stay retained for audit history.</p>
           </div>
           <span className="auto-badge">{loading ? "Loading" : `${rows.length} records`}</span>
         </div>
@@ -221,6 +278,14 @@ export default function MasterDoctypeClient({ type, title, description, createLa
           rowKey={(row, index) => rowId(row, config.idKey, index)}
           onRowClick={openRecord}
           rowAriaLabel={(row, index) => `Open ${String(row[config.nameKey] || rowId(row, config.idKey, index))}`}
+          selectable
+          selectedKeys={selectedKeys}
+          onSelectionChange={setSelectedKeys}
+          toolbarActions={<>
+            <button type="button" className="danger-button" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row))} onClick={()=>void runLifecycle("delete",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row)))}>Delete Selected</button>
+            <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row))} onClick={()=>void runLifecycle("disable",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row)))}>Disable Selected</button>
+            <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row))} onClick={()=>void runLifecycle("activate",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row)))}>Activate Selected</button>
+          </>}
         />
       </section>
 
