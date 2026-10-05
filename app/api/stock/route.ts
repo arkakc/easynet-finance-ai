@@ -203,6 +203,14 @@ export async function GET(request: Request) {
             || Math.abs(Number(row.available || 0)) > 0.0001
             || Math.abs(Number(row.stockValue || 0)) > 0.005
           );
+        const usageReasons:string[]=[];
+        if(Number(item._count?.purchaseOrderLines||0)>0)usageReasons.push(`${item._count.purchaseOrderLines} purchase order / supplier quotation line(s)`);
+        if(Number(item._count?.quoteLines||0)>0)usageReasons.push(`${item._count.quoteLines} sales quotation / order line(s)`);
+        if(Number(item._count?.invoiceLines||0)>0)usageReasons.push(`${item._count.invoiceLines} sales invoice line(s)`);
+        if(Number(item._count?.billLines||0)>0)usageReasons.push(`${item._count.billLines} supplier invoice line(s)`);
+        if(Number(item._count?.stockMovements||0)>0)usageReasons.push(`${item._count.stockMovements} stock / accounting movement(s)`);
+        if(Number(item._count?.landedCostItems||0)>0)usageReasons.push(`${item._count.landedCostItems} landed-cost allocation(s)`);
+        if(nonZeroStock)usageReasons.push("non-zero stock quantity, reservation, availability, or book value");
         return {
           itemId: item.id,
           itemCode: item.code,
@@ -216,6 +224,7 @@ export async function GET(request: Request) {
           active: item.isActive !== false,
           canDelete: usageCount === 0 && !nonZeroStock,
           usageCount,
+          usageReasons,
           stockQty: state.qty,
           stockValue,
           deferredRevenueMonths: 0,
