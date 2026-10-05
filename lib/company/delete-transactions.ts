@@ -19,6 +19,7 @@ export type TransactionSummary = {
   supplierBills: number;
   billLines: number;
   payments: number;
+  paymentAllocations: number;
   refunds: number;
   expenses: number;
   bankTransactions: number;
@@ -55,6 +56,7 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     supplierBills,
     billLines,
     payments,
+    paymentAllocations,
     refunds,
     expenses,
     bankTransactions,
@@ -87,6 +89,7 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     client.supplierBill.count(),
     client.billLine.count(),
     client.payment.count(),
+    client.paymentAllocation.count(),
     client.refund.count(),
     client.expense.count(),
     client.bankTransaction.count(),
@@ -122,6 +125,7 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     goodsReceipts +
     supplierBills +
     payments +
+    paymentAllocations +
     refunds +
     expenses +
     bankTransactions +
@@ -152,6 +156,7 @@ export async function getCompanyTransactionsSummary(client: DbClient = prisma): 
     supplierBills,
     billLines,
     payments,
+    paymentAllocations,
     refunds,
     expenses,
     bankTransactions,
@@ -208,26 +213,31 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       },
     });
 
-    // 3. Delete Payments & Refunds
+    // 3. Delete payment allocations before Payments / Invoices / Supplier Bills.
+    // PaymentAllocation uses ON DELETE RESTRICT for paymentId, invoiceId and billId,
+    // so deleting any parent first will fail the factory reset.
+    await tx.paymentAllocation.deleteMany({});
+
+    // 4. Delete Payments & Refunds
     await tx.payment.deleteMany({});
     await tx.refund.deleteMany({});
 
-    // 4. Landed cost items & vouchers
+    // 5. Landed cost items & vouchers
     await tx.landedCostItem.deleteMany({});
     await tx.landedCostVoucher.deleteMany({});
 
-    // 5. Credit notes
+    // 6. Credit notes
     await tx.creditNoteLine.deleteMany({});
     await tx.creditNote.deleteMany({});
 
-    // 6. Invoices & InvoiceLines
+    // 7. Invoices & InvoiceLines
     await tx.invoiceLine.deleteMany({});
     await tx.invoice.deleteMany({});
 
-    // 7. Time entries
+    // 8. Time entries
     await tx.timeEntry.deleteMany({});
 
-    // 8. Goods receipts & Purchase Orders & Supplier Bills
+    // 9. Goods receipts & Purchase Orders & Supplier Bills
     await tx.goodsReceipt.deleteMany({});
     await tx.pOLine.deleteMany({});
     await tx.billLine.deleteMany({});
@@ -239,14 +249,14 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
     await tx.purchaseOrder.deleteMany({});
     await tx.supplierBill.deleteMany({});
 
-    // 9. Quotes
+    // 10. Quotes
     await tx.quoteLine.deleteMany({});
     await tx.quote.deleteMany({});
 
-    // 10. Expenses
+    // 11. Expenses
     await tx.expense.deleteMany({});
 
-    // 11. Stock Movements & optional StockLevel balance reset
+    // 12. Stock Movements & optional StockLevel balance reset
     await tx.stockMovement.deleteMany({});
     if (options.resetStockQuantities !== false) {
       await tx.stockLevel.updateMany({
@@ -258,31 +268,31 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       });
     }
 
-    // 12. Payroll runs & items
+    // 13. Payroll runs & items
     await tx.payrollItem.deleteMany({});
     await tx.payrollRun.deleteMany({});
 
-    // 13. POS sessions
+    // 14. POS sessions
     await tx.posSession.deleteMany({});
 
-    // 14. Loans & LoanEvents
+    // 15. Loans & LoanEvents
     await tx.loanEvent.deleteMany({});
     await tx.loan.deleteMany({});
 
-    // 15. Fixed assets (or reset depreciation & source doc)
+    // 16. Fixed assets (or reset depreciation & source doc)
     await tx.fixedAsset.deleteMany({});
 
-    // 16. Tax Reports
+    // 17. Tax Reports
     await tx.taxReport.deleteMany({});
 
-    // 17. Approval Requests
+    // 18. Approval Requests
     await tx.approvalRequest.deleteMany({});
 
-    // 18. General Ledger Journal Lines & Headers
+    // 19. General Ledger Journal Lines & Headers
     await tx.journalLine.deleteMany({});
     await tx.journalHeader.deleteMany({});
 
-    // 19. Transactional Documents (leave CERTIFICATE, GST_REGISTRATION, ID_DOCUMENT untouched)
+    // 20. Transactional Documents (leave CERTIFICATE, GST_REGISTRATION, ID_DOCUMENT untouched)
     await tx.document.deleteMany({
       where: {
         OR: [
@@ -292,7 +302,7 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       },
     });
 
-    // 20. Find admin user ID for audit log
+    // 21. Find admin user ID for audit log
     let adminUserId = options.adminUserId;
     if (!adminUserId) {
       const u = await tx.user.findFirst({
@@ -303,7 +313,7 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       adminUserId = u?.id;
     }
 
-    // 21. Write a Phase 9 sealed audit event. userId may be null for
+    // 22. Write a Phase 9 sealed audit event. userId may be null for
     // imported/legacy administrators; actorEmail remains the immutable actor snapshot.
     const audit = await appendAuditEvent({
       action: "DELETE_COMPANY_TRANSACTIONS",
