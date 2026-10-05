@@ -184,11 +184,14 @@ export async function GET(request: Request) {
           deferredRevenueMonths: 0,
         };
       });
-      if (scope === "items") return NextResponse.json({
-        ok: true, source: "prisma", items: localItems,
-        warehouses: warehouses.map((warehouse) => ({ warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive })),
-        nextItemCode: nextItemCode(localItems),
-      });
+      if (scope === "items") {
+        const activeItems = localItems.filter((item) => item.active !== false);
+        return NextResponse.json({
+          ok: true, source: "prisma", items: activeItems,
+          warehouses: warehouses.map((warehouse) => ({ warehouseId: warehouse.id, warehouseCode: warehouse.code, warehouseName: warehouse.name, location: warehouse.location || "", isDefault: warehouse.isDefault, active: warehouse.isActive })),
+          nextItemCode: nextItemCode(localItems),
+        });
+      }
       return NextResponse.json({
         ok: true,
         source: "prisma",
