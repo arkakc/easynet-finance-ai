@@ -11,7 +11,11 @@ import {
 } from "@/lib/backend/apps-script";
 import {
   prismaDeleteSupplier,
+  prismaDisableSupplier,
+  prismaActivateSupplier,
   prismaDeleteCustomer,
+  prismaDisableCustomer,
+  prismaActivateCustomer,
   prismaDeleteProject,
   prismaDisableProject,
   prismaActivateProject,
@@ -182,33 +186,16 @@ export async function POST(request: Request) {
     const backendConfigured = false;
 
     if (body.type === "customer") {
-      if (mode === "delete") {
+      if (mode === "delete" || mode === "disable" || mode === "activate") {
         const raw = (body.record || {}) as Record<string, unknown>;
         const customerId = String(raw.customerId || raw.id || raw.code || "").trim();
-        if (!customerId) throw new Error("Customer ID is required for deletion");
-
+        if (!customerId) throw new Error("Customer ID is required");
         if (!backendConfigured) {
-          const res = await prismaDeleteCustomer(customerId);
-          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+          if (mode === "delete") return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaDeleteCustomer(customerId)) });
+          if (mode === "disable") return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaDisableCustomer(customerId)) });
+          return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaActivateCustomer(customerId)) });
         }
-
-        const [existing, invoices, quotes, payments, projects] = await Promise.all([
-          findRecords("Customers", { customerId }, 1),
-          findRecords("Invoices", { customerId }, 1),
-          findRecords("Quotes", { customerId }, 1),
-          findRecords("Payments", { partyId: customerId }, 1),
-          findRecords("Projects", { customerId }, 1),
-        ]);
-
-        if (!existing.rows.length) throw new Error("Customer not found");
-
-        const hasLedger = invoices.rows.length > 0 || quotes.rows.length > 0 || payments.rows.length > 0 || projects.rows.length > 0;
-        if (hasLedger) {
-          throw new Error("Cannot delete customer: customer already has accounts ledger entries or transactions.");
-        }
-
-        await updateRecord("Customers", "customerId", customerId, { active: false }, "master-data-ui:delete");
-        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, customerId });
+        throw new Error("Customer lifecycle actions require the authoritative database backend.");
       }
 
       const parsed = customerSchema.parse(body.record || {});
@@ -309,33 +296,16 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "supplier") {
-      if (mode === "delete") {
+      if (mode === "delete" || mode === "disable" || mode === "activate") {
         const raw = (body.record || {}) as Record<string, unknown>;
         const supplierId = String(raw.supplierId || raw.id || raw.code || "").trim();
-        if (!supplierId) throw new Error("Supplier ID is required for deletion");
-
+        if (!supplierId) throw new Error("Supplier ID is required");
         if (!backendConfigured) {
-          const res = await prismaDeleteSupplier(supplierId);
-          return NextResponse.json({ ok: true, type: body.type, mode, ...res });
+          if (mode === "delete") return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaDeleteSupplier(supplierId)) });
+          if (mode === "disable") return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaDisableSupplier(supplierId)) });
+          return NextResponse.json({ ok: true, type: body.type, mode, ...(await prismaActivateSupplier(supplierId)) });
         }
-
-        const [existing, bills, pos, payments, expenses] = await Promise.all([
-          findRecords("Suppliers", { supplierId }, 1),
-          findRecords("SupplierBills", { supplierId }, 1),
-          findRecords("PurchaseOrders", { supplierId }, 1),
-          findRecords("Payments", { partyId: supplierId }, 1),
-          findRecords("Expenses", { supplierId }, 1),
-        ]);
-
-        if (!existing.rows.length) throw new Error("Supplier not found");
-
-        const hasLedger = bills.rows.length > 0 || pos.rows.length > 0 || payments.rows.length > 0 || expenses.rows.length > 0;
-        if (hasLedger) {
-          throw new Error("Cannot delete supplier: supplier already has accounts ledger entries or transactions.");
-        }
-
-        await updateRecord("Suppliers", "supplierId", supplierId, { active: false }, "master-data-ui:delete");
-        return NextResponse.json({ ok: true, type: body.type, mode, deleted: true, supplierId });
+        throw new Error("Supplier lifecycle actions require the authoritative database backend.");
       }
 
       const parsed = supplierSchema.parse(body.record || {});
