@@ -5084,3 +5084,155 @@ form.panel {
     min-width: 112px;
   }
 }
+
+
+/* =========================================================
+   SYSTEM-WIDE LIST VIEW CLEANUP
+========================================================= */
+.panel.table-wrap,
+.panel .table-wrap {
+  overflow-x: auto;
+}
+
+.adjustable-table {
+  gap: 14px;
+}
+
+.adjustable-table-toolbar,
+.doctype-list-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin: 0 0 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.adjustable-table-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 620px;
+}
+
+.adjustable-table-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.adjustable-table-toolbar label,
+.doctype-list-toolbar label {
+  min-width: 180px;
+  margin: 0;
+}
+
+.adjustable-table-toolbar input,
+.adjustable-table-toolbar select,
+.doctype-list-toolbar input,
+.doctype-list-toolbar select {
+  height: 38px;
+  min-width: 180px;
+}
+
+.adjustable-table-toolbar button,
+.doctype-list-toolbar button,
+.adjustable-table-actions button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.adjustable-table-hint {
+  align-self: center;
+  white-space: nowrap;
+  opacity: .78;
+}
+
+.data-table,
+.adjustable-data-table,
+.enhanced-data-table {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.data-table th,
+.data-table td {
+  padding: 11px 12px;
+}
+
+.data-table th {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.data-table td {
+  line-height: 1.35;
+}
+
+.data-table td strong {
+  font-weight: 600;
+}
+
+.selection-column {
+  width: 64px !important;
+  min-width: 64px !important;
+  max-width: 64px !important;
+  text-align: center !important;
+}
+
+.selection-column input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0 auto;
+  padding: 0;
+  display: block;
+}
+
+.row-actions,
+.button-row {
+  gap: 8px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .adjustable-table-toolbar,
+  .doctype-list-toolbar {
+    align-items: stretch;
+  }
+
+  .adjustable-table-controls,
+  .adjustable-table-actions {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .adjustable-table-actions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .adjustable-table-toolbar label,
+  .doctype-list-toolbar label {
+    flex: 1 1 220px;
+  }
+
+  .adjustable-table-hint {
+    width: 100%;
+  }
+}

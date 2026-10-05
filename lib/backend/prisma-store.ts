@@ -1863,9 +1863,9 @@ export async function prismaUpdateRecord<T = any>(
   }
 }
 
-export async function prismaDeleteSupplier(supplierId: string) {
+export async function prismaSupplierUsage(supplierRef: string) {
   const existing = await prisma.supplier.findFirst({
-    where: { OR: [{ id: supplierId }, { code: supplierId }] },
+    where: { OR: [{ id: supplierRef }, { code: supplierRef }] },
   });
   if (!existing) throw new Error("Supplier not found");
 
@@ -1877,27 +1877,44 @@ export async function prismaDeleteSupplier(supplierId: string) {
     prisma.fixedAsset.count({ where: { supplierId: existing.id } }),
     prisma.project.count({ where: { supplierId: existing.id } }),
   ]);
+  const usageCount = billCount + poCount + paymentCount + expenseCount + assetCount + projectCount;
+  const reasons:string[]=[];
+  if (billCount) reasons.push(`${billCount} supplier invoice(s)`);
+  if (poCount) reasons.push(`${poCount} purchase order / supplier quotation(s)`);
+  if (paymentCount) reasons.push(`${paymentCount} payment(s)`);
+  if (expenseCount) reasons.push(`${expenseCount} expense(s)`);
+  if (assetCount) reasons.push(`${assetCount} fixed asset(s)`);
+  if (projectCount) reasons.push(`${projectCount} project(s)`);
+  return { supplier: existing, usageCount, canDelete: usageCount === 0, reasons };
+}
 
-  const totalEntries = billCount + poCount + paymentCount + expenseCount + assetCount + projectCount;
-  if (totalEntries > 0) {
-    const reasons: string[] = [];
-    if (billCount > 0) reasons.push(`${billCount} bill(s)`);
-    if (poCount > 0) reasons.push(`${poCount} purchase order(s)/quote(s)`);
-    if (paymentCount > 0) reasons.push(`${paymentCount} payment(s)`);
-    if (expenseCount > 0) reasons.push(`${expenseCount} expense(s)`);
-    if (assetCount > 0) reasons.push(`${assetCount} fixed asset(s)`);
-    if (projectCount > 0) reasons.push(`${projectCount} project(s)`);
-    throw new Error(`Cannot delete supplier: supplier already has accounts ledger entries or transactions (${reasons.join(", ")}).`);
-  }
-
+export async function prismaDeleteSupplier(supplierId: string) {
+  const usage = await prismaSupplierUsage(supplierId);
+  const existing = usage.supplier;
+  if (!usage.canDelete) throw new Error(`Cannot delete supplier ${existing.code}: transaction/history exists (${usage.reasons.join(", ")}). Disable the supplier instead.`);
   await prisma.contact.deleteMany({ where: { supplierId: existing.id } });
   await prisma.supplier.delete({ where: { id: existing.id } });
   return { deleted: true, supplierId: existing.id, supplierName: existing.name };
 }
 
-export async function prismaDeleteCustomer(customerId: string) {
+export async function prismaDisableSupplier(supplierRef: string) {
+  const usage = await prismaSupplierUsage(supplierRef);
+  const existing = usage.supplier;
+  if (usage.usageCount === 0) throw new Error(`Cannot disable supplier ${existing.code}: no transaction/history exists. Delete the unused supplier instead.`);
+  const updated = existing.isActive ? await prisma.supplier.update({ where: { id: existing.id }, data: { isActive: false } }) : existing;
+  return { disabled: true, supplierId: updated.id, supplierCode: updated.code, supplierName: updated.name, active: updated.isActive, usage: usage.reasons };
+}
+
+export async function prismaActivateSupplier(supplierRef: string) {
+  const existing = await prisma.supplier.findFirst({ where: { OR: [{ id: supplierRef }, { code: supplierRef }] } });
+  if (!existing) throw new Error("Supplier not found");
+  const updated = existing.isActive ? existing : await prisma.supplier.update({ where: { id: existing.id }, data: { isActive: true } });
+  return { activated: true, supplierId: updated.id, supplierCode: updated.code, supplierName: updated.name, active: updated.isActive };
+}
+
+export async function prismaCustomerUsage(customerRef: string) {
   const existing = await prisma.customer.findFirst({
-    where: { OR: [{ id: customerId }, { code: customerId }] },
+    where: { OR: [{ id: customerRef }, { code: customerRef }] },
   });
   if (!existing) throw new Error("Customer not found");
 
@@ -1908,21 +1925,38 @@ export async function prismaDeleteCustomer(customerId: string) {
     prisma.creditNote.count({ where: { customerId: existing.id } }),
     prisma.project.count({ where: { customerId: existing.id } }),
   ]);
+  const usageCount = invoiceCount + quoteCount + paymentCount + creditNoteCount + projectCount;
+  const reasons:string[]=[];
+  if (invoiceCount) reasons.push(`${invoiceCount} sales invoice(s)`);
+  if (quoteCount) reasons.push(`${quoteCount} sales quotation / order(s)`);
+  if (paymentCount) reasons.push(`${paymentCount} receipt / payment(s)`);
+  if (creditNoteCount) reasons.push(`${creditNoteCount} credit note(s)`);
+  if (projectCount) reasons.push(`${projectCount} project(s)`);
+  return { customer: existing, usageCount, canDelete: usageCount === 0, reasons };
+}
 
-  const totalEntries = invoiceCount + quoteCount + paymentCount + creditNoteCount + projectCount;
-  if (totalEntries > 0) {
-    const reasons: string[] = [];
-    if (invoiceCount > 0) reasons.push(`${invoiceCount} invoice(s)`);
-    if (quoteCount > 0) reasons.push(`${quoteCount} quotation(s)`);
-    if (paymentCount > 0) reasons.push(`${paymentCount} payment(s)`);
-    if (creditNoteCount > 0) reasons.push(`${creditNoteCount} credit note(s)`);
-    if (projectCount > 0) reasons.push(`${projectCount} project(s)`);
-    throw new Error(`Cannot delete customer: customer already has accounts ledger entries or transactions (${reasons.join(", ")}).`);
-  }
-
+export async function prismaDeleteCustomer(customerId: string) {
+  const usage = await prismaCustomerUsage(customerId);
+  const existing = usage.customer;
+  if (!usage.canDelete) throw new Error(`Cannot delete customer ${existing.code}: transaction/history exists (${usage.reasons.join(", ")}). Disable the customer instead.`);
   await prisma.contact.deleteMany({ where: { customerId: existing.id } });
   await prisma.customer.delete({ where: { id: existing.id } });
   return { deleted: true, customerId: existing.id, customerName: existing.name };
+}
+
+export async function prismaDisableCustomer(customerRef: string) {
+  const usage = await prismaCustomerUsage(customerRef);
+  const existing = usage.customer;
+  if (usage.usageCount === 0) throw new Error(`Cannot disable customer ${existing.code}: no transaction/history exists. Delete the unused customer instead.`);
+  const updated = existing.isActive ? await prisma.customer.update({ where: { id: existing.id }, data: { isActive: false } }) : existing;
+  return { disabled: true, customerId: updated.id, customerCode: updated.code, customerName: updated.name, active: updated.isActive, usage: usage.reasons };
+}
+
+export async function prismaActivateCustomer(customerRef: string) {
+  const existing = await prisma.customer.findFirst({ where: { OR: [{ id: customerRef }, { code: customerRef }] } });
+  if (!existing) throw new Error("Customer not found");
+  const updated = existing.isActive ? existing : await prisma.customer.update({ where: { id: existing.id }, data: { isActive: true } });
+  return { activated: true, customerId: updated.id, customerCode: updated.code, customerName: updated.name, active: updated.isActive };
 }
 
 export async function prismaProjectUsage(projectRef: string) {
