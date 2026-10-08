@@ -29,9 +29,9 @@ export async function POST(request: Request) {
     }
     const currentDay = new Date().toISOString().slice(0, 10);
     if (input.postingDate > currentDay) throw new Error("Future-dated revenue recognition is not permitted");
+    await ensurePaymentScheduleInfrastructure(prisma);
     const accounts = await loadConfiguredPostingAccounts();
     const result = await runAtomicAccounting(async ({ tx, postJournal }) => {
-      await ensurePaymentScheduleInfrastructure(tx);
       const rows = await tx.$queryRaw<Schedule[]>(Prisma.sql`
         SELECT "scheduleId", "sourceId", "milestone", "dueDate", "amount", "status"
         FROM "PaymentSchedule" WHERE "scheduleId" = ${input.scheduleId}
