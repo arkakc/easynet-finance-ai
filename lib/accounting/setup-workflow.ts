@@ -9,6 +9,7 @@ import {
   ERP_TEXT_SETTING_FIELDS,
 } from "@/lib/accounting/finance-settings";
 import { validateCostCenterRefs } from "@/lib/accounting/cost-centers";
+import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
