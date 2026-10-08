@@ -55,6 +55,7 @@ const groups: readonly NavGroup[] = [
     icon: "📦",
     links: [
       ["Items & Stock", "/stock", "stock.read"],
+      ["Warehouse Stock", "/stock/warehouses", "stock.read"],
       ["Fixed Assets", "/assets", "stock.read"],
     ],
   },
