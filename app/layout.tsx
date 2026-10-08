@@ -72,6 +72,7 @@ const groups: readonly NavGroup[] = [
       ["Journal Reversal", "/journals/reverse", "accounts.write"],
       ["Statements", "/statements", "accounts.read"],
       ["Bank Reconciliation", "/banking", "accounts.read"],
+      ["Deferred Revenue", "/deferred-revenue", "post.approve"],
       ["Month-End Close", "/period-close", "post.approve"],
       ["Budgets", "/budgets", "accounts.read"],
       ["Loan Register", "/loans", "accounts.read"],
