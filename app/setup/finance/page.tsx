@@ -177,6 +177,10 @@ export default function FinanceSetupPage() {
       if (!response.ok || !body.ok) throw new Error(body.error || "Setup workflow unavailable");
       setOverview(body);
       setConfig((current) => lockAccountingMethods({ ...current, ...body.config }));
+      if (["REGISTERED", "VERIFIED"].includes(body.config.gstStatus) && (!body.config.gstEvidenceDocId || !body.config.gstEvidenceDocName)) {
+        setStep(0);
+        setError("GST Registration Certificate was not saved in the existing company setup. Select the certificate in Company registration and Save & Continue before completing later steps.");
+      }
       if (Array.isArray(body.openingBalanceEntries) && body.openingBalanceEntries.length) setBalances(hydrateBalanceEntries(body.openingBalanceEntries));
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Setup workflow unavailable"); }
   }, []);
@@ -237,7 +241,16 @@ export default function FinanceSetupPage() {
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Configuration could not be saved");
       setOverview(body); setMessage("Configuration saved without creating any accounting transaction."); return body as Overview;
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Configuration could not be saved"); return null; }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Configuration could not be saved";
+      if (message.includes("gstEvidenceDocName") || message.includes("GST Registration Certificate") || message.includes("GST registration certificate")) {
+        setStep(0);
+        setError("GST Registration Certificate is required. Return to Company registration, select the certificate again, then Save & Continue. The certificate must be saved before proceeding.");
+      } else {
+        setError(message);
+      }
+      return null;
+    }
     finally { setBusy(false); }
   };
   const importChartOfAccounts = async () => {
