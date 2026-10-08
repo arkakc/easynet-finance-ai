@@ -1076,6 +1076,10 @@ label:has(textarea[required])::after,
 .settings-section-complete .settings-field-label::after {
   content: none !important;
 }
+/* A persisted bank field is already fulfilled; retain required validation on empty new rows. */
+.settings-field-label.saved-required-field::after {
+  content: none !important;
+}
 
 .field-action {
   display: flex;
