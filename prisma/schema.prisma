@@ -309,6 +309,7 @@ model Item {
   sellPrice          Decimal?
   costAccount        String? // GL account for cost
   revenueAccount     String? // GL account for revenue
+  deferredRevenueMonths Int @default(0)
   taxCode            String? // Tax classification
   isActive           Boolean          @default(true)
   trackQty           Boolean          @default(false)
