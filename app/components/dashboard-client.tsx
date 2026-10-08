@@ -5,14 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
 
 type DashboardKPI = { key: string; value: string | number; updatedAt: string };
-type BackendStatus = { ok: boolean; version?: string; error?: string };
 type DashboardPayload = {
   ok: boolean;
   rows?: DashboardKPI[];
-  services?: Record<string, BackendStatus>;
   backendError?: string;
   error?: string;
-  mode?: "local" | "backend";
 };
 
 const n = (value: unknown) => {
@@ -35,9 +32,7 @@ const money = (value: unknown) => new Intl.NumberFormat("en-PG", {
 
 export default function DashboardClient() {
   const [rows, setRows] = useState<DashboardKPI[]>([]);
-  const [services, setServices] = useState<Record<string, BackendStatus>>({});
   const [backendError, setBackendError] = useState("");
-  const [mode, setMode] = useState<"local" | "backend">("backend");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -54,9 +49,7 @@ export default function DashboardClient() {
           const body = await response.json() as DashboardPayload;
           if (!response.ok || !body.ok) throw new Error(body.error || "Dashboard data load failed");
           setRows(Array.isArray(body.rows) ? body.rows : []);
-          setServices(body.services || {});
           setBackendError(String(body.backendError || ""));
-          setMode(body.mode || "backend");
         } catch (error) {
           if (controller.signal.aborted) return;
           setBackendError(error instanceof Error ? error.message : "Dashboard data load failed");
@@ -91,13 +84,6 @@ export default function DashboardClient() {
   const apSubledger = n(get("apSubledger"));
   const arDifference = n(get("arReconciliationDifference"));
   const apDifference = n(get("apReconciliationDifference"));
-
-  const coreVersion = services.core?.version || "Unavailable";
-  const reportingVersion = services.reporting?.version || "Unavailable";
-  const documentVersion = services.document?.version || "Unavailable";
-  const coreReady = mode === "local" || Boolean(services.core?.ok && coreVersion === "0.5.0");
-  const reportingReady = mode === "local" || Boolean(services.reporting?.ok && reportingVersion === "0.4.1");
-  const documentReady = mode === "local" || Boolean(services.document?.ok && documentVersion === "0.4.0");
 
   const activeLoan = String(get("loanStatus")).toUpperCase() === "ACTIVE";
   let nextLoanAccrual = "";
@@ -152,7 +138,7 @@ export default function DashboardClient() {
         {kpis.map(([label, value]) => <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
       </div>
 
-      <div className="two-col">
+      <div>
         <section className="panel">
           <h3>Control Snapshot</h3>
           <p>Pending finance approvals: <strong>{displayCount(draftApprovals)}</strong></p>
