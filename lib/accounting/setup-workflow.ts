@@ -114,7 +114,7 @@ export const setupConfigSchema = z.object({
       path: ["customBusinessType"],
     });
   }
-  if (config.gstStatus === "VERIFIED") {
+  if (config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") {
     if (!config.gstNumber.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -125,7 +125,7 @@ export const setupConfigSchema = z.object({
     if (!config.gstEvidenceDocName.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "GST registration certificate document is required when GST status is Verified",
+        message: "GST registration certificate document is required when GST status is Registered or Verified",
         path: ["gstEvidenceDocName"],
       });
     }
@@ -272,7 +272,8 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const costCentersValid = costCenterValidation.valid;
   const requiredCostCentersReady = ERP_COST_CENTER_SETTING_FIELDS.every((field) => !field.required || Boolean(String((config as Record<string, unknown>)[field.configKey] || "").trim()));
   const businessTypeReady = Boolean(config.businessType && (config.businessType !== "OTHER" || config.customBusinessType));
-  const gstReady = Boolean(config.gstStatus && (config.gstStatus !== "VERIFIED" || (config.gstNumber && config.gstEvidenceDocName)));
+  const gstNeedsCertificate = config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED";
+  const gstReady = Boolean(config.gstStatus && (!gstNeedsCertificate || (config.gstEvidenceDocName && (config.gstStatus !== "VERIFIED" || config.gstNumber))));
   const configurationReady = Boolean(config.companyName && config.companyShortName && config.country && config.registrationNo && config.baseCurrency && config.financialYearPeriod && gstReady && businessTypeReady && config.openingMode && config.openingDate && requiredAccountDefaultsReady && requiredCostCentersReady && costCentersValid && mappingsValid);
   const openingValidated = valueOf(settings, "opening_validation_status") === "VALID";
   const openingBalanceEntries = parseOpeningBalanceEntries(valueOf(settings, "opening_balance_entries", "[]"));
@@ -372,7 +373,7 @@ export async function saveSetupConfig(input: unknown, actorEmail: string, client
     for (const [key, value] of Object.entries(pairs)) {
       await tx.globalSettings.upsert({ where: { key }, create: settingValue(key, value, actorEmail), update: { value, updatedBy: actorEmail, updatedAt: new Date() } });
     }
-    if (config.gstStatus === "VERIFIED" && config.gstEvidenceDocName.trim()) {
+    if ((config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") && config.gstEvidenceDocName.trim()) {
       const existingDoc = await tx.document.findFirst({
         where: { documentType: "GST_REGISTRATION", name: config.gstEvidenceDocName.trim() },
         select: { id: true },
