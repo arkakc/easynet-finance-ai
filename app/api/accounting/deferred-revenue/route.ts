@@ -10,7 +10,7 @@ import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings
 const requestSchema = z.object({
   scheduleId: z.string().trim().min(1),
   action: z.enum(["preview", "recognize"]),
-  postingDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/),
+  postingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
 type Schedule = {
