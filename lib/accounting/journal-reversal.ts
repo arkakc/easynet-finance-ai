@@ -1,4 +1,5 @@
 import { Prisma, PrismaClient } from "@prisma/client";
+import { ensurePaymentScheduleInfrastructure } from "@/lib/accounting/payment-schedule-store";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
@@ -174,6 +175,13 @@ async function synchronizeSourceAfterReversal(
     if (!invoice) {
       throw new Error("Linked Sales Invoice was not found; reversal aborted to protect AR reconciliation");
     }
+    const revenueSchedules = await tx.$queryRaw<Array<{ status: string }>>(Prisma.sql`
+      SELECT "status" FROM "PaymentSchedule"
+      WHERE "sourceType" = 'DEFERRED_REVENUE' AND "sourceId" = ${invoice.id}
+    `);
+    if (revenueSchedules.some(s => s.status === "COMPLETED")) {
+      throw new Error("Reverse posted deferred revenue recognition journals before reversing this sales invoice");
+    }
     const activeAllocations = await tx.paymentAllocation.count({
       where: { invoiceId: invoice.id, status: "POSTED" },
     });
@@ -263,6 +271,7 @@ export async function reversePostedJournal(
   input: ReverseJournalInput,
   client: PrismaClient = prisma,
 ) {
+  await ensurePaymentScheduleInfrastructure(client);
   const normalizedDate = normalizeAccountingDate(input.reversalDate);
   const postingDate = new Date(`${normalizedDate}T00:00:00+10:00`);
 
@@ -323,6 +332,22 @@ export async function reversePostedJournal(
     const totalDebit = round2(reversedLines.reduce((sum, line) => sum + Number(line.debit), 0));
     const totalCredit = round2(reversedLines.reduce((sum, line) => sum + Number(line.credit), 0));
     if (totalDebit !== totalCredit) throw new Error("Original journal is not balanced");
+
+    if (type === "DEFERRED_REVENUE") {
+      const scheduleId = String(original.sourceDocId || "");
+      const schedules = await tx.$queryRaw<Array<{ scheduleId: string; status: string }>>(Prisma.sql`
+        SELECT "scheduleId", "status" FROM "PaymentSchedule"
+        WHERE "sourceType" = 'DEFERRED_REVENUE' AND "scheduleId" = ${scheduleId}
+      `);
+      if (schedules.length !== 1 || schedules[0].status !== "COMPLETED") {
+        throw new Error("Linked completed deferred revenue schedule not found; reversal blocked");
+      }
+      const updated = await tx.$executeRaw(Prisma.sql`
+        UPDATE "PaymentSchedule" SET "status" = 'PENDING', "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "scheduleId" = ${scheduleId} AND "status" = 'COMPLETED'
+      `);
+      if (updated !== 1) throw new Error("Deferred revenue schedule status changed during reversal");
+    }
 
     // Source/subledger correction and the counter-entry commit together.
     // Any failure rolls the complete reversal back.
