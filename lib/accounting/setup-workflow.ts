@@ -9,7 +9,6 @@ import {
   ERP_TEXT_SETTING_FIELDS,
 } from "@/lib/accounting/finance-settings";
 import { validateCostCenterRefs } from "@/lib/accounting/cost-centers";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -65,6 +64,7 @@ export const setupConfigSchema = z.object({
   gstNumber: z.string().trim().max(80).optional().default(""),
   gstEvidenceNote: z.string().trim().max(500).optional().default(""),
   gstEvidenceDocName: z.string().trim().max(180).optional().default(""),
+  gstEvidenceDocId: z.string().trim().max(80).optional().default(""),
   accountingMethod: z.any().optional().transform(() => LOCKED_ACCOUNTING_METHOD),
   inventoryMethod: z.any().optional().transform(() => LOCKED_INVENTORY_METHOD),
   businessType: z.enum(["SERVICE", "TRADING", "WHOLESALE", "MANUFACTURING", "CONSTRUCTION", "IT_TECHNOLOGY", "PROFESSIONAL_SERVICES", "OTHER"]).default("IT_TECHNOLOGY"),
@@ -118,14 +118,14 @@ export const setupConfigSchema = z.object({
     if (!config.gstNumber.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "GST / IRC TIN is required when GST status is Verified",
+        message: "GST / IRC TIN is required when GST status is Registered or Verified",
         path: ["gstNumber"],
       });
     }
-    if (!config.gstEvidenceDocName.trim()) {
+    if (!config.gstEvidenceDocId.trim() || !config.gstEvidenceDocName.trim()) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "GST registration certificate document is required when GST status is Registered or Verified",
+        message: "GST Registration Certificate is required when GST status is REGISTERED or VERIFIED",
         path: ["gstEvidenceDocName"],
       });
     }
@@ -220,6 +220,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
     gstNumber: valueOf(settings, "gst_number") || valueOf(settings, "company_tin"),
     gstEvidenceNote: valueOf(settings, "gst_evidence_note"),
     gstEvidenceDocName: valueOf(settings, "gst_evidence_doc_name"),
+    gstEvidenceDocId: valueOf(settings, "gst_evidence_doc_id"),
     accountingMethod: LOCKED_ACCOUNTING_METHOD,
     inventoryMethod: LOCKED_INVENTORY_METHOD,
     businessType: valueOf(settings, "business_type", "IT_TECHNOLOGY"),
@@ -264,6 +265,12 @@ export async function getSetupOverview(client: DbClient = prisma) {
     return Boolean(account && types.includes(account.type) && account.children.length === 0);
   });
   const requiredAccountDefaultsReady = ALL_ERP_ACCOUNT_SETTING_FIELDS.every((field) => !field.required || Boolean(normalizeMappingCode(String((config as Record<string, unknown>)[field.configKey] || ""))));
+  if (config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") {
+    const doc = await client.document.findFirst({ where: { id: config.gstEvidenceDocId, documentType: "GST_REGISTRATION", name: config.gstEvidenceDocName } });
+    if (!doc?.fileUrl?.startsWith("/api/setup/gst-certificate?id=")) throw new Error("Upload a valid GST Registration Certificate before saving.");
+    const stored = await client.globalSettings.findUnique({ where: { key: `gst_certificate_data_${doc.fileUrl.split("id=")[1]}` } });
+    if (!stored?.value) throw new Error("The GST Registration Certificate file is missing. Upload it again.");
+  }
   const costCenterValidation = await validateCostCenterRefs(ERP_COST_CENTER_SETTING_FIELDS.map((field) => ({
     key: field.label,
     value: String((config as Record<string, unknown>)[field.configKey] || ""),
@@ -273,7 +280,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const requiredCostCentersReady = ERP_COST_CENTER_SETTING_FIELDS.every((field) => !field.required || Boolean(String((config as Record<string, unknown>)[field.configKey] || "").trim()));
   const businessTypeReady = Boolean(config.businessType && (config.businessType !== "OTHER" || config.customBusinessType));
   const gstNeedsCertificate = config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED";
-  const gstReady = Boolean(config.gstStatus && (!gstNeedsCertificate || (config.gstEvidenceDocName && (config.gstStatus !== "VERIFIED" || config.gstNumber))));
+  const gstReady = Boolean(config.gstStatus && (!gstNeedsCertificate || (config.gstEvidenceDocId && config.gstEvidenceDocName && config.gstNumber)));
   const configurationReady = Boolean(config.companyName && config.companyShortName && config.country && config.registrationNo && config.baseCurrency && config.financialYearPeriod && gstReady && businessTypeReady && config.openingMode && config.openingDate && requiredAccountDefaultsReady && requiredCostCentersReady && costCentersValid && mappingsValid);
   const openingValidated = valueOf(settings, "opening_validation_status") === "VALID";
   const openingBalanceEntries = parseOpeningBalanceEntries(valueOf(settings, "opening_balance_entries", "[]"));
@@ -343,6 +350,7 @@ export async function saveSetupConfig(input: unknown, actorEmail: string, client
     company_tin: config.gstNumber,
     gst_evidence_note: config.gstEvidenceNote,
     gst_evidence_doc_name: config.gstEvidenceDocName,
+    gst_evidence_doc_id: config.gstEvidenceDocId,
     accounting_method: LOCKED_ACCOUNTING_METHOD,
     inventory_method: LOCKED_INVENTORY_METHOD,
     perpetual_inventory: "true",
@@ -372,27 +380,6 @@ export async function saveSetupConfig(input: unknown, actorEmail: string, client
   await client.$transaction(async (tx) => {
     for (const [key, value] of Object.entries(pairs)) {
       await tx.globalSettings.upsert({ where: { key }, create: settingValue(key, value, actorEmail), update: { value, updatedBy: actorEmail, updatedAt: new Date() } });
-    }
-    if ((config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") && config.gstEvidenceDocName.trim()) {
-      const existingDoc = await tx.document.findFirst({
-        where: { documentType: "GST_REGISTRATION", name: config.gstEvidenceDocName.trim() },
-        select: { id: true },
-      });
-      if (!existingDoc) {
-        const safeName = config.gstEvidenceDocName.trim().replace(/[\\/:*?"<>|]/g, "-");
-        await tx.document.create({
-          data: {
-            code: documentSeriesId("Document"),
-            name: config.gstEvidenceDocName.trim(),
-            type: "CERTIFICATE",
-            documentType: "GST_REGISTRATION",
-            fileUrl: `/documents/${safeName}`,
-            status: "APPROVED",
-            description: `Retained IRC GST Registration Certificate for ${config.gstNumber || config.companyName}`,
-            createdBy: actor.id,
-          },
-        });
-      }
     }
     if (typeof completedStepIndex === "number") await recordSetupStepComplete(tx, completedStepIndex, actorEmail);
     await tx.auditLog.create({ data: { action: "UPDATE", entityType: "ACCOUNTING_SETUP", entityCode: "SETUP", description: `Accounting setup configuration saved by ${actorEmail}`, changes: JSON.stringify(config), userId: actor.id } });
