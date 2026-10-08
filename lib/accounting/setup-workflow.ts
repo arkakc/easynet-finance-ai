@@ -28,6 +28,7 @@ export const SETUP_KEYS = [
   "company_tin",
   "gst_evidence_note",
   "gst_evidence_doc_name",
+  "gst_evidence_doc_id",
   "accounting_method",
   "inventory_method",
   "business_type",
