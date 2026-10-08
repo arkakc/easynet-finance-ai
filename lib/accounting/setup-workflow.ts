@@ -309,8 +309,8 @@ export async function getSetupOverview(client: DbClient = prisma) {
 export async function saveSetupConfig(input: unknown, actorEmail: string, client: PrismaClient = prisma, completedStepIndex?: number) {
   const parsed = setupConfigSchema.safeParse(input);
   if (!parsed.success) {
-    const fields = parsed.error.issues.map((issue) => issue.path.join(".") || "configuration").join(", ");
-    throw new Error(`Required setup data is missing or invalid: ${fields}`);
+    const messages = parsed.error.issues.map((issue) => issue.message);
+    throw new Error(`Required setup data is missing or invalid: ${[...new Set(messages)].join("; ")}`);
   }
   const config = parsed.data;
   if (config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") {
