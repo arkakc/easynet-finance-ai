@@ -1091,7 +1091,7 @@ export default function SettingsPage() {
                       disabled={settingsFieldDisabled}
                     />
                   </label>
-                  <label className="settings-field-label">
+                  <label className={`settings-field-label ${row.id && row.bankName.trim() ? "saved-required-field" : ""}`}>
                     Bank Name *
                     <input
                       type="text"
@@ -1103,7 +1103,7 @@ export default function SettingsPage() {
                       required
                     />
                   </label>
-                  <label className="settings-field-label">
+                  <label className={`settings-field-label ${row.id && row.accountNumber.trim() ? "saved-required-field" : ""}`}>
                     Bank Account Number *
                     <input
                       type="text"
