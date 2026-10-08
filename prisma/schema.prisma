@@ -646,6 +646,7 @@ model InvoiceLine {
   discountAmount  Decimal  @default(0)
   amount          Decimal  @default(0)
   revenueAccount  String?
+  recognitionMonths Int?
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
