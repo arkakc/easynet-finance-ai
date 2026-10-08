@@ -265,12 +265,6 @@ export async function getSetupOverview(client: DbClient = prisma) {
     return Boolean(account && types.includes(account.type) && account.children.length === 0);
   });
   const requiredAccountDefaultsReady = ALL_ERP_ACCOUNT_SETTING_FIELDS.every((field) => !field.required || Boolean(normalizeMappingCode(String((config as Record<string, unknown>)[field.configKey] || ""))));
-  if (config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") {
-    const doc = await client.document.findFirst({ where: { id: config.gstEvidenceDocId, documentType: "GST_REGISTRATION", name: config.gstEvidenceDocName } });
-    if (!doc?.fileUrl?.startsWith("/api/setup/gst-certificate?id=")) throw new Error("Upload a valid GST Registration Certificate before saving.");
-    const stored = await client.globalSettings.findUnique({ where: { key: `gst_certificate_data_${doc.fileUrl.split("id=")[1]}` } });
-    if (!stored?.value) throw new Error("The GST Registration Certificate file is missing. Upload it again.");
-  }
   const costCenterValidation = await validateCostCenterRefs(ERP_COST_CENTER_SETTING_FIELDS.map((field) => ({
     key: field.label,
     value: String((config as Record<string, unknown>)[field.configKey] || ""),
@@ -318,6 +312,12 @@ export async function saveSetupConfig(input: unknown, actorEmail: string, client
     throw new Error(`Required setup data is missing or invalid: ${fields}`);
   }
   const config = parsed.data;
+  if (config.gstStatus === "REGISTERED" || config.gstStatus === "VERIFIED") {
+    const doc = await client.document.findFirst({ where: { id: config.gstEvidenceDocId, documentType: "GST_REGISTRATION", name: config.gstEvidenceDocName } });
+    if (!doc?.fileUrl?.startsWith("/api/setup/gst-certificate?id=")) throw new Error("Upload a valid GST Registration Certificate before saving.");
+    const stored = await client.globalSettings.findUnique({ where: { key: `gst_certificate_data_${doc.fileUrl.split("id=")[1]}` } });
+    if (!stored?.value) throw new Error("The GST Registration Certificate file is missing. Upload it again.");
+  }
   const costCenterValidation = await validateCostCenterRefs(ERP_COST_CENTER_SETTING_FIELDS.map((field) => ({
     key: field.label,
     value: String((config as Record<string, unknown>)[field.configKey] || ""),
