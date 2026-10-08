@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 import { ensurePaymentScheduleInfrastructure } from "@/lib/accounting/payment-schedule-store";
+import { assertInvoiceRecognitionReversible, assertRecognitionReversalSchedule } from "@/lib/accounting/deferred-revenue-policy";
 import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { prisma } from "@/src/lib/prisma";
@@ -179,9 +180,7 @@ async function synchronizeSourceAfterReversal(
       SELECT "status" FROM "PaymentSchedule"
       WHERE "sourceType" = 'DEFERRED_REVENUE' AND "sourceId" = ${invoice.id}
     `);
-    if (revenueSchedules.some(s => s.status === "COMPLETED")) {
-      throw new Error("Reverse posted deferred revenue recognition journals before reversing this sales invoice");
-    }
+    assertInvoiceRecognitionReversible(revenueSchedules);
     const activeAllocations = await tx.paymentAllocation.count({
       where: { invoiceId: invoice.id, status: "POSTED" },
     });
@@ -344,9 +343,7 @@ export async function reversePostedJournal(
         SELECT "scheduleId", "status" FROM "PaymentSchedule"
         WHERE "sourceType" = 'DEFERRED_REVENUE' AND "scheduleId" = ${scheduleId}
       `);
-      if (schedules.length !== 1 || schedules[0].status !== "COMPLETED") {
-        throw new Error("Linked completed deferred revenue schedule not found; reversal blocked");
-      }
+      assertRecognitionReversalSchedule(schedules);
       const updated = await tx.$executeRaw(Prisma.sql`
         UPDATE "PaymentSchedule" SET "status" = 'PENDING', "updatedAt" = CURRENT_TIMESTAMP
         WHERE "scheduleId" = ${scheduleId} AND "status" = 'COMPLETED'
