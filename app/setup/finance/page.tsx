@@ -160,6 +160,7 @@ export default function FinanceSetupPage() {
   const [coaView, setCoaView] = useState<"tree" | "list">("tree");
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [mappingSuggestionNotes, setMappingSuggestionNotes] = useState<MappingSuggestionNotes>({});
+  const [mappingProposals, setMappingProposals] = useState<Partial<Record<MappingAccountKey, { code: string; score: number }>>>({});
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
   const [costCenterLoading, setCostCenterLoading] = useState(false);
   const [quickAccountField, setQuickAccountField] = useState<ErpAccountSettingField | null>(null);
@@ -558,7 +559,7 @@ export default function FinanceSetupPage() {
       if (!accounts.length) accounts = await loadSetupAccounts();
       const activeLedgers = accounts.filter((account) => account.active && !account.isGroup);
       if (!activeLedgers.length) throw new Error("No active ledger accounts found. Import or refresh the Chart of Accounts first.");
-      const updates: Partial<Record<MappingAccountKey, string>> = {};
+      const proposals: Partial<Record<MappingAccountKey, { code: string; score: number }>> = {};
       const notes: MappingSuggestionNotes = {};
       for (const field of mappingAccountFields) {
         const candidates = activeLedgers.filter((account) => accountTypeAllowed(account, field.allowedTypes));
@@ -567,16 +568,15 @@ export default function FinanceSetupPage() {
           .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode, undefined, { numeric: true }));
         const best = ranked[0];
         if (best && best.score > 0) {
-          updates[field.configKey] = best.account.accountCode;
+          proposals[field.configKey] = { code: best.account.accountCode, score: best.score };
           notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (${confidenceLabel(best.score)})`;
         } else {
           notes[field.configKey] = `${field.label}: no accurate active ledger match found`;
         }
       }
-      setConfig((current) => ({ ...current, ...updates }));
+      setMappingProposals(proposals);
       setMappingSuggestionNotes(notes);
-      const suggestedCount = Object.keys(updates).length;
-      setMessage(`${suggestedCount} AI suggested account selections applied from the existing Chart of Accounts. Please review each field before Save & continue.`);
+      setMessage("Account mapping suggestions are ready for review. No account mappings have been changed.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "AI suggested account selection failed"); }
     finally { setAiSuggesting(false); }
   };
@@ -735,18 +735,19 @@ export default function FinanceSetupPage() {
         </div>
         <div className="button-row">
           <button type="button" className="secondary-btn" onClick={() => void loadSetupAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{coaLoading ? "Loading accounts…" : "Refresh account list"}</button>
-          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "AI suggesting…" : "AI Suggested Account Selection"}</button>
+          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "AI suggesting…" : "Suggest Account Mappings"}</button>
         </div>
       </div>
       <div className="form-wide warning-panel">
-        <strong>Manual linked setup required</strong>
-        <p className="small">The system does not auto-set these accounts. Search by account number or account name and choose the correct active ledger account from your imported Chart of Accounts. Group accounts are blocked.</p>
+        <strong>Account mapping review required</strong>
+        <p className="small">Select correct active ledger accounts from your Chart of Accounts. Suggestions never automatically overwrite existing mappings. Group accounts are blocked.</p>
       </div>
       {renderQuickAccountCreator()}
       {renderQuickCostCenterCreator()}
       {Object.keys(mappingSuggestionNotes).length > 0 && <div className="form-wide conversion-box">
-        <strong>AI suggestion result</strong>
-        {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <p key={field.settingKey} className="small">{mappingSuggestionNotes[field.configKey]}</p> : null)}
+        <strong>Suggested mappings (not applied)</strong>
+        <p className="small">Review each suggested mapping before applying. Low-confidence suggestions require manual selection. Existing mapping selections are protected.</p>
+        {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <div key={field.settingKey} className="button-row" style={{ justifyContent: "space-between", marginTop: 8 }}><span className="small">{mappingSuggestionNotes[field.configKey]}</span>{mappingProposals[field.configKey] && mappingProposals[field.configKey]!.score >= 34 && !String(config[field.configKey] || "").trim() && <button type="button" className="secondary-btn" onClick={() => { const proposed = mappingProposals[field.configKey]; if (proposed) setConfig((current) => String(current[field.configKey] || "").trim() ? current : { ...current, [field.configKey]: proposed.code }); }}>Apply suggestion</button>}</div> : null)}
       </div>}
       <div className="form-wide settings-section-title">
         <h3>Accounts Settings</h3>
