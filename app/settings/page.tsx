@@ -467,6 +467,10 @@ export default function SettingsPage() {
   const hasMandatoryBankAccount = activeBankAccounts.some((row) => row.bankName.trim() && row.accountNumber.trim());
   const hasIncompleteBankAccount = activeBankAccounts.some((row) => !row.bankName.trim() || !row.accountNumber.trim());
 
+  const companySectionComplete = Boolean(companyName.trim() && companyShortName.trim() && companyCountry.trim() && companyRegistrationNo.trim() && baseCurrency.trim());
+  const financialYearSectionComplete = Boolean(financialYearPeriod.trim());
+  const gstSectionComplete = Boolean(gstStatus.trim() && (!["REGISTERED", "VERIFIED"].includes(gstStatus) || (hasGstNumber && Boolean(retainedDocName.trim() || existingDocs.length))));
+
   // Overall Mandatory setup completion check
   const isMandatoryComplete = Boolean(
     companyName.trim() &&
@@ -631,7 +635,7 @@ export default function SettingsPage() {
             </span>
           ) : (
             <span className="badge" style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>
-              ⚠️ Mandatory Setup Required
+              ⚠️ {setupStatus !== "ACTIVE" ? "Setup Wizard Pending" : "Bank Account Required"}
             </span>
           )}
           <Link prefetch={false} className="button-link secondary-link" href="/accounting/exchange-rates">
@@ -649,7 +653,7 @@ export default function SettingsPage() {
         <div className="settings-blocked-banner" style={{ marginBottom: "16px" }}>
           <span>⚠️</span>
           <div>
-            <strong>Mandatory Setup Incomplete:</strong> Complete the Fresh Company Setup Wizard before using operational finance pages.
+            {setupStatus !== "ACTIVE" ? <><strong>Company Setup Wizard Pending:</strong> Complete all remaining setup steps and activate accounting before using operational finance pages.</> : <><strong>Bank Account Required:</strong> Company setup is active. Add a valid active company bank account to complete Finance &amp; ERP Configuration.</>}
           </div>
         </div>
       )}
@@ -710,7 +714,7 @@ export default function SettingsPage() {
               <span style={{ fontSize: "18px" }}>🏢</span>
               <h3 className="settings-section-title">General Company & Base Currency</h3>
             </div>
-            <span className="settings-badge-mandatory">Mandatory Before Use</span>
+            <span className={companySectionComplete ? "settings-badge-ready" : "settings-badge-mandatory"}>{companySectionComplete ? "Completed" : "Required"}</span>
           </div>
 
           <div className="settings-grid-2col">
@@ -798,7 +802,7 @@ export default function SettingsPage() {
               <span style={{ fontSize: "18px" }}>📅</span>
               <h3 className="settings-section-title">Papua New Guinea Financial Year Period</h3>
             </div>
-            <span className="settings-badge-mandatory">Mandatory Before Use</span>
+            <span className={financialYearSectionComplete ? "settings-badge-ready" : "settings-badge-mandatory"}>{financialYearSectionComplete ? "Completed" : "Required"}</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -854,7 +858,7 @@ export default function SettingsPage() {
               <span style={{ fontSize: "18px" }}>⚖️</span>
               <h3 className="settings-section-title">Papua New Guinea GST & IRC Compliance</h3>
             </div>
-            <span className="settings-badge-mandatory">Mandatory Before Use</span>
+            <span className={gstSectionComplete ? "settings-badge-ready" : "settings-badge-mandatory"}>{gstSectionComplete ? "Completed" : "Required"}</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -926,7 +930,7 @@ export default function SettingsPage() {
               <div className="settings-info-banner">
                 <span>ℹ️</span>
                 <div>
-                  For status <strong>{gstStatus}</strong>, retaining a source document evidence is not required to save.
+                  For status <strong>{gstStatus}</strong>, a retained GST Registration Certificate is required in the Company Setup Wizard.
                 </div>
               </div>
             )}
@@ -1037,7 +1041,7 @@ export default function SettingsPage() {
               <h3 className="settings-section-title">Company Banking Details (PNG Operations)</h3>
             </div>
             <span className={hasMandatoryBankAccount && !hasIncompleteBankAccount ? "settings-badge-ready" : "settings-badge-required"}>
-              Mandatory Bank Master
+              {hasMandatoryBankAccount && !hasIncompleteBankAccount ? "Bank Account Completed" : "Bank Account Required"}
             </span>
           </div>
 
