@@ -188,6 +188,11 @@ async function synchronizeSourceAfterReversal(
     if (Number(invoice.amountPaid || 0) > 0.001 || activeAllocations > 0) {
       throw new Error("Reverse allocated customer receipts before reversing this sales invoice");
     }
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE "PaymentSchedule" SET "status" = 'CANCELLED', "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "sourceType" = 'DEFERRED_REVENUE' AND "sourceId" = ${invoice.id}
+        AND "status" = 'PENDING'
+    `);
     await tx.invoice.update({
       where: { id: invoice.id },
       data: { status: "VOID", outstanding: 0, baseOutstanding: 0 },
