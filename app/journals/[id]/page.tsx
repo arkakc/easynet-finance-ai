@@ -64,11 +64,11 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
       ? supplierMap.get(line.supplierId) || line.supplierId
       : "—";
 
-  const canEditDelete = ["DRAFT", "PENDING"].includes(header.status) && header.sourceDocType.startsWith("MANUAL_") && user.permissions.includes("accounts.write");
+  const canEditDelete = ["DRAFT", "PENDING"].includes(header.status) && (header.sourceDocType?.startsWith("MANUAL_") ?? false) && user.permissions.includes("accounts.write");
 
 
   const canApprove = header.status === "PENDING"
-    && header.sourceDocType.startsWith("MANUAL_")
+    && (header.sourceDocType?.startsWith("MANUAL_") ?? false)
     && user.permissions.includes("post.approve")
     && (user.roles.includes("System Manager") || String(header.createdBy || "").toLowerCase() !== String(user.email || "").toLowerCase());
 
