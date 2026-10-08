@@ -5252,3 +5252,22 @@ form.panel {
     width: 100%;
   }
 }
+
+
+/* Warehouse Master: two-line compact toolbar, clear selection and actions. */
+.warehouse-master-toolbar { display: grid; gap: 12px; padding: 14px 0; }
+.warehouse-master-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.warehouse-master-filters > input { flex: 1 1 330px; min-width: 220px; max-width: 620px; }
+.warehouse-master-filters > select { flex: 0 1 195px; min-width: 155px; }
+.warehouse-master-filters > button { flex: 0 0 auto; white-space: nowrap; }
+.warehouse-master-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 10px 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+.warehouse-select-all { display: inline-flex !important; align-items: center; gap: 8px !important; flex: 0 0 auto; white-space: nowrap; font-size: 13px; padding: 0 !important; }
+.warehouse-select-all::after { content: none !important; }
+.warehouse-select-all input { margin: 0; width: 16px; height: 16px; flex: 0 0 auto; }
+.warehouse-selected-count { color: #64748b; font-size: 12px; white-space: nowrap; }
+.warehouse-bulk-buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.warehouse-bulk-buttons button { white-space: nowrap; }
+@media (max-width: 740px) {
+  .warehouse-master-filters > input, .warehouse-master-filters > select { max-width: none; flex: 1 1 100%; }
+  .warehouse-bulk-buttons { margin-left: 0; width: 100%; }
+}
