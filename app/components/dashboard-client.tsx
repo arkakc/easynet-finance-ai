@@ -126,93 +126,6 @@ export default function DashboardClient() {
     ["PO Commitments", displayValue(poCommitments)],
   ];
 
-  const systemMessages: Array<{
-    id: string;
-    type: "info" | "success" | "warning" | "error";
-    icon: string;
-    title: string;
-    text: string;
-  }> = [];
-
-  if (!loaded) {
-    systemMessages.push({
-      id: "loading",
-      type: "info",
-      icon: "⏳",
-      title: "Loading Live Data",
-      text: "The dashboard UI is ready while live reporting and backend values are fetched in the background.",
-    });
-  } else {
-    if (mode === "local") {
-      systemMessages.push({
-        id: "db",
-        type: "success",
-        icon: "✓",
-        title: "Database Connected",
-        text: "Dashboard values are loaded from the persistent Prisma database.",
-      });
-    }
-
-    if (backendError) {
-      systemMessages.push({
-        id: "backend-err",
-        type: "error",
-        icon: "⚠️",
-        title: "Financial Data Notice",
-        text: `${backendError}. Do not rely on dashboard balances until this warning clears.`,
-      });
-    }
-
-    if (Math.abs(arDifference) >= 0.01 || Math.abs(apDifference) >= 0.01) {
-      systemMessages.push({
-        id: "subledger-control",
-        type: "warning",
-        icon: "⚠️",
-        title: "Subledger Reconciliation Required",
-        text: `AR differs by ${money(arDifference)} and AP differs by ${money(apDifference)}. Restore or migrate the missing source invoices and supplier bills before closing the period.`,
-      });
-    }
-
-    if (!reportingReady) {
-      systemMessages.push({
-        id: "reporting-upgrade",
-        type: "warning",
-        icon: "⚙️",
-        title: "Reporting Backend Upgrade Required",
-        text: `Connected Reporting API is ${reportingVersion}. This feature branch expects v0.4.1 so reversed-document exclusion, credit-note reporting and accounting-truth project profitability are guaranteed only after the Reporting Apps Script is deployed at v0.4.1 and its materializer is refreshed.`,
-      });
-    }
-
-    if (!coreReady) {
-      systemMessages.push({
-        id: "core-version",
-        type: "warning",
-        icon: "⚙️",
-        title: "Core Backend Version Check",
-        text: `Connected Core API is ${coreVersion}; Accounting 0.5 expects Core v0.5.0.`,
-      });
-    }
-
-    if (!documentReady) {
-      systemMessages.push({
-        id: "doc-version",
-        type: "warning",
-        icon: "⚙️",
-        title: "Document Backend Version Check",
-        text: `Connected Document API is ${documentVersion}; this branch expects Document v0.4.0.`,
-      });
-    }
-
-    systemMessages.push({
-      id: "paint-info",
-      type: "info",
-      icon: "ℹ️",
-      title: "Page Synchronization Info",
-      text: "Page UI loads first; live reporting values and backend readiness are populated immediately after the first paint.",
-    });
-  }
-
-  const hasWarnings = systemMessages.some((m) => m.type === "warning" || m.type === "error");
 
   return (
     <>
@@ -221,32 +134,19 @@ export default function DashboardClient() {
           <h2>Management Dashboard</h2>
           <p className="small">Financial overview and real-time controls for Papua New Guinea SME operations.</p>
         </div>
-        <div className="page-head-actions">
-          {systemMessages.length > 0 && (
-            <details className="system-notice-tab">
-              <summary>
-                <span>ℹ️ System Notice</span>
-                <span className="notice-arrow">▾</span>
-              </summary>
-              <div className="system-notice-dropdown" style={{ maxHeight: "400px", overflowY: "auto", width: "min(440px, calc(100vw - 32px))", whiteSpace: "normal" }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #e2e8f0" }}>
-                  System Notices & Diagnostics
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {systemMessages.map((msg) => (
-                    <div key={msg.id} style={{ display: "flex", gap: "8px", alignItems: "flex-start", fontSize: "12px" }}>
-                      <span>{msg.icon}</span>
-                      <div style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-                        <strong>{msg.title}:</strong> {msg.text}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </details>
-          )}
-        </div>
+
       </div>
+
+      {loaded && backendError && (
+        <div className="warning-panel" role="alert">
+          <strong>Financial data unavailable:</strong> Dashboard balances may be incomplete. Please contact your system administrator before relying on these figures.
+        </div>
+      )}
+      {loaded && !backendError && (Math.abs(arDifference) >= 0.01 || Math.abs(apDifference) >= 0.01) && (
+        <div className="warning-panel" role="alert">
+          <strong>Accounts reconciliation required:</strong> Receivables difference {money(arDifference)}; payables difference {money(apDifference)}. Review subledger balances before closing the period.
+        </div>
+      )}
 
       <div className="grid dashboard-grid">
         {kpis.map(([label, value]) => <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
@@ -266,15 +166,7 @@ export default function DashboardClient() {
           <div className="button-row"><Link prefetch={false} className="link-button" href="/controls">Open Control Centre</Link><Link prefetch={false} className="link-button secondary-link" href="/reports">Open Reports</Link></div>
         </section>
 
-        <section className="panel">
-          <h3>Backend Readiness</h3>
-          {!loaded ? <p>Checking connected services…</p> : <>
-            <p>Core API: <strong>{coreVersion}</strong> · {coreReady ? "READY" : "REVIEW"}</p>
-            <p>Reporting API: <strong>{reportingVersion}</strong> · {reportingReady ? "READY" : "UPGRADE REQUIRED"}</p>
-            <p>Document API: <strong>{documentVersion}</strong> · {documentReady ? "READY" : "REVIEW"}</p>
-          </>}
-          <p className="small">{mode === "local" ? "The persistent Prisma database is connected and ready." : "Version checks run after the UI paints against the configured reporting services."}</p>
-        </section>
+
       </div>
 
       <div className="two-col">
