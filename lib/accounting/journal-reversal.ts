@@ -345,7 +345,7 @@ export async function reversePostedJournal(
       `);
       assertRecognitionReversalSchedule(schedules);
       const updated = await tx.$executeRaw(Prisma.sql`
-        UPDATE "PaymentSchedule" SET "status" = 'PENDING', "updatedAt" = CURRENT_TIMESTAMP
+        UPDATE "PaymentSchedule" SET "status" = 'REVERSED', "updatedAt" = CURRENT_TIMESTAMP
         WHERE "scheduleId" = ${scheduleId} AND "status" = 'COMPLETED'
       `);
       if (updated !== 1) throw new Error("Deferred revenue schedule status changed during reversal");
