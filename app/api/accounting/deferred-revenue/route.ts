@@ -21,7 +21,7 @@ const cents = (amount: unknown) => Math.round(Number(amount) * 100) / 100;
 
 export async function POST(request: Request) {
   try {
-    await requirePermission("accounts.write");
+    await requirePermission("post.approve");
     const input = requestSchema.parse(await request.json());
     const date = new Date(input.postingDate + "T00:00:00Z");
     if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== input.postingDate) {
