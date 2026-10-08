@@ -82,7 +82,10 @@ export async function buildCashFlowStatement(input: { from: string; asOf: string
 
   const lines = await client.journalLine.findMany({
     where: { accountId: { in: [...cashIds] }, journal: { status: "POSTED", date: { lte: asOfDate } } },
-    select: {\n      accountId: true,\n      debit: true,\n      credit: true,
+    select: {
+      accountId: true,
+      debit: true,
+      credit: true,
       journal: { select: { id: true, code: true, date: true, sourceDocType: true, reference: true, description: true } },
     },
     orderBy: [{ journal: { date: "asc" } }, { journalId: "asc" }, { lineNo: "asc" }],
