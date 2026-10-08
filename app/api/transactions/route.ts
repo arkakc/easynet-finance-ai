@@ -214,6 +214,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
         invoiceLineId: `${invoiceId}-${String(line.lineNo).padStart(3, "0")}`,
         invoiceId, ...line,
         revenueAccountId: String(item?.revenueAccount || parsed.accountId || defaults.defaultIncomeAccount),
+        recognitionMonths: item && itemType(item) !== "STOCK" ? Math.max(0, Math.min(120, Math.trunc(Number(item.deferredRevenueMonths || 0)))) : 0,
       };
     }), "transaction-ui");
     return { type, recordId: invoiceId, documentNumber: invoiceNumber, totals: t, status: "DRAFT" };
@@ -271,13 +272,32 @@ async function createExpense(raw: unknown) {
   return { type: "expense", recordId: expenseId, documentNumber: expenseNumber, totalAmount, status: "DRAFT" };
 }
 
+function recognitionPeriods(line: any, item: any, policy: Record<string, number>, accountId: string) {
+  if (itemType(item) === "STOCK") return 0;
+  // Invoice line snapshot takes precedence so later changes to the Item Master
+  // cannot silently alter the revenue policy of an already-created invoice.
+  const saved = line.recognitionMonths;
+  if (saved !== undefined && saved !== null && String(saved) !== "") {
+    const periods = Number(saved);
+    if (!Number.isInteger(periods) || periods < 0 || periods > 120) throw new Error("Invalid invoice-line recognition period");
+    return periods;
+  }
+  const itemMonths = item?.deferredRevenueMonths;
+  if (itemMonths !== undefined && itemMonths !== null && String(itemMonths) !== "") {
+    const periods = Number(itemMonths);
+    if (!Number.isInteger(periods) || periods < 0 || periods > 120) throw new Error("Invalid item recognition period");
+    return periods;
+  }
+  return Math.max(0, Math.min(120, Math.trunc(Number(policy[accountId] || 0))));
+}
+
 async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items: Map<string, any>, policy: Record<string, number>, defaultIncomeAccount: string) {
   const schedules: any[] = [];
   for (const line of invoiceLines) {
     const item = items.get(String(line.itemId || ""));
     const accountId = String(line.revenueAccountId || item?.revenueAccount || defaultIncomeAccount);
-    const periods = Number(policy[accountId] || 0);
-    if (!(periods > 1) || itemType(item) === "STOCK") continue;
+    const periods = recognitionPeriods(line, item, policy, accountId);
+    if (periods <= 1) continue;
     const amounts = splitEvenly(Number(line.netAmount || 0), periods);
     for (let index = 0; index < periods; index += 1) {
       schedules.push({
@@ -322,7 +342,7 @@ async function postSalesInvoice(row: any, approveAtomically = false) {
       accountId,
       amount: Number(line.netAmount || 0),
       description: String(line.description || "Sales revenue"),
-      deferred: itemType(item) !== "STOCK" && Number(policy[accountId] || 0) > 1,
+      deferred: recognitionPeriods(line, item, policy, accountId) > 1,
     };
   });
 
