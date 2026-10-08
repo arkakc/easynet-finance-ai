@@ -1071,6 +1071,12 @@ label:has(textarea[required])::after,
   content: none;
 }
 
+/* The mandatory badge is a prompt for missing setup data, not a permanent label.
+   Disabled/read-only controls do not reliably participate in native validity checks. */
+.settings-section-complete .settings-field-label::after {
+  content: none !important;
+}
+
 .field-action {
   display: flex;
   align-items: center;
