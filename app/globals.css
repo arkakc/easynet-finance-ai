@@ -1065,6 +1065,12 @@ label:has(textarea[required])::after,
   margin-top: 16px;
 }
 
+/* Show the mandatory badge only while a required control is empty or invalid.
+   Retain the HTML required attribute so browser and server validation remain active. */
+:is(label, .settings-field-label, .coa-form-group, .finance-modal-field):has(:is(input, select, textarea)[required]:valid)::after {
+  content: none;
+}
+
 .field-action {
   display: flex;
   align-items: center;
