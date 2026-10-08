@@ -117,7 +117,7 @@ function mapItem(i: any) {
     revenueAccount: i.revenueAccount || "",
     taxCode: i.taxCode || "GST",
     active: i.isActive !== false,
-    deferredRevenueMonths: 0,
+    deferredRevenueMonths: Number(i.deferredRevenueMonths || 0),
     createdAt: i.createdAt?.toISOString?.() || String(i.createdAt || ""),
   };
 }
@@ -948,6 +948,7 @@ export async function prismaAppendRecord<T = any>(
           sellPrice: record.defaultRate ? Number(record.defaultRate) : record.rate ? Number(record.rate) : 0,
           revenueAccount: record.revenueAccount !== undefined ? String(record.revenueAccount).trim() : "",
           costAccount: record.costAccount !== undefined ? String(record.costAccount).trim() : "",
+          deferredRevenueMonths: requestedType === "STOCK" ? 0 : Number(record.deferredRevenueMonths || 0),
           unit: record.uom ? String(record.uom) : record.unit ? String(record.unit) : "Each",
           isActive: true,
         },
