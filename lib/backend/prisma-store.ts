@@ -276,6 +276,7 @@ function mapInvoiceLine(l: any) {
   return {
     invoiceLineId: l.id,
     invoiceId: l.invoiceId,
+    recognitionMonths: l.recognitionMonths ?? null,
     lineNo: l.lineNo || 1,
     itemId: l.itemId || "",
     description: l.description || "",
@@ -1148,6 +1149,7 @@ export async function prismaAppendRecord<T = any>(
           amount: Number(record.netAmount || record.amount || 0),
           taxAmount: Number(record.gstAmount || record.taxAmount || 0),
           revenueAccount: record.revenueAccountId ? String(record.revenueAccountId) : "ACC-4100",
+          recognitionMonths: record.recognitionMonths === undefined ? null : Number(record.recognitionMonths),
         },
       });
       return mapInvoiceLine(created) as T;
