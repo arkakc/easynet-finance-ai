@@ -54,6 +54,21 @@ export async function POST(request: Request) {
       if (invoice.currency !== "PGK") throw new Error("Foreign currency schedules require review before recognition");
       const line = await tx.invoiceLine.findUnique({ where: { id: lineId } });
       if (!line || line.invoiceId !== invoice.id) throw new Error("Invoice line does not match the schedule");
+      if (String(line.revenueAccount || "") !== incomeAccount) {
+        throw new Error("Schedule revenue account does not match the original invoice line");
+      }
+      if (incomeAccount === accounts.defaultDeferredRevenueAccount) {
+        throw new Error("Revenue and deferred liability accounts must be different");
+      }
+      const scheduled = await tx.$queryRaw<Array<{ amount: number | string; status: string }>>(Prisma.sql`
+        SELECT "amount", "status" FROM "PaymentSchedule"
+        WHERE "sourceType" = 'DEFERRED_REVENUE' AND "sourceId" = ${invoice.id}
+          AND "milestone" LIKE ${lineId + "|%"}
+      `);
+      const scheduledTotal = cents(scheduled.reduce((sum, entry) => sum + Number(entry.amount || 0), 0));
+      if (Math.abs(scheduledTotal - Number(line.amount)) > 0.02) {
+        throw new Error("Deferred schedule total does not reconcile to the invoice line");
+      }
       if (input.action === "preview") return { preview: true, scheduleId: row.scheduleId, amount, postingDate: input.postingDate, incomeAccount };
       const journal = await postJournal({
         postingDate: input.postingDate,
