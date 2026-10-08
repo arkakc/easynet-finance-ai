@@ -209,14 +209,21 @@ export default function WarehouseStockClient() {
         </div>
         <span className="auto-badge">{loading ? "Loading…" : `${warehouses.length} Warehouses`}</span>
       </div>
-      <div className="button-row" style={{ margin: "12px 0", flexWrap: "wrap", gap: 8 }}>
-        <input aria-label="Search warehouses" placeholder="Search all warehouse fields…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 220, flex: 1 }} />
-        <select aria-label="Sort warehouses" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="code">Sort: Code</option><option value="name">Sort: Warehouse</option><option value="location">Sort: Location</option><option value="status">Sort: Status</option></select>
-        <button type="button" className="secondary" onClick={() => setDescending((v) => !v)}>{descending ? "Descending" : "Ascending"}</button>
-        <label style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={allSelected} onChange={(e) => setSelected((prev) => e.target.checked ? [...new Set([...prev, ...filteredWarehouses.map((w) => w.warehouseId)])] : prev.filter((id) => !filteredWarehouses.some((w) => w.warehouseId === id)))} />Select all shown</label>
-        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDelete", selected)}>Delete Selected</button>
-        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDisable", selected)}>Disable Selected</button>
-        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkActivate", selected)}>Activate Selected</button>
+      <div className="warehouse-master-toolbar">
+        <div className="warehouse-master-filters">
+          <input aria-label="Search warehouses" placeholder="Search warehouses by code, name, location or status" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <select aria-label="Sort warehouses" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="code">Sort: Code</option><option value="name">Sort: Warehouse</option><option value="location">Sort: Location</option><option value="status">Sort: Status</option></select>
+          <button type="button" className="secondary" onClick={() => setDescending((v) => !v)}>{descending ? "Descending ↓" : "Ascending ↑"}</button>
+        </div>
+        <div className="warehouse-master-actions">
+          <label className="warehouse-select-all"><input type="checkbox" checked={allSelected} onChange={(e) => setSelected((prev) => e.target.checked ? [...new Set([...prev, ...filteredWarehouses.map((w) => w.warehouseId)])] : prev.filter((id) => !filteredWarehouses.some((w) => w.warehouseId === id)))} /> <span>Select all shown</span></label>
+          <span className="warehouse-selected-count">{selected.length} selected</span>
+          <div className="warehouse-bulk-buttons">
+            <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDelete", selected)}>Delete Selected</button>
+            <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDisable", selected)}>Disable Selected</button>
+            <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkActivate", selected)}>Activate Selected</button>
+          </div>
+        </div>
       </div>
       <table className="data-table" style={{ minWidth: 880 }}>
         <thead><tr><th>Select</th><th>Code</th><th>Warehouse</th><th>Location</th><th>Default</th><th>Status</th><th>Actions</th></tr></thead>
