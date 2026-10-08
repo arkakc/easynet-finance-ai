@@ -135,24 +135,8 @@ export async function deferredRevenuePolicy() {
     normalized = { "ACC-4700": 12, "ACC-4400": 12 };
   }
 
-  // Item Master may set a more specific period. The current accounting model
-  // posts deferred revenue by revenue account, so items sharing one revenue
-  // account must use the same custom period. This keeps posting deterministic
-  // and avoids one invoice line silently using a different recognition policy.
-  const items = await listTable<any>("Items", 500, 0);
-  const itemPolicy = new Map<string, number>();
-  for (const item of items.rows) {
-    if (String(item.itemType || "").toUpperCase() === "STOCK") continue;
-    const periods = Math.trunc(Number(item.deferredRevenueMonths || 0));
-    if (!(periods > 1 && periods <= 120)) continue;
-    const accountId = String(item.revenueAccount || "").trim();
-    if (!accountId) continue;
-    const existing = itemPolicy.get(accountId);
-    if (existing && existing !== periods) {
-      throw new Error(`Deferred revenue policy conflict on ${accountId}: Item Master contains both ${existing} and ${periods} month schedules. Use separate revenue accounts or one common period.`);
-    }
-    itemPolicy.set(accountId, periods);
-  }
-  for (const [accountId, periods] of itemPolicy.entries()) normalized[accountId] = periods;
+  // Account policy is a legacy fallback only. Each new invoice line records
+  // its own recognition period; unrelated items sharing an income account
+  // must not conflict with one another.
   return normalized;
 }
