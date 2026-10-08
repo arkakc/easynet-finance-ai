@@ -708,7 +708,7 @@ export default function SettingsPage() {
       {/* Main Configuration Form */}
       <form className="settings-form-container" onSubmit={handleSave}>
         {/* SECTION 1: General & Currency (Mandatory) */}
-        <div className="settings-section-card">
+        <div className={`settings-section-card ${companySectionComplete ? "settings-section-complete" : ""}`}>
           <div className="settings-section-header">
             <div className="settings-section-title-wrap">
               <span style={{ fontSize: "18px" }}>🏢</span>
@@ -796,7 +796,7 @@ export default function SettingsPage() {
         </div>
 
         {/* SECTION 2: Financial Year Period (Mandatory - Papua New Guinea) */}
-        <div className="settings-section-card">
+        <div className={`settings-section-card ${financialYearSectionComplete ? "settings-section-complete" : ""}`}>
           <div className="settings-section-header">
             <div className="settings-section-title-wrap">
               <span style={{ fontSize: "18px" }}>📅</span>
@@ -852,7 +852,7 @@ export default function SettingsPage() {
         </div>
 
         {/* SECTION 3: PNG GST & IRC Compliance (Mandatory) */}
-        <div className="settings-section-card">
+        <div className={`settings-section-card ${gstSectionComplete ? "settings-section-complete" : ""}`}>
           <div className="settings-section-header">
             <div className="settings-section-title-wrap">
               <span style={{ fontSize: "18px" }}>⚖️</span>
