@@ -10,6 +10,9 @@ type Warehouse = {
   location?: string;
   isDefault?: boolean;
   active?: boolean;
+  historyCount?: number;
+  hasStock?: boolean;
+  canDelete?: boolean;
 };
 
 type Item = {
@@ -56,6 +59,11 @@ export default function WarehouseStockClient() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"code" | "name" | "location" | "status">("code");
+  const [descending, setDescending] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [editing, setEditing] = useState<Warehouse | null>(null);
 
   async function load() {
     setLoading(true);
@@ -63,7 +71,11 @@ export default function WarehouseStockClient() {
       const response = await fetch("/api/stock", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Warehouse stock load failed");
-      setWarehouses(body.warehouses || []);
+      const masters = await fetch("/api/stock/warehouse-master", { cache: "no-store" });
+      const masterData = await masters.json();
+      if (!masters.ok || !masterData.ok) throw new Error(masterData.error || "Warehouse master load failed");
+      setWarehouses(masterData.warehouses || []);
+      setSelected((previous) => previous.filter((id) => (masterData.warehouses || []).some((w: Warehouse) => w.warehouseId === id)));
       setItems((body.items || []).filter((item: Item) => String(item.itemType || "").toUpperCase() === "STOCK"));
       setBalances(body.warehouseBalances || []);
     } catch (error) {
@@ -135,6 +147,28 @@ export default function WarehouseStockClient() {
     }
   }
 
+  const filteredWarehouses = useMemo(() => warehouses.filter((w) => [w.warehouseCode, w.warehouseName, w.location, w.active === false ? "inactive" : "active"].some((value) => String(value || "").toLowerCase().includes(query.toLowerCase().trim()))).sort((a, b) => {
+    const value = (w: Warehouse) => sort === "name" ? w.warehouseName : sort === "location" ? w.location || "" : sort === "status" ? (w.active === false ? "inactive" : "active") : w.warehouseCode;
+    return (descending ? -1 : 1) * value(a).localeCompare(value(b), undefined, { numeric: true });
+  }), [warehouses, query, sort, descending]);
+  const allSelected = filteredWarehouses.length > 0 && filteredWarehouses.every((w) => selected.includes(w.warehouseId));
+  async function act(action: string, ids: string[], extra: Record<string, unknown> = {}) {
+    if (!ids.length || busy) return;
+    if (action.toLowerCase().includes("delete") && !window.confirm(`Delete ${ids.length} selected warehouse(s)? Only unused, non-default warehouses can be deleted.`)) return;
+    setBusy(action);
+    try {
+      const response = await fetch("/api/stock/warehouse-master", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ids, ...extra }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Warehouse action failed");
+      const successes = (data.results || []).filter((r: { status: string }) => r.status === "success").length;
+      const skipped = (data.results || []).filter((r: { status: string }) => r.status !== "success");
+      setMessage(`${successes} warehouse(s) updated.${skipped.length ? " Skipped: " + skipped.map((r: { reason?: string }) => r.reason).join("; ") : ""}`);
+      setEditing(null);
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Warehouse action failed"); }
+    finally { setBusy(""); }
+  }
+
   const totalValue = useMemo(
     () => balances.reduce((sum, row) => sum + Number(row.stockValue || 0), 0),
     [balances],
@@ -175,19 +209,39 @@ export default function WarehouseStockClient() {
         </div>
         <span className="auto-badge">{loading ? "Loading…" : `${warehouses.length} Warehouses`}</span>
       </div>
-      <table className="data-table">
-        <thead><tr><th>Code</th><th>Warehouse</th><th>Location</th><th>Default</th><th>Status</th></tr></thead>
+      <div className="button-row" style={{ margin: "12px 0", flexWrap: "wrap", gap: 8 }}>
+        <input aria-label="Search warehouses" placeholder="Search all warehouse fields…" value={query} onChange={(e) => setQuery(e.target.value)} style={{ minWidth: 220, flex: 1 }} />
+        <select aria-label="Sort warehouses" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="code">Sort: Code</option><option value="name">Sort: Warehouse</option><option value="location">Sort: Location</option><option value="status">Sort: Status</option></select>
+        <button type="button" className="secondary" onClick={() => setDescending((v) => !v)}>{descending ? "Descending" : "Ascending"}</button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={allSelected} onChange={(e) => setSelected((prev) => e.target.checked ? [...new Set([...prev, ...filteredWarehouses.map((w) => w.warehouseId)])] : prev.filter((id) => !filteredWarehouses.some((w) => w.warehouseId === id)))} />Select all shown</label>
+        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDelete", selected)}>Delete Selected</button>
+        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkDisable", selected)}>Disable Selected</button>
+        <button type="button" className="secondary" disabled={Boolean(busy) || !selected.length} onClick={() => void act("bulkActivate", selected)}>Activate Selected</button>
+      </div>
+      <table className="data-table" style={{ minWidth: 880 }}>
+        <thead><tr><th>Select</th><th>Code</th><th>Warehouse</th><th>Location</th><th>Default</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>
-          {!warehouses.length && <tr><td colSpan={5}>No warehouse master rows.</td></tr>}
-          {warehouses.map((warehouse) => <tr key={warehouse.warehouseId}>
-            <td><strong>{warehouse.warehouseCode}</strong></td>
-            <td>{warehouse.warehouseName}</td>
-            <td>{warehouse.location || "—"}</td>
-            <td>{warehouse.isDefault ? "YES" : "—"}</td>
-            <td>{warehouse.active === false ? "INACTIVE" : "ACTIVE"}</td>
+          {!filteredWarehouses.length && <tr><td colSpan={7}>No matching warehouses.</td></tr>}
+          {filteredWarehouses.map((warehouse) => <tr key={warehouse.warehouseId}>
+            <td><input aria-label={`Select ${warehouse.warehouseCode}`} type="checkbox" checked={selected.includes(warehouse.warehouseId)} onChange={(e) => setSelected((prev) => e.target.checked ? [...prev, warehouse.warehouseId] : prev.filter((id) => id !== warehouse.warehouseId))} /></td>
+            <td><strong>{warehouse.warehouseCode}</strong></td><td>{warehouse.warehouseName}</td><td>{warehouse.location || "—"}</td>
+            <td>{warehouse.isDefault ? "YES" : "—"}</td><td>{warehouse.active === false ? "INACTIVE" : "ACTIVE"}</td>
+            <td><div className="button-row" style={{ gap: 6, flexWrap: "nowrap" }}>
+              <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => setEditing(warehouse)}>Edit</button>
+              {warehouse.canDelete && <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => void act("delete", [warehouse.warehouseId])}>Delete</button>}
+              {warehouse.active === false
+                ? <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => void act("activate", [warehouse.warehouseId])}>Activate</button>
+                : !warehouse.isDefault && !warehouse.hasStock && <button type="button" className="secondary" disabled={Boolean(busy)} onClick={() => void act("disable", [warehouse.warehouseId])}>Disable</button>}
+            </div></td>
           </tr>)}
         </tbody>
       </table>
+      {editing && <form className="form-grid" style={{ marginTop: 14 }} onSubmit={(e) => { e.preventDefault(); void act("edit", [editing.warehouseId], { name: editing.warehouseName, location: editing.location || "" }); }}>
+        <h4 className="form-wide">Edit warehouse: {editing.warehouseCode}</h4>
+        <label>Name<input required value={editing.warehouseName} onChange={(e) => setEditing({ ...editing, warehouseName: e.target.value })} /></label>
+        <label>Location<input value={editing.location || ""} onChange={(e) => setEditing({ ...editing, location: e.target.value })} /></label>
+        <div className="form-wide button-row"><button type="submit" disabled={Boolean(busy)}>Save Changes</button><button type="button" className="secondary" onClick={() => setEditing(null)}>Cancel</button></div>
+      </form>}
     </section>
 
     <form className="panel form-grid" onSubmit={createWarehouse} style={{ marginTop: 20 }}>
