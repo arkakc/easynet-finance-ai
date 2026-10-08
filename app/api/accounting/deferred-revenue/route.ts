@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { ensurePaymentScheduleInfrastructure } from "@/lib/accounting/payment-schedule-store";
 import { loadConfiguredPostingAccounts } from "@/lib/accounting/finance-settings.server";
+import { recognitionScheduleTotalsMatch } from "@/lib/accounting/deferred-revenue-policy";
 
 const requestSchema = z.object({
   scheduleId: z.string().trim().min(1),
@@ -65,8 +66,7 @@ export async function POST(request: Request) {
         WHERE "sourceType" = 'DEFERRED_REVENUE' AND "sourceId" = ${invoice.id}
           AND "milestone" LIKE ${lineId + "|%"}
       `);
-      const scheduledTotal = cents(scheduled.reduce((sum, entry) => sum + Number(entry.amount || 0), 0));
-      if (Math.abs(scheduledTotal - Number(line.amount)) > 0.02) {
+      if (!recognitionScheduleTotalsMatch(scheduled.map(entry => entry.amount), Number(line.amount))) {
         throw new Error("Deferred schedule total does not reconcile to the invoice line");
       }
       if (input.action === "preview") return { preview: true, scheduleId: row.scheduleId, amount, postingDate: input.postingDate, incomeAccount };
