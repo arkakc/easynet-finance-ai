@@ -195,7 +195,7 @@ export default function WarehouseStockClient() {
     {message && <div className="status-banner" style={{ marginBottom: 16 }}>{message}</div>}
 
     <div className="grid">
-      <div className="card"><div className="label">Active Warehouses</div><div className="value">{warehouses.length}</div></div>
+      <div className="card"><div className="label">Active Warehouses</div><div className="value">{warehouses.filter((w) => w.active !== false).length}</div></div>
       <div className="card"><div className="label">Warehouse Balance Rows</div><div className="value">{balances.length}</div></div>
       <div className="card"><div className="label">Total Stock Qty</div><div className="value">{qty(totalQty)}</div></div>
       <div className="card"><div className="label">Inventory Book Value</div><div className="value">{money(totalValue)}</div></div>
@@ -281,8 +281,8 @@ export default function WarehouseStockClient() {
       <h3 className="form-title">Warehouse Transfer</h3>
       <label>Date<input name="movementDate" type="date" defaultValue={localDate()} required disabled={Boolean(busy)} /></label>
       <label>Stock Item<select name="itemId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select stock item</option>{items.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} — {item.itemName}</option>)}</select></label>
-      <label>From Warehouse<select name="fromWarehouseId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select source</option>{warehouses.map((warehouse) => <option key={warehouse.warehouseId} value={warehouse.warehouseId}>{warehouse.warehouseCode} — {warehouse.warehouseName}</option>)}</select></label>
-      <label>To Warehouse<select name="toWarehouseId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select destination</option>{warehouses.map((warehouse) => <option key={warehouse.warehouseId} value={warehouse.warehouseId}>{warehouse.warehouseCode} — {warehouse.warehouseName}</option>)}</select></label>
+      <label>From Warehouse<select name="fromWarehouseId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select source</option>{warehouses.filter((warehouse) => warehouse.active !== false).map((warehouse) => <option key={warehouse.warehouseId} value={warehouse.warehouseId}>{warehouse.warehouseCode} — {warehouse.warehouseName}</option>)}</select></label>
+      <label>To Warehouse<select name="toWarehouseId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select destination</option>{warehouses.filter((warehouse) => warehouse.active !== false).map((warehouse) => <option key={warehouse.warehouseId} value={warehouse.warehouseId}>{warehouse.warehouseCode} — {warehouse.warehouseName}</option>)}</select></label>
       <label>Quantity<input name="qty" type="number" min="0.0001" step="0.0001" required disabled={Boolean(busy)} /></label>
       <label>Source / Reference<input name="sourceDocumentId" placeholder="Optional transfer request / memo" disabled={Boolean(busy)} /></label>
       <label className="form-wide">Note<input name="note" placeholder="Optional transfer note" disabled={Boolean(busy)} /></label>
