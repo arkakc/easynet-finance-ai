@@ -41,7 +41,7 @@ async function resolvePurchaseOrder(ref:string){
 }
 
 async function remainingStockLines(order:any){
-  const itemIds=[...new Set((order.lines||[]).filter((line:any)=>line.item?.type==="GOOD"&&line.itemId).map((line:any)=>String(line.itemId)))];
+  const itemIds: string[] = [...new Set<string>((order.lines||[]).filter((line:any)=>line.item?.type==="GOOD"&&line.itemId).map((line:any)=>String(line.itemId)))];
   const result:any[]=[];
   for(const itemId of itemIds){
     const sourceLines=(order.lines||[]).filter((line:any)=>String(line.itemId||"")===itemId);
@@ -50,7 +50,7 @@ async function remainingStockLines(order:any){
       where:{itemId,type:"PURCHASE_RECEIPT",referenceId:{in:[order.id,order.code]}},
       _sum:{quantity:true},
     });
-    const alreadyReceived=Number(received._sum.quantity||0);
+    const alreadyReceived=Number(received._sum?.quantity ?? 0);
     const remaining=Math.max(0,ordered-alreadyReceived);
     if(remaining<=0.0001)continue;
     const line=sourceLines[0];
