@@ -53,7 +53,16 @@ export function addMonths(dateText: string, months: number) {
 }
 
 export function addMonthsMonthEnd(dateText: string, months: number) {
-  return monthEnd(addMonths(dateText, months));
+  // Calculate the target month directly. Adding months to the original day
+  // overflows for the 29th-31st, silently skipping February and short months.
+  const [year, month, day] = String(dateText).slice(0, 10).split("-").map(Number);
+  if (!year || !month || !day || month < 1 || month > 12 ||
+      new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) !== dateText.slice(0, 10)) {
+    throw new Error(`Invalid date: ${dateText}`);
+  }
+  if (!Number.isInteger(months) || months < 0) throw new Error("Invalid month offset");
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  return new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
 }
 
 export function splitEvenly(total: number, periods: number) {
