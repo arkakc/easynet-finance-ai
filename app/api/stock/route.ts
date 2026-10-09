@@ -227,7 +227,7 @@ export async function GET(request: Request) {
           usageReasons,
           stockQty: state.qty,
           stockValue,
-          deferredRevenueMonths: 0,
+          deferredRevenueMonths: Number(item.deferredRevenueMonths || 0),
         };
       });
       if (scope === "items") {
