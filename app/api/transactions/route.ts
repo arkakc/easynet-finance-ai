@@ -59,6 +59,7 @@ const commercialSchema = z.object({
   projectId: optionalText,
   documentDate: text.min(8),
   dueDate: optionalText,
+  recognitionStartDate: optionalText,
   expiryDate: optionalText,
   gstRate: z.coerce.number().finite().min(0).max(1).default(0),
   accountId: optionalText,
@@ -165,6 +166,14 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
 
   const currency = parsed.currency || String(party.currency || "PGK").toUpperCase();
   const exchangeRate = parsed.exchangeRate;
+  if (parsed.recognitionStartDate) {
+    const parsedDate = new Date(parsed.recognitionStartDate + "T00:00:00Z");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(parsed.recognitionStartDate) ||
+        Number.isNaN(parsedDate.getTime()) ||
+        parsedDate.toISOString().slice(0, 10) !== parsed.recognitionStartDate) {
+      throw new Error("Invalid revenue recognition start date");
+    }
+  }
   const t = totals(parsed.lines, parsed.gstRate);
   const items = type === "invoice" || type === "supplierBill" ? await itemMasterMap() : new Map<string, any>();
 
@@ -204,6 +213,7 @@ async function createCommercial(type: "quote" | "purchaseOrder" | "invoice" | "s
     await appendRecord("Invoices", {
       invoiceId, invoiceNumber, customerId: parsed.partyId, projectId: parsed.projectId,
       invoiceDate: parsed.documentDate, dueDate: parsed.dueDate,
+      recognitionStartDate: parsed.recognitionStartDate || parsed.documentDate,
       currency, exchangeRate,
       netAmount: t.net, gstAmount: t.gst, totalAmount: t.total,
       paidAmount: 0, outstandingAmount: t.total, status: "DRAFT", sourceDocumentId: "", journalId: "",
@@ -307,7 +317,7 @@ async function deferredSchedulesForInvoice(row: any, invoiceLines: any[], items:
         projectId: row.projectId || "",
         partyId: row.customerId || "",
         milestone: `${line.invoiceLineId}|${accountId}|${index + 1}/${periods}`,
-        dueDate: addMonthsMonthEnd(String(row.invoiceDate), index),
+        dueDate: addMonthsMonthEnd(String(row.recognitionStartDate || row.invoiceDate), index),
         percentage: round4(100 / periods),
         amount: amounts[index],
         status: "PENDING",
