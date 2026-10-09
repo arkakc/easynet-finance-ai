@@ -24,6 +24,11 @@ async function scan(): Promise<Proposed[]> {
     if (!payment.allocations.length) continue;
     if (payment.allocations.length !== 1) throw new Error(`Payment ${payment.code} has multiple allocations; manual review required`);
     const allocation = payment.allocations[0];
+    const alreadyCorrected = await prisma.journalHeader.findUnique({ where: { sourceDocId: `CONTROL-RECLASS:${payment.id}` } });
+    if (alreadyCorrected) {
+      if (alreadyCorrected.status !== "POSTED") throw new Error(`Prior correction is not POSTED: ${payment.code}`);
+      continue;
+    }
     const side = allocation.invoiceId ? "AR" : allocation.billId ? "AP" : null;
     if (!side || (side === "AR" ? !payment.customerId : !payment.supplierId)) throw new Error(`Invalid allocation party for ${payment.code}`);
     if (payment.currency !== "PGK" || allocation.currency !== "PGK") throw new Error(`Non-PGK settlement ${payment.code} requires FX audit`);
@@ -34,7 +39,7 @@ async function scan(): Promise<Proposed[]> {
     if ((side === "AR" ? (document as any).customerId !== payment.customerId : (document as any).supplierId !== payment.supplierId)) throw new Error(`Party mismatch for ${payment.code}`);
     const journals = await prisma.journalHeader.findMany({
       where: { OR: [{ id: document.journalId }, { code: document.journalId }, { id: payment.journalId! }, { code: payment.journalId! }] },
-      include: { lines: { include: { account: { select: { code: true } } } } },
+      include: { lines: { include: { account: { select: { code: true, type: true } } } } },
     });
     const original = journals.find((j) => j.id === document.journalId || j.code === document.journalId);
     const settlement = journals.find((j) => j.id === payment.journalId || j.code === payment.journalId);
@@ -46,12 +51,13 @@ async function scan(): Promise<Proposed[]> {
     if (settlementLines.length !== 1) throw new Error(`Ambiguous settlement journal for ${payment.code}`);
     const settlementLine = settlementLines[0];
     const settlementAmount = round(side === "AR" ? Number(settlementLine.credit) : Number(settlementLine.debit));
+    if (settlementLine.account.type !== (side === "AR" ? "ASSET" : "LIABILITY")) throw new Error(`Unexpected settlement account type for ${payment.code}`);
     if (settlementAmount <= 0 || Math.abs(settlementAmount - Number(allocation.baseAmount || allocation.amount)) > 0.01) {
       throw new Error(`Allocation GL amount mismatch for ${payment.code}`);
     }
     if (originalId === settlementLine.accountId) continue;
     const sourceAccount = original.lines.find((line) => line.accountId === originalId)?.account;
-    if (!sourceAccount) throw new Error(`Original account missing for ${payment.code}`);
+    if (!sourceAccount || sourceAccount.type !== (side === "AR" ? "ASSET" : "LIABILITY")) throw new Error(`Original control account has invalid type for ${payment.code}`);
     proposed.push({
       paymentId: payment.id, paymentCode: payment.code, invoiceCode: document.code, side,
       partyId: String(side === "AR" ? payment.customerId : payment.supplierId),
@@ -80,8 +86,6 @@ async function main() {
     const posted = await prisma.$transaction(async (tx) => {
       const existing = await tx.journalHeader.findUnique({ where: { sourceDocId: docId } });
       if (existing) { console.log(`Already corrected: ${p.paymentCode} ${existing.code}`); return null; }
-      const previous = await tx.journalHeader.findFirst({ where: { OR: [{ id: p.paymentCode }, { code: p.paymentCode }] } });
-      void previous;
       return postJournalInTransaction(tx, {
         postingDate: date, documentType: "CONTROL_ACCOUNT_RECLASS", documentId: docId,
         documentNumber: p.paymentCode,
