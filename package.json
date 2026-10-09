@@ -18,6 +18,8 @@
     "db:backup:remove-daily": "powershell -ExecutionPolicy Bypass -File scripts/database/remove-windows-backup-task.ps1",
     "db:restore": "tsx scripts/database/restore.ts",
     "db:reconcile:snapshot": "tsx scripts/database/reconciliation-snapshot.ts",
+    "db:reconcile:control-preview": "tsx scripts/database/reclassify-historical-control-accounts.ts",
+    "db:reconcile:control-apply": "tsx scripts/database/reclassify-historical-control-accounts.ts --apply",
     "db:repair:bank-mappings": "tsx scripts/database/backfill-bank-ledger-mappings.ts",
     "db:postgres:schema": "tsx scripts/database/generate-postgres-schema.ts",
     "db:postgres:validate": "npm run db:postgres:schema && tsx scripts/database/validate-postgres-schema.ts",
