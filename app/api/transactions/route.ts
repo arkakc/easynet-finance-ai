@@ -36,6 +36,7 @@ import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoic
 import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
 import { finalizeExpenseAtomic } from "@/lib/accounting/atomic-expense";
 import { allocateAdvanceAtomic, finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
+import { assertGstPostingAuthorized } from "@/lib/accounting/gst-posting-eligibility";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
