@@ -1,0 +1,30 @@
+name: Deferred Revenue Accounting Checks
+on:
+  pull_request:
+    paths:
+      - "app/api/accounting/deferred-revenue/**"
+      - "app/api/transactions/route.ts"
+      - "lib/accounting/**"
+      - "lib/backend/prisma-store.ts"
+      - "prisma/schema.prisma"
+      - "tests/accounting/**"
+      - "package.json"
+      - ".github/workflows/deferred-revenue.yml"
+  workflow_dispatch:
+
+jobs:
+  accounting-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: "file:./ci-deferred-revenue.db"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run test:deferred-revenue
+      - run: npm run typecheck

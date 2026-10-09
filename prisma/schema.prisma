@@ -568,6 +568,7 @@ model Invoice {
   customerId          String
   projectId           String?
   issuedDate          DateTime      @default(now())
+  recognitionStartDate DateTime?
   dueDate             DateTime?
   status              InvoiceStatus @default(DRAFT)
   currency            String        @default("PGK")

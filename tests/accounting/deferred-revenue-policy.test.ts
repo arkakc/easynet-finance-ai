@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { addMonthsMonthEnd, splitEvenly } from "../../lib/accounting/inventory";
 import test from "node:test";
 import {
   assertInvoiceRecognitionReversible,
@@ -24,4 +25,18 @@ test("monthly allocations reconcile to invoice line net amount", () => {
   assert.equal(recognitionScheduleTotalsMatch([333.33, 333.33, 333.34], 1000), true);
   assert.equal(recognitionScheduleTotalsMatch([100, 100], 300), false);
   assert.equal(recognitionScheduleTotalsMatch([100, 100], Number.NaN), false);
+});
+
+test("month-end recognition does not skip February or shorter months", () => {
+  assert.equal(addMonthsMonthEnd("2026-01-31", 0), "2026-01-31");
+  assert.equal(addMonthsMonthEnd("2026-01-31", 1), "2026-02-28");
+  assert.equal(addMonthsMonthEnd("2026-01-31", 2), "2026-03-31");
+  assert.equal(addMonthsMonthEnd("2024-01-31", 1), "2024-02-29");
+  assert.equal(addMonthsMonthEnd("2026-08-31", 1), "2026-09-30");
+  assert.throws(() => addMonthsMonthEnd("2026-02-30", 1), /Invalid date/);
+});
+test("recognition instalments preserve cents in the last month", () => {
+  const instalments = splitEvenly(1000, 12);
+  assert.equal(instalments.length, 12);
+  assert.equal(Math.round(instalments.reduce((sum, amount) => sum + amount, 0) * 100), 100000);
 });
