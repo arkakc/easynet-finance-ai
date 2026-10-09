@@ -5,6 +5,7 @@ on:
       - "app/api/accounting/deferred-revenue/**"
       - "app/api/transactions/route.ts"
       - "app/api/masters/route.ts"
+      - "scripts/database/finance-uat-deep-audit.ts"
       - "scripts/database/reclassify-historical-control-accounts.ts"
       - "tests/accounting/settlement-control-account.test.ts"
       - "app/api/stock/route.ts"
