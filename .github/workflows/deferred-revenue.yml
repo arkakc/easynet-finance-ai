@@ -5,6 +5,7 @@ on:
       - "app/api/accounting/deferred-revenue/**"
       - "app/api/transactions/route.ts"
       - "app/api/masters/route.ts"
+      - "tests/accounting/gst-posting-eligibility.test.ts"
       - "app/components/master-doctype-detail-client.tsx"
       - "lib/accounting/**"
       - "lib/backend/prisma-store.ts"
@@ -29,4 +30,5 @@ jobs:
       - run: npm ci
       - run: npm run db:generate
       - run: npm run test:deferred-revenue
+      - run: npx tsx --test tests/accounting/gst-posting-eligibility.test.ts
       - run: npm run typecheck

@@ -36,6 +36,7 @@ import { finalizeSalesInvoiceAtomic } from "@/lib/accounting/atomic-sales-invoic
 import { finalizeSupplierBillAtomic } from "@/lib/accounting/atomic-supplier-bill";
 import { finalizeExpenseAtomic } from "@/lib/accounting/atomic-expense";
 import { allocateAdvanceAtomic, finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
+import { assertGstPostingAuthorized } from "@/lib/accounting/gst-posting-eligibility";
 
 const text = z.string().trim();
 const optionalText = text.optional().default("");
@@ -131,10 +132,6 @@ function totals(lines: z.infer<typeof lineSchema>[], gstRate: number) {
   return { lines: normalized, net, gst, total: round2(net + gst) };
 }
 
-async function gstStatus() {
-  const result = await findRecords<{ key: string; value: string }>("Settings", { key: "gst_status" }, 1);
-  return String(result.rows[0]?.value || "UNVERIFIED").toUpperCase();
-}
 
 async function assertParty(table: "Customers" | "Suppliers", idField: "customerId" | "supplierId", value: string) {
   const result = await findRecords<any>(table, { [idField]: value }, 1);
@@ -331,9 +328,7 @@ async function postSalesInvoice(row: any, approveAtomically = false) {
   if (["POSTED", "PAID"].includes(String(row.status || "").toUpperCase()) && String(row.journalId || "")) {
     return { recordType: "invoice", recordId: row.invoiceId, status: "already-posted", journalId: row.journalId };
   }
-  if (Number(row.gstAmount || 0) > 0 && (await gstStatus()) !== "VERIFIED") {
-    throw new Error("GST status is UNVERIFIED. Verify GST registration before posting GST-bearing invoices.");
-  }
+  if (Number(row.gstAmount || 0) > 0) await assertGstPostingAuthorized();
 
   await ensureAccountingInfrastructure();
   const [lineResult, itemResult, policy, defaults] = await Promise.all([
@@ -413,9 +408,7 @@ async function postSupplierBill(row: any, approveAtomically = false) {
   if (["POSTED", "PAID"].includes(String(row.status || "").toUpperCase()) && String(row.journalId || "")) {
     return { recordType: "supplierBill", recordId: row.billId, status: "already-posted", journalId: row.journalId };
   }
-  if (Number(row.gstAmount || 0) > 0 && (await gstStatus()) !== "VERIFIED") {
-    throw new Error("GST status is UNVERIFIED. Verify GST registration before posting input GST.");
-  }
+  if (Number(row.gstAmount || 0) > 0) await assertGstPostingAuthorized();
 
   await ensureAccountingInfrastructure();
   const [tolerance, defaults] = await Promise.all([
@@ -625,9 +618,7 @@ async function postRecord(raw: unknown) {
 
   const row = (await findRecords<any>("Expenses", { expenseId: parsed.recordId }, 1)).rows[0];
   if (!row) throw new Error("Expense not found");
-  if (Number(row.gstAmount || 0) > 0 && (await gstStatus()) !== "VERIFIED") {
-    throw new Error("GST status is UNVERIFIED. Verify GST registration before posting input GST.");
-  }
+  if (Number(row.gstAmount || 0) > 0) await assertGstPostingAuthorized();
 
   await ensureAccountingInfrastructure();
   const posted = await finalizeExpenseAtomic({
