@@ -211,6 +211,7 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
                 <label>Phone<input name="phone" defaultValue={text(record.phone)} disabled={saving} /></label>
                 <label>Email<input name="email" type="email" defaultValue={text(record.email)} disabled={saving} /></label>
                 <label>Tax ID / TIN<input name="taxId" defaultValue={text(record.taxId)} disabled={saving} /></label>
+                <label>Billing Currency (ISO 4217)<input name="currency" maxLength={3} minLength={3} pattern="[A-Za-z]{3}" defaultValue={text(record.currency) || "PGK"} required disabled={saving} /></label>
                 <label>Credit Terms (days)<input name="creditTermsDays" type="number" min="0" defaultValue={numberValue(record.creditTermsDays)} disabled={saving} /></label>
                 <label>Credit Limit<input name="creditLimit" type="number" min="0" step="0.01" defaultValue={numberValue(record.creditLimit)} disabled={saving} /></label>
                 <label>Status<input value={activeText(record.active)} readOnly disabled /></label>
@@ -225,6 +226,7 @@ export default function MasterDoctypeDetailClient({ type, recordId }: Props) {
                 <label>Phone<input name="phone" defaultValue={text(record.phone)} disabled={saving} /></label>
                 <label>Email<input name="email" type="email" defaultValue={text(record.email)} disabled={saving} /></label>
                 <label>Tax ID / TIN<input name="taxId" defaultValue={text(record.taxId)} disabled={saving} /></label>
+                <label>Billing Currency (ISO 4217)<input name="currency" maxLength={3} minLength={3} pattern="[A-Za-z]{3}" defaultValue={text(record.currency) || "PGK"} required disabled={saving} /></label>
                 <label>Payment Terms (days)<input name="paymentTermsDays" type="number" min="0" defaultValue={numberValue(record.paymentTermsDays)} disabled={saving} /></label>
                 <label>Status<input value={activeText(record.active)} readOnly disabled /></label>
                 <label className="form-wide">Address<textarea name="address" rows={3} defaultValue={text(record.address)} disabled={saving} /></label>
