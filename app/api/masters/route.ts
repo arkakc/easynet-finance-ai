@@ -38,7 +38,7 @@ const customerSchema = z.object({
   taxId: optionalText,
   creditTermsDays: optionalNumber,
   creditLimit: optionalNumber,
-  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
+  currency: z.union([z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), z.literal("")]).optional().default(""),
 });
 
 const supplierSchema = z.object({
@@ -50,7 +50,7 @@ const supplierSchema = z.object({
   address: optionalText,
   taxId: optionalText,
   paymentTermsDays: optionalNumber,
-  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional().default(""),
+  currency: z.union([z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/), z.literal("")]).optional().default(""),
 });
 
 const projectSchema = z.object({
