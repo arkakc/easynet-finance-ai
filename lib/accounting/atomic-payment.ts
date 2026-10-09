@@ -169,10 +169,35 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       const realizedGain = Number(directAllocation.realizedGain || 0);
       const realizedLoss = Number(directAllocation.realizedLoss || 0);
       const cashAccount = input.cashBankAccountId;
-      const settlementAccount = input.lines.find(
-        (line) => String(line.accountId || "").toUpperCase() !== String(cashAccount || "").toUpperCase(),
-      )?.accountId;
-      if (!settlementAccount) throw new Error("Payment settlement account could not be resolved");
+      // A direct receipt/payment must settle the actual control account used
+      // by its source invoice/bill, not a potentially different current default.
+      const source = input.againstInvoiceId
+        ? await tx.invoice.findFirst({
+            where: { OR: [{ id: input.againstInvoiceId }, { code: input.againstInvoiceId }] },
+            select: { journalId: true, glPosted: true },
+          })
+        : await tx.supplierBill.findFirst({
+            where: { OR: [{ id: input.againstBillId! }, { code: input.againstBillId! }] },
+            select: { journalId: true, glPosted: true },
+          });
+      if (!source?.glPosted || !source.journalId) {
+        throw new Error("Source invoice/bill has no posted GL journal for settlement");
+      }
+      const journal = await tx.journalHeader.findFirst({
+        where: { OR: [{ id: source.journalId }, { code: source.journalId }], status: "POSTED" },
+        include: { lines: true },
+      });
+      if (!journal) throw new Error("Source invoice/bill journal is not POSTED");
+      const sourceControlLines = journal.lines.filter((line) =>
+        input.againstInvoiceId
+          ? Number(line.debit || 0) > 0 && /^accounts receivable$/i.test(String(line.description || "").trim())
+          : Number(line.credit || 0) > 0 && /^accounts payable$/i.test(String(line.description || "").trim()),
+      );
+      const controlAccounts = [...new Set(sourceControlLines.map((line) => line.accountId))];
+      if (controlAccounts.length !== 1) {
+        throw new Error("Cannot unambiguously resolve AR/AP control account from source journal; settlement blocked");
+      }
+      const settlementAccount = controlAccounts[0];
 
       const partyRef = payment.customerId
         ? (payment.customer?.code || payment.customerId)
