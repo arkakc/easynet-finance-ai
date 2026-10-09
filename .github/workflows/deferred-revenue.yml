@@ -5,6 +5,8 @@ on:
       - "app/api/accounting/deferred-revenue/**"
       - "app/api/transactions/route.ts"
       - "app/api/masters/route.ts"
+      - "app/api/stock/route.ts"
+      - "tests/accounting/stock-delivery-movement.test.ts"
       - "tests/accounting/gst-posting-eligibility.test.ts"
       - "app/components/master-doctype-detail-client.tsx"
       - "lib/accounting/**"
@@ -31,4 +33,5 @@ jobs:
       - run: npm run db:generate
       - run: npm run test:deferred-revenue
       - run: npx tsx --test tests/accounting/gst-posting-eligibility.test.ts
+      - run: npx tsx --test tests/accounting/stock-delivery-movement.test.ts
       - run: npm run typecheck
