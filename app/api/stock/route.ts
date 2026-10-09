@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { prisma } from "@/src/lib/prisma";
+import { stockMovementQuantities } from "@/lib/accounting/stock-movement-direction";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
@@ -263,8 +264,7 @@ export async function GET(request: Request) {
           transferId: movement.transferId || "",
           movementType: movement.type,
           referenceType: movement.referenceType || "",
-          qtyIn: ["PURCHASE_IN", "PURCHASE_RECEIPT", "SALES_ISSUE_ROLLBACK", "ADJUSTMENT_IN", "RETURN_IN", "TRANSFER_IN"].includes(movement.type) ? Number(movement.quantity) : 0,
-          qtyOut: ["SALES_DELIVERY", "SALES_ISSUE", "SALE_OUT", "PROJECT_ISSUE", "ADJUSTMENT_OUT", "RETURN_OUT", "TRANSFER_OUT"].includes(movement.type) ? Number(movement.quantity) : 0,
+          ...stockMovementQuantities(movement.type, Number(movement.quantity)),
           unitCost: Number(movement.unitCost || 0),
           value: Number(movement.totalCost || 0),
           sourceDocumentId: movement.referenceId || "",
