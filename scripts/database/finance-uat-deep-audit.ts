@@ -1,6 +1,6 @@
 import { prisma } from "../../src/lib/prisma";
 import { buildFinancialStatements } from "../../lib/accounting/financial-statements";
-import { saveFinancialReconciliationSnapshot } from "../../lib/system/financial-reconciliation";
+import { buildFinancialReconciliationSnapshot } from "../../lib/system/financial-reconciliation";
 
 const value = (x: unknown) => Number(x || 0);
 const round = (x: number) => Math.round((x + Number.EPSILON) * 100) / 100;
@@ -16,7 +16,7 @@ async function main() {
   console.log(`Read-only finance UAT audit, as of ${asOf} (PGK base amounts)`);
   const [statements, snapshot, journals, bankAccounts, invoices, bills, payments, deliveryNotes, purchaseReceipts, coa, settings] = await Promise.all([
     buildFinancialStatements({ asOf }),
-    saveFinancialReconciliationSnapshot({ asOf, generatedBy: "finance-uat-audit" }),
+    buildFinancialReconciliationSnapshot({ asOf, generatedBy: "finance-uat-audit" }),
     prisma.journalHeader.findMany({ where: { status: "POSTED", date: { lte: end } }, include: { lines: { include: { account: { select: { code: true, type: true } } } } } }),
     prisma.bankAccount.findMany({ where: { isActive: true }, include: { chartOfAccounts: { select: { code: true, id: true } } } }),
     prisma.invoice.findMany({ where: { glPosted: true, issuedDate: { lte: end }, status: { notIn: ["CANCELLED", "VOID"] } } }),
