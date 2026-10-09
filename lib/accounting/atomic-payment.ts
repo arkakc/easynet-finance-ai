@@ -2,6 +2,7 @@ import type { AtomicPostingLine } from "@/lib/accounting/atomic-posting";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { allocateAdvancePaymentAtomic, createPaymentAllocationInTransaction } from "@/lib/accounting/payment-allocation";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { sourceControlAccount } from "@/lib/accounting/settlement-control-account";
 import { realizedFxForSettlement, resolveDocumentExchangeRate, toBaseAmount } from "@/lib/accounting/currency";
 
 const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
@@ -188,16 +189,10 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
         include: { lines: true },
       });
       if (!journal) throw new Error("Source invoice/bill journal is not POSTED");
-      const sourceControlLines = journal.lines.filter((line) =>
-        input.againstInvoiceId
-          ? Number(line.debit || 0) > 0 && /^accounts receivable$/i.test(String(line.description || "").trim())
-          : Number(line.credit || 0) > 0 && /^accounts payable$/i.test(String(line.description || "").trim()),
+      const settlementAccount = sourceControlAccount(
+        journal.lines,
+        input.againstInvoiceId ? "RECEIVABLE" : "PAYABLE",
       );
-      const controlAccounts = [...new Set(sourceControlLines.map((line) => line.accountId))];
-      if (controlAccounts.length !== 1) {
-        throw new Error("Cannot unambiguously resolve AR/AP control account from source journal; settlement blocked");
-      }
-      const settlementAccount = controlAccounts[0];
 
       const partyRef = payment.customerId
         ? (payment.customer?.code || payment.customerId)
