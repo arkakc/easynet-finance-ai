@@ -4,6 +4,8 @@ on:
     paths:
       - "app/api/accounting/deferred-revenue/**"
       - "app/api/transactions/route.ts"
+      - "app/api/masters/route.ts"
+      - "app/components/master-doctype-detail-client.tsx"
       - "lib/accounting/**"
       - "lib/backend/prisma-store.ts"
       - "prisma/schema.prisma"
