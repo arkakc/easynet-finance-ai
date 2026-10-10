@@ -5271,3 +5271,29 @@ form.panel {
   .warehouse-master-filters > input, .warehouse-master-filters > select { max-width: none; flex: 1 1 100%; }
   .warehouse-bulk-buttons { margin-left: 0; width: 100%; }
 }
+
+
+/* Stock register: compact, readable, and intentionally scrollable on smaller screens. */
+.stock-item-register .form-title-row { align-items: flex-start; gap: 16px; }
+.stock-item-register .doctype-list-toolbar { margin-top: 22px; }
+.stock-item-register-table { width: 100%; min-width: 1100px; table-layout: auto; border-collapse: separate; border-spacing: 0; margin-top: 14px; }
+.stock-item-register-table th { text-transform: uppercase; font-size: 11px; letter-spacing: .055em; font-weight: 700; color: #526278; background: #f6f8fb; white-space: nowrap; vertical-align: middle; }
+.stock-item-register-table td { vertical-align: middle; padding: 15px 12px; font-size: 13px; color: #24354c; }
+.stock-item-register-table td:first-child, .stock-item-register-table th:first-child { text-align: center; }
+.stock-item-register-table .stock-item-identity { min-width: 190px; max-width: 280px; }
+.stock-item-identity strong { display: block; line-height: 1.45; font-size: 13px; }
+.stock-item-code, .stock-item-muted { display: block; margin-top: 5px; color: #697b90; font-size: 12px; }
+.stock-item-register-table .stock-item-number { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.stock-item-accounts { min-width: 130px; font-size: 12px; }
+.stock-item-accounts span { display: block; white-space: nowrap; line-height: 1.8; }
+.stock-item-status { white-space: nowrap; }
+.stock-item-reasons { margin-top: 8px; max-width: 190px; font-size: 12px; color: #526278; }
+.stock-item-reasons summary { cursor: pointer; font-weight: 600; color: #38649d; }
+.stock-item-reasons div { margin-top: 7px; line-height: 1.45; overflow-wrap: anywhere; }
+.stock-item-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.stock-item-actions :is(button,.button-link) { white-space: nowrap; min-height: 36px; padding: 8px 12px; font-size: 12px; }
+.stock-item-register-table tbody tr:hover td { background: #f8fbff; }
+@media (max-width: 900px) {
+  .stock-item-register-table { min-width: 1040px; }
+  .stock-item-register-table td { padding: 12px 10px; }
+}
