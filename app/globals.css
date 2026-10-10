@@ -5386,3 +5386,15 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .sales-quote-stock-table td:nth-child(8) .table-field-align { justify-content: center; }
 .sales-quote-stock-table td:last-child button { min-width: 0; white-space: nowrap; font-size: 11px; padding: 8px; }
 @media (max-width: 1200px) { .sales-quote-stock-table { min-width: 1180px; } }
+
+
+/* Dashboard GST control drill-down */
+.dashboard-gst-card { display: block; text-align: left; width: 100%; font: inherit; cursor: pointer; }
+.dashboard-gst-card:disabled { cursor: default; }
+.dashboard-gst-card:not(:disabled):hover { border-color: #7ba3e5; box-shadow: 0 5px 16px rgba(33, 70, 123, .11); }
+.dashboard-gst-card:focus-visible { outline: 3px solid #4c82d6; outline-offset: 3px; }
+.dashboard-gst-card .dashboard-gst-chevron { margin-left: 5px; font-size: 12px; }
+.dashboard-gst-hint { display: block; margin-top: 6px; font-size: 11px; color: #57749b; }
+.dashboard-gst-breakdown { margin: 18px 0; }
+.dashboard-gst-breakdown-row { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; padding: 11px 0; border-bottom: 1px solid #e4eaf2; font-variant-numeric: tabular-nums; }
+.dashboard-gst-breakdown-total { font-weight: 700; font-size: 17px; border-bottom: none; }
