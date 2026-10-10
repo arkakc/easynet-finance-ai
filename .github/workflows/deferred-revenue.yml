@@ -21,6 +21,7 @@ on:
       - "app/components/transaction-document-client.tsx"
       - "app/components/purchase-receipt-client.tsx"
       - "app/components/transaction-item-lines.tsx"
+      - "app/components/transactions-workspace-v5.tsx"
       - "app/components/sales-invoice-cycle.tsx"
       - "app/components/delivery-note-client.tsx"
       - "app/globals.css"
