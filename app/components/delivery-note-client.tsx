@@ -161,7 +161,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
 
       <div className="document-section-heading"><div><span className="document-section-kicker">Items</span><h2>Line items</h2></div></div>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>#</th><th>Item Code</th><th>Item Name</th><th>Type</th><th>UOM</th><th>Qty</th></tr></thead><tbody>
-        {(note.lines||[]).map((line:any,index:number)=><tr key={line.lineId||line.itemId||index}><td>{index+1}</td><td>{line.itemCode||line.itemId}</td><td>{line.itemName||line.description}</td><td>{line.itemType}</td><td>{line.uom}</td><td>{Number(line.qty||0).toFixed(4)}</td></tr>)}
+        {(note.lines||[]).map((line:any,index:number)=><tr key={line.lineId||line.itemId||index}><td>{index+1}</td><td><LinkedDocumentReference kind="item" id={line.itemId || line.itemCode}>{line.itemCode || line.itemId}</LinkedDocumentReference></td><td>{line.itemName||line.description}</td><td>{line.itemType}</td><td>{line.uom}</td><td>{Number(line.qty||0).toFixed(4)}</td></tr>)}
       </tbody></table></div>
     </section>
 

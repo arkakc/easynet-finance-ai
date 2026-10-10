@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { useCallback, useEffect, useState } from "react";
 import { FlowCreateLink, useFlowDataRefresh } from "@/app/components/flow-navigation";
 
@@ -184,7 +185,7 @@ export default function TransactionItemLines({
               <td style={{ verticalAlign: "top" }}>
                 <div className="table-field-align">
                   {linked
-                    ? <Link prefetch={false} href={`/stock/item/${encodeURIComponent(linked.itemId || linked.itemCode)}`}><strong>{itemCode(linked)}</strong></Link>
+                    ? <LinkedDocumentReference kind="item" id={linked.itemId || linked.itemCode}>{itemCode(linked)}</LinkedDocumentReference>
                     : <strong>{masterOnly ? "SELECT" : temporary ? "TEMP" : "AUTO"}</strong>}
                 </div>
               </td>
