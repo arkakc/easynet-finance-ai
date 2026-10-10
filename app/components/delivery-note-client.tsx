@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -151,11 +152,11 @@ export default function DeliveryNoteClient({id}:{id:string}){
 
       <div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Delivery details</h2></div></div>
       <div className="document-meta">
-        <div><span>Source Sales Order</span><strong><Link href={"/transactions/quote/"+encodeURIComponent(note.salesOrderId)}>{note.salesOrderId}</Link></strong></div>
+        <div><span>Source Sales Order</span><strong><LinkedDocumentReference kind="salesOrder" id={note.salesOrderId} /></strong></div>
         <div><span>Customer</span><strong>{note.customerName?note.customerName+" ("+note.customerId+")":note.customerId||"—"}</strong></div>
         <div><span>Project</span><strong>{note.projectName?note.projectName+" ("+note.projectId+")":note.projectId||"—"}</strong></div>
         <div><span>Delivery Date</span><strong>{note.deliveryDate}</strong></div>
-        {note.journalId&&<div><span>COGS Journal</span><strong><Link href={"/journals/"+encodeURIComponent(note.journalId)}>{note.journalId}</Link></strong></div>}
+        {note.journalId&&<div><span>COGS Journal</span><strong><LinkedDocumentReference kind="journal" id={note.journalId} /></strong></div>}
       </div>
 
       <div className="document-section-heading"><div><span className="document-section-kicker">Items</span><h2>Line items</h2></div></div>

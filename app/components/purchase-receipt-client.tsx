@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { useEffect, useState } from "react";
 
 type Warehouse={warehouseId:string;warehouseCode:string;warehouseName:string;isDefault?:boolean};
@@ -161,11 +162,11 @@ export default function PurchaseReceiptClient({id}:{id:string}){
 
       <div className="document-section-heading"><div><span className="document-section-kicker">Overview</span><h2>Receipt details</h2></div></div>
       <div className="document-meta">
-        <div><span>Source Purchase Order</span><strong><Link href={"/transactions/purchaseOrder/"+encodeURIComponent(receipt.purchaseOrderId)}>{receipt.purchaseOrderNumber||receipt.purchaseOrderId}</Link></strong></div>
+        <div><span>Source Purchase Order</span><strong><LinkedDocumentReference kind="purchaseOrder" id={receipt.purchaseOrderId}>{receipt.purchaseOrderNumber||receipt.purchaseOrderId}</LinkedDocumentReference></strong></div>
         <div><span>Supplier</span><strong>{receipt.supplierName?receipt.supplierName+" ("+receipt.supplierId+")":receipt.supplierId||"—"}</strong></div>
         <div><span>Project</span><strong>{receipt.projectName?receipt.projectName+" ("+receipt.projectId+")":receipt.projectId||"—"}</strong></div>
         <div><span>Receipt Date</span><strong>{receipt.receiptDate}</strong></div>
-        {receipt.journalId&&<div><span>Inventory / GRNI Journal</span><strong><Link href={"/journals/"+encodeURIComponent(receipt.journalId)}>{receipt.journalId}</Link></strong></div>}
+        {receipt.journalId&&<div><span>Inventory / GRNI Journal</span><strong><LinkedDocumentReference kind="journal" id={receipt.journalId} /></strong></div>}
       </div>
 
       <div className="document-section-heading"><div><span className="document-section-kicker">Items</span><h2>Receipt lines</h2></div></div>
