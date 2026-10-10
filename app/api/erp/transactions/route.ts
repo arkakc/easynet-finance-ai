@@ -457,7 +457,9 @@ export async function POST(request: Request) {
 
     let payload = body.payload || {};
     const series = body.action ? SERIES[body.action] : undefined;
-    if (body.action && series && !String(payload[series.payloadField] || "").trim()) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
+    // Never trust the UI preview as a reserved sequence. Allocate an authoritative
+    // number only when the create request is submitted.
+    if (body.action && series) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
 
     let itemLinking: { created: number; linked: number; temporary: number } | undefined;
     if (body.action && ["createQuote", "createSalesOrder", "createInvoice", "createSupplierQuote", "createPurchaseOrder"].includes(body.action)) {
