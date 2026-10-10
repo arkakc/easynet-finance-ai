@@ -5350,3 +5350,22 @@ a.linked-document-id:focus-visible,
 .data-table a[href^="/journals/"]:focus-visible,
 .data-table a[href^="/transactions/"]:focus-visible { outline: 2px solid #175cd3; outline-offset: 3px; border-radius: 2px; }
 .stock-trace-clickable-row { cursor: auto; }
+
+
+/* Item master references receive the same treatment as document/GL references. */
+.document-sheet .document-lines .data-table td a[href^="/stock/item/"],
+.data-table td a[href^="/stock/item/"],
+.document-meta a[href^="/stock/item/"],
+a.linked-document-id[href^="/stock/item/"] {
+  color: #175cd3;
+  font-weight: 700;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+.document-sheet .document-lines .data-table td a[href^="/stock/item/"]:hover,
+.data-table td a[href^="/stock/item/"]:hover,
+.document-meta a[href^="/stock/item/"]:hover,
+a.linked-document-id[href^="/stock/item/"]:hover { color: #1045a0; text-decoration: underline; }
+.document-sheet .document-lines .data-table td a[href^="/stock/item/"]:focus-visible,
+.data-table td a[href^="/stock/item/"]:focus-visible,
+a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #175cd3; outline-offset: 3px; border-radius: 2px; }
