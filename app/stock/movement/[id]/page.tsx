@@ -1,4 +1,5 @@
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { findRecords } from "@/lib/backend/apps-script";
@@ -48,10 +49,10 @@ export default async function StockMovementTracePage({ params }: { params: Promi
         <div><span>Warehouse</span><strong>{movement.warehouseCode || movement.warehouseId || "LEGACY / DEFAULT"}</strong></div>
         <div><span>Movement type</span><strong>{movementType.replaceAll("_", " ")}</strong></div>
         <div><span>Line reference</span><strong>{internalLineId}</strong></div>
-        <div><span>Item</span><strong>{itemId ? <Link prefetch={false} href={`/stock/item/${encodeURIComponent(itemId)}`}>{itemId}</Link> : "—"}</strong></div>
+        <div><span>Item</span><strong>{itemId ? <LinkedDocumentReference kind="item" id={itemId} /> : "—"}</strong></div>
         <div><span>Project</span><strong>{movement.projectId || "—"}</strong></div>
         <div><span>Source document</span><strong>{sourceId ? <Link prefetch={false} href={movementType === "PURCHASE_RECEIPT" ? `/transactions/purchaseOrder/${encodeURIComponent(sourceId)}` : `/document-explorer?documentId=${encodeURIComponent(sourceId)}`}>{sourceId}</Link> : "—"}</strong></div>
-        <div><span>GL journal</span><strong>{journalId ? <Link prefetch={false} href={`/journals/${encodeURIComponent(journalId)}`}>{journalId}</Link> : "—"}</strong></div>
+        <div><span>GL journal</span><strong>{journalId ? <LinkedDocumentReference kind="journal" id={journalId} /> : "—"}</strong></div>
       </div>
     </section>
   </main>;
