@@ -12,6 +12,8 @@ on:
       - "tests/accounting/stock-delivery-movement.test.ts"
       - "tests/accounting/gst-posting-eligibility.test.ts"
       - "app/components/master-doctype-detail-client.tsx"
+      - "app/components/stock-workspace-v6.tsx"
+      - "app/globals.css"
       - "lib/accounting/**"
       - "lib/backend/prisma-store.ts"
       - "prisma/schema.prisma"
