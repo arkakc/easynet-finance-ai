@@ -656,7 +656,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
       {salesInvoicePaid&&<div className="status-banner no-print" style={{marginTop:16}}>Sales Invoice is fully paid.</div>}
       {type==="invoice"&&isCreditNote&&<LazyDocumentSection title="Credit Note / Refund Actions" description="Refundable credit controls are loaded only when requested." buttonLabel="Open Refund / Credit Actions"><SalesInvoiceCycle invoiceId={id} record={record}/></LazyDocumentSection>}
-      {paymentFinalizationReady&&<PaymentFinalSave record={record}/>} 
+      {paymentFinalizationReady&&<PaymentFinalSave record={record} onFinalized={() => loadDocument(undefined, false)}/>} 
       {type==="payment"&&Boolean(String(record.journalId||"").trim())&&(
         <>
           {paymentSupplierBillRef
