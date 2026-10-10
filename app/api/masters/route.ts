@@ -22,7 +22,7 @@ import {
   prismaDeleteItem,
 } from "@/lib/backend/prisma-store";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
-import { documentSeriesId } from "@/lib/accounting/document-numbering";
+import { nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeCurrency } from "@/lib/accounting/currency";
 
 const optionalText = z.string().trim().optional().default("");
@@ -67,8 +67,8 @@ const projectSchema = z.object({
   projectManager: optionalText,
 });
 
-function generatedId(prefix: string) {
-  return documentSeriesId(prefix);
+async function generatedId(prefix: string) {
+  return nextDocumentSeriesId(prefix);
 }
 
 async function localBaseCurrency() {
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
         }
         const created = await prisma.customer.create({
           data: {
-            code: generatedId("CUS"),
+            code: await generatedId("CUS"),
             name: parsed.customerName,
             phone: parsed.phone || null,
             email: parsed.email || null,
@@ -286,7 +286,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
       }
 
-      const customerId = generatedId("CUS");
+      const customerId = await generatedId("CUS");
       const result = await appendRecord(
         "Customers",
         { ...parsed, customerId, active: true },
@@ -351,7 +351,7 @@ export async function POST(request: Request) {
         }
         const created = await prisma.supplier.create({
           data: {
-            code: generatedId("SUP"),
+            code: await generatedId("SUP"),
             name: parsed.supplierName,
             phone: parsed.phone || null,
             email: parsed.email || null,
@@ -392,7 +392,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
       }
 
-      const supplierId = generatedId("SUP");
+      const supplierId = await generatedId("SUP");
       const result = await appendRecord(
         "Suppliers",
         { ...parsed, supplierId, active: true },
@@ -492,7 +492,7 @@ export async function POST(request: Request) {
           : null;
         const created = await prisma.project.create({
           data: {
-            code: generatedId("PJ"),
+            code: await generatedId("PJ"),
             name: parsed.projectName,
             customerId: customerMatch ? customerMatch.id : null,
             startDate: parsed.startDate ? new Date(parsed.startDate) : null,
@@ -531,7 +531,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, type: body.type, mode, row: result.row });
       }
 
-      const projectId = generatedId("PJ");
+      const projectId = await generatedId("PJ");
       const result = await appendRecord(
         "Projects",
         { ...normalizedProjectRecord, projectId },
