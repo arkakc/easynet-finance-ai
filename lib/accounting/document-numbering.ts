@@ -1,5 +1,6 @@
 import { randomInt } from "node:crypto";
 import { prisma } from "@/src/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 function normalizedPrefix(documentName: string) {
   const cleaned = String(documentName || "DO").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
@@ -24,29 +25,32 @@ export function documentSeriesId(documentName: string, year = new Date().getUTCF
  * Format: PREFIX-YYYY-0000001
  * Uses an atomic database counter per prefix/year so the visible series is sequential.
  */
+/**
+ * Shared collision scan for every persisted model with a unique document code.
+ * Adding a new Prisma document model with a 'code' field makes it participate
+ * automatically, instead of maintaining a fragile list of doctypes.
+ */
 export async function existingVisibleSequenceMax(prefix: string, year: number) {
   const start = `${prefix}-${year}-`;
-  const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, deliveryNotes, purchaseReceipts, customers, suppliers, projects, items] = await Promise.all([
-    prisma.quote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.invoice.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.purchaseOrder.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.supplierBill.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.payment.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.expense.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.deliveryNote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.purchaseReceipt.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.customer.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.supplier.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.project.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-    prisma.item.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
-  ]);
-  return [...quotes, ...invoices, ...purchaseOrders, ...supplierBills, ...payments, ...expenses, ...deliveryNotes, ...purchaseReceipts, ...customers, ...suppliers, ...projects, ...items]
-    .reduce((max, row) => {
-      const value = String(row.code || "");
-      if (!value.startsWith(start)) return max;
-      const sequence = Number(value.slice(start.length));
-      return Number.isInteger(sequence) && sequence > max ? sequence : max;
-    }, 0);
+  const models = Prisma.dmmf.datamodel.models.filter((model) =>
+    model.fields.some((field) => field.name === "code" && field.kind === "scalar" && field.type === "String")
+  );
+  const rows = await Promise.all(models.map(async (model) => {
+    const key = model.name[0].toLowerCase() + model.name.slice(1);
+    const delegate = (prisma as unknown as Record<string, { findMany?: (query: unknown) => Promise<Array<{ code: string }>> }>)[key];
+    if (!delegate?.findMany) return [];
+    return delegate.findMany({
+      where: { code: { startsWith: start } },
+      select: { code: true },
+    });
+  }));
+  return rows.flat().reduce((max, row) => {
+    const code = String(row.code || "");
+    const suffix = code.slice(start.length);
+    if (!/^\d+$/.test(suffix)) return max;
+    const sequence = Number(suffix);
+    return Number.isSafeInteger(sequence) ? Math.max(max, sequence) : max;
+  }, 0);
 }
 
 export async function nextDocumentSeriesId(documentName: string, year = new Date().getUTCFullYear()) {
