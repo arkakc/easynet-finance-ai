@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PrintButton from "@/app/components/print-button";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
@@ -344,7 +345,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     if(key==="cashBankAccountId"||key==="expenseAccountId")return named(value,accountMap);
     if(key==="journalId"){
       const journalId=String(value||"").trim();
-      return journalId?<Link prefetch={false} href={`/journals/${encodeURIComponent(journalId)}`}>{journalId}</Link>:"—";
+      return <LinkedDocumentReference kind="journal" id={journalId} />;
     }
     if(key==="reference"&&type==="payment"){
       const text=String(value||"");
