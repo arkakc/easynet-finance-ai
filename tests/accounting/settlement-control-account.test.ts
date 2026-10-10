@@ -28,3 +28,25 @@ test("missing account relation must fail closed rather than posting the FK as a 
   const missing = invoice.map(({ account, ...line }) => line);
   assert.throws(() => sourceControlAccount(missing, "RECEIVABLE"), /unambiguously/);
 });
+
+test("supplier advance must clear the original bill AP 2111, never a default 2110", () => {
+  const selected = sourceControlAccount(bill, "PAYABLE");
+  const advanceLines = [
+    { accountId: selected, debit: 500, credit: 0, description: "Settle Accounts Payable from advance" },
+    { accountId: "1160", debit: 0, credit: 500, description: "Apply supplier advance" },
+  ];
+  assert.equal(advanceLines[0].accountId, "2111");
+  assert.equal(advanceLines.reduce((sum, line) => sum + line.debit - line.credit, 0), 0);
+});
+test("customer advance must clear the original invoice AR 1131, never a default 1130", () => {
+  const selected = sourceControlAccount(invoice, "RECEIVABLE");
+  const advanceLines = [
+    { accountId: "customer-advances", debit: 500, credit: 0, description: "Apply customer advance" },
+    { accountId: selected, debit: 0, credit: 500, description: "Settle Accounts Receivable from advance" },
+  ];
+  assert.equal(advanceLines[1].accountId, "1131");
+  assert.equal(advanceLines.reduce((sum, line) => sum + line.debit - line.credit, 0), 0);
+});
+test("advance source must be unambiguous before journal lines can be prepared", () => {
+  assert.throws(() => sourceControlAccount([...bill, { accountId: "other", account: { code: "2110" }, description: "Accounts payable", debit: 0, credit: 500 }], "PAYABLE"), /unambiguously/);
+});
