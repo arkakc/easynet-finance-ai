@@ -12,6 +12,7 @@ export type TransactionItemMaster = {
   itemType: string;
   uom?: string;
   defaultRate?: number | string;
+  stockQty?: number | string;
 };
 
 export type TransactionDraftLine = {
@@ -30,6 +31,7 @@ type Props = {
   lines: TransactionDraftLine[];
   items: TransactionItemMaster[];
   supplierQuotation?: boolean;
+  showStockOnHand?: boolean;
   temporaryQuotation?: boolean;
   masterOnly?: boolean;
   disabled?: boolean;
@@ -75,6 +77,7 @@ export default function TransactionItemLines({
   lines,
   items,
   supplierQuotation = false,
+  showStockOnHand = false,
   temporaryQuotation: temporaryQuotationProp,
   masterOnly = false,
   disabled = false,
@@ -93,6 +96,13 @@ export default function TransactionItemLines({
     }
   }, []);
   useFlowDataRefresh(() => { void refreshItems(); });
+  useEffect(() => {
+    if (!showStockOnHand) return;
+    void refreshItems();
+    const onFocus = () => { void refreshItems(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [showStockOnHand, refreshItems]);
 
   const salesQuotationFromUrl = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "salesQuote";
   const temporaryQuotation = !masterOnly && (temporaryQuotationProp ?? (supplierQuotation || salesQuotationFromUrl));
@@ -154,6 +164,7 @@ export default function TransactionItemLines({
             <th style={{ minWidth: 220 }}>Item Name</th>
             <th style={{ width: 95 }}>UOM</th>
             <th style={{ width: 125 }}>Moving Avg Cost</th>
+            {showStockOnHand && <th style={{ width: 112 }}>Current SOH</th>}
             <th style={{ width: 100 }}>QTY</th>
             <th style={{ width: 115 }}>Unit Price</th>
             <th style={{ width: 110 }}>Total</th>
@@ -205,6 +216,7 @@ export default function TransactionItemLines({
               </td>
               <td style={{ verticalAlign: "top" }}><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}><input value={money(movingAverage)} readOnly disabled /></td>
+              {showStockOnHand && <td style={{ verticalAlign: "top" }}><div className="table-field-align" title="Current Item Master quantity on hand. A quotation does not reserve or deduct stock."><strong>{linked && String(linked.itemType).toUpperCase() === "STOCK" ? (linked.stockQty === undefined || linked.stockQty === null ? "—" : Number(linked.stockQty).toLocaleString(undefined, { maximumFractionDigits: 4 })) : "N/A"}</strong></div></td>}
               <td style={{ verticalAlign: "top" }}><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}>
