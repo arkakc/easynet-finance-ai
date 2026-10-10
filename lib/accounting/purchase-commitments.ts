@@ -17,6 +17,8 @@ const isStock = (kind: string | undefined) => ["GOOD", "STOCK"].includes(String(
 /** Unfulfilled PO contractual value, not unpaid AP or unapplied vendor cash. */
 export function outstandingPurchaseCommitments(orders: OpenPurchaseOrder[], movements: ReceivedStock[], bills: BilledService[]) {
   return round2(orders.reduce((grand, order) => {
+    // Supplier Quotations share the PurchaseOrder table but are not contractual POs.
+    if (!/^PO-/i.test(String(order.code || ""))) return grand;
     if (closedStatuses.has(String(order.status).toUpperCase())) return grand;
     const received = new Map<string, number>();
     for (const movement of movements) {
