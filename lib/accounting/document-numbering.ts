@@ -24,7 +24,7 @@ export function documentSeriesId(documentName: string, year = new Date().getUTCF
  * Format: PREFIX-YYYY-0000001
  * Uses an atomic database counter per prefix/year so the visible series is sequential.
  */
-async function existingVisibleSequenceMax(prefix: string, year: number) {
+export async function existingVisibleSequenceMax(prefix: string, year: number) {
   const start = `${prefix}-${year}-`;
   const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, deliveryNotes, purchaseReceipts, customers, suppliers, projects, items] = await Promise.all([
     prisma.quote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
@@ -49,32 +49,33 @@ async function existingVisibleSequenceMax(prefix: string, year: number) {
     }, 0);
 }
 
-/**
- * Reconcile legacy counters against actually persisted numbers.
- * A previously consumed preview must never permanently skip a number.
- * This is safe only because the allocator's update is atomic, while previews
- * are read-only. Numbers are still allocated at creation time.
- */
 export async function nextDocumentSeriesId(documentName: string, year = new Date().getUTCFullYear()) {
   const prefix = normalizedPrefix(documentName);
   const key = `document_series:${prefix}:${year}`;
-  const persistedMax = await existingVisibleSequenceMax(prefix, year);
-  // A counter ahead of persisted data can be an unused reservation from the old
-  // reload bug. Rebase it only when there are no persistent documents in
-  // that series, avoiding reuse of an existing reference.
-  if (persistedMax === 0) {
-    await prisma.globalSettings.updateMany({
-      where: { key, valueInt: { gt: 0 } },
-      data: { valueInt: 0, updatedBy: "document-numbering" },
+  const existingCounter = await prisma.globalSettings.findUnique({
+    where: { key },
+    select: { valueInt: true },
+  });
+  if (existingCounter?.valueInt) {
+    const row = await prisma.globalSettings.update({
+      where: { key },
+      data: { valueInt: { increment: 1 }, updatedBy: "document-numbering" },
+      select: { valueInt: true },
     });
+    return `${prefix}-${year}-${String(Number(row.valueInt || 1)).padStart(7, "0")}`;
   }
+  const initialSequence = (await existingVisibleSequenceMax(prefix, year)) + 1;
   const row = await prisma.globalSettings.upsert({
     where: { key },
-    create: { key, valueInt: persistedMax + 1, description: `Sequential document counter for ${prefix}-${year}`, updatedBy: "document-numbering" },
+    create: {
+      key, valueInt: initialSequence,
+      description: `Sequential document counter for ${prefix}-${year}`,
+      updatedBy: "document-numbering",
+    },
     update: { valueInt: { increment: 1 }, updatedBy: "document-numbering" },
     select: { valueInt: true },
   });
-  const sequence = Math.max(persistedMax + 1, Number(row.valueInt || 1));
+  const sequence = Math.max(initialSequence, Number(row.valueInt || initialSequence));
   return `${prefix}-${year}-${String(sequence).padStart(7, "0")}`;
 }
 
@@ -93,7 +94,6 @@ export async function previewDocumentSeriesId(documentName: string, year = new D
     prisma.globalSettings.findUnique({ where: { key }, select: { valueInt: true } }),
     existingVisibleSequenceMax(prefix, year),
   ]);
-  // With no saved documents, a legacy counter is a stale preview reservation.
-  const next = inUse === 0 ? 1 : Math.max(Number(counter?.valueInt || 0), inUse) + 1;
+  const next = Math.max(Number(counter?.valueInt || 0), inUse) + 1;
   return `${prefix}-${year}-${String(next).padStart(7, "0")}`;
 }
