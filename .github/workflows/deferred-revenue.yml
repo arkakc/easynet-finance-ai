@@ -21,6 +21,8 @@ on:
       - "app/components/transaction-document-client.tsx"
       - "app/components/purchase-receipt-client.tsx"
       - "app/components/transaction-item-lines.tsx"
+      - "lib/accounting/sales-order-reservations.ts"
+      - "tests/accounting/sales-order-reservations.test.ts"
       - "app/components/transactions-workspace-v5.tsx"
       - "app/components/sales-invoice-cycle.tsx"
       - "app/components/delivery-note-client.tsx"
@@ -51,4 +53,5 @@ jobs:
       - run: npx tsx --test tests/accounting/gst-posting-eligibility.test.ts
       - run: npx tsx --test tests/accounting/stock-delivery-movement.test.ts
       - run: npx tsx --test tests/accounting/settlement-control-account.test.ts
+      - run: npx tsx --test tests/accounting/sales-order-reservations.test.ts
       - run: npm run typecheck

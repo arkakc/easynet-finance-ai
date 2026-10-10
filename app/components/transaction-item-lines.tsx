@@ -13,6 +13,8 @@ export type TransactionItemMaster = {
   uom?: string;
   defaultRate?: number | string;
   stockQty?: number | string;
+  reservedQty?: number | string;
+  availableQty?: number | string;
 };
 
 export type TransactionDraftLine = {
@@ -156,7 +158,7 @@ export default function TransactionItemLines({
     </datalist>
 
     <div className="table-wrap">
-      <table className="data-table line-items-table" style={{ minWidth: 1280 }}>
+      <table className="data-table line-items-table" style={{ minWidth: showStockOnHand ? 1550 : 1280 }}>
         <thead>
           <tr>
             <th style={{ minWidth: 290 }}>Search / Enter Item</th>
@@ -164,7 +166,7 @@ export default function TransactionItemLines({
             <th style={{ minWidth: 220 }}>Item Name</th>
             <th style={{ width: 95 }}>UOM</th>
             <th style={{ width: 125 }}>Moving Avg Cost</th>
-            {showStockOnHand && <th style={{ width: 112 }}>Current SOH</th>}
+            {showStockOnHand && <><th style={{ width: 112 }}>Current SOH</th><th style={{ width: 112 }}>SO Reserved</th><th style={{ width: 112 }}>Available</th></>}
             <th style={{ width: 100 }}>QTY</th>
             <th style={{ width: 115 }}>Unit Price</th>
             <th style={{ width: 110 }}>Total</th>
@@ -217,6 +219,8 @@ export default function TransactionItemLines({
               <td style={{ verticalAlign: "top" }}><input value={line.uom} onChange={(event) => patchLine(index, { uom: event.target.value })} readOnly={masterOnly} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}><input value={money(movingAverage)} readOnly disabled /></td>
               {showStockOnHand && <td style={{ verticalAlign: "top" }}><div className="table-field-align" title="Current Item Master quantity on hand. A quotation does not reserve or deduct stock."><strong>{linked && String(linked.itemType).toUpperCase() === "STOCK" ? (linked.stockQty === undefined || linked.stockQty === null ? "—" : Number(linked.stockQty).toLocaleString(undefined, { maximumFractionDigits: 4 })) : "N/A"}</strong></div></td>}
+              {showStockOnHand && <td style={{ verticalAlign: "top" }}><div className="table-field-align" title="Undelivered quantities on confirmed Sales Orders only. Sales Quotations do not reserve stock."><strong>{linked && String(linked.itemType).toUpperCase() === "STOCK" ? (linked.reservedQty === undefined ? "—" : Number(linked.reservedQty).toLocaleString(undefined, { maximumFractionDigits: 4 })) : "N/A"}</strong></div></td>}
+              {showStockOnHand && <td style={{ verticalAlign: "top" }}><div className="table-field-align" title="Quantity on hand minus Sales Order reservations."><strong>{linked && String(linked.itemType).toUpperCase() === "STOCK" ? (linked.availableQty === undefined ? "—" : Number(linked.availableQty).toLocaleString(undefined, { maximumFractionDigits: 4 })) : "N/A"}</strong></div></td>}
               <td style={{ verticalAlign: "top" }}><input type="number" min="0.0001" step="0.0001" value={line.qty} onChange={(event) => patchLine(index, { qty: event.target.value })} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}><input type="number" min="0" step="0.01" value={line.rate} onChange={(event) => patchLine(index, { rate: event.target.value })} required disabled={disabled} /></td>
               <td style={{ verticalAlign: "top" }}>
