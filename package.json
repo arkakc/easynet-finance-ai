@@ -21,6 +21,7 @@
     "db:sequence:preview": "tsx scripts/database/repair-empty-document-series.ts",
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
     "db:uat:deep-audit": "tsx scripts/database/finance-uat-deep-audit.ts",
+    "db:uat:close-controls": "tsx scripts/database/finance-close-controls.ts",
     "db:reconcile:control-preview": "tsx scripts/database/reclassify-historical-control-accounts.ts",
     "db:reconcile:control-apply": "tsx scripts/database/reclassify-historical-control-accounts.ts --apply",
     "db:repair:bank-mappings": "tsx scripts/database/backfill-bank-ledger-mappings.ts",
