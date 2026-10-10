@@ -34,6 +34,7 @@ export default function DashboardClient() {
   const [rows, setRows] = useState<DashboardKPI[]>([]);
   const [backendError, setBackendError] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [gstDetailsOpen, setGstDetailsOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -72,6 +73,8 @@ export default function DashboardClient() {
   const accountsReceivable = n(get("accountsReceivable"));
   const accountsPayable = n(get("accountsPayable"));
   const gstPayable = n(get("gstPayable"));
+  const gstOutputLiability = n(get("gstOutputLiability"));
+  const gstInputRecoverable = n(get("gstInputRecoverable"));
   const revenue = n(get("revenuePosted"));
   const expenses = n(get("expensesPosted"));
   const netProfit = n(get("netProfitPosted"));
@@ -105,7 +108,7 @@ export default function DashboardClient() {
     ["Cash & Bank", displayValue(cashBank)],
     ["Accounts Receivable", displayValue(accountsReceivable)],
     ["Accounts Payable", displayValue(accountsPayable)],
-    ["GST Payable", displayValue(gstPayable)],
+    ["Net GST Payable", displayValue(gstPayable)],
     ["Revenue (Posted)", displayValue(revenue)],
     ["Expenses (Posted)", displayValue(expenses)],
     ["Net Profit (Posted)", displayValue(netProfit)],
@@ -135,8 +138,34 @@ export default function DashboardClient() {
       )}
 
       <div className="grid dashboard-grid">
-        {kpis.map(([label, value]) => <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
+        {kpis.map(([label, value]) => label === "Net GST Payable" ? (
+          <button
+            type="button"
+            className="card dashboard-gst-card"
+            key={label}
+            onClick={() => setGstDetailsOpen((current) => !current)}
+            aria-expanded={gstDetailsOpen}
+            aria-controls="dashboard-gst-breakdown"
+            disabled={!loaded || Boolean(backendError)}
+            title="Show Output GST, Input GST and Net GST position"
+          >
+            <span className="label">{label} <span className="dashboard-gst-chevron" aria-hidden="true">{gstDetailsOpen ? "▴" : "▾"}</span></span>
+            <span className="value">{value}</span>
+            <span className="dashboard-gst-hint">View GST breakdown</span>
+          </button>
+        ) : <div className="card" key={label}><div className="label">{label}</div><div className="value">{value}</div></div>)}
       </div>
+
+      {gstDetailsOpen && loaded && !backendError && (
+        <section className="panel dashboard-gst-breakdown" id="dashboard-gst-breakdown" aria-label="GST control account breakdown">
+          <h3>GST Control Account Breakdown</h3>
+          <p className="small">Balances from posted GL accounts. Net position is a reporting calculation, not a GST settlement journal.</p>
+          <div className="dashboard-gst-breakdown-row"><span>Output GST (Liability)</span><strong>{money(gstOutputLiability)}</strong></div>
+          <div className="dashboard-gst-breakdown-row"><span>Less: Input GST (Recoverable Asset)</span><strong>({money(gstInputRecoverable)})</strong></div>
+          <div className="dashboard-gst-breakdown-row dashboard-gst-breakdown-total"><span>{gstPayable < 0 ? "Net GST Recoverable" : "Net GST Payable"}</span><strong>{money(Math.abs(gstPayable))}</strong></div>
+          <p className="small">Input GST recoverability depends on valid documentation and applicable PNG GST rules. The displayed amount is the GL balance, not verified tax-return eligibility.</p>
+        </section>
+      )}
 
       <div>
         <section className="panel">

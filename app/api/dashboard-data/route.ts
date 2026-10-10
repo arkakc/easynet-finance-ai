@@ -34,6 +34,8 @@ async function localDashboardData() {
       { key: "accountsReceivable", value: accountsReceivable, updatedAt },
       { key: "accountsPayable", value: accountsPayable, updatedAt },
       { key: "gstPayable", value: gstPayable, updatedAt },
+      { key: "gstOutputLiability", value: gstLiability, updatedAt },
+      { key: "gstInputRecoverable", value: gstAsset, updatedAt },
       { key: "revenuePosted", value: revenue, updatedAt },
       { key: "expensesPosted", value: expensesTotal, updatedAt },
       { key: "netProfitPosted", value: revenue - expensesTotal, updatedAt },
