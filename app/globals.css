@@ -5369,3 +5369,20 @@ a.linked-document-id[href^="/stock/item/"]:hover { color: #1045a0; text-decorati
 .document-sheet .document-lines .data-table td a[href^="/stock/item/"]:focus-visible,
 .data-table td a[href^="/stock/item/"]:focus-visible,
 a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #175cd3; outline-offset: 3px; border-radius: 2px; }
+
+
+/* Sales Quotation: compact stock visibility directly beside Moving Average Cost. */
+.sales-quote-stock-table { width: 100%; table-layout: fixed; }
+.sales-quote-stock-table th { font-size: 10.5px; line-height: 1.25; letter-spacing: .015em; white-space: normal; padding: 10px 7px; }
+.sales-quote-stock-table td { font-size: 12px; padding: 10px 7px; vertical-align: top; }
+.sales-quote-stock-table :is(input,select) { min-width: 0; width: 100%; padding: 8px 9px; font-size: 12px; height: 38px; }
+.sales-quote-stock-table .table-field-align { min-height: 38px; font-size: 12px; align-items: center; }
+.sales-quote-stock-table .item-line-hint { font-size: 10.5px; line-height: 1.3; }
+.sales-quote-stock-table td:nth-child(6),
+.sales-quote-stock-table td:nth-child(7),
+.sales-quote-stock-table td:nth-child(8) { font-variant-numeric: tabular-nums; text-align: center; }
+.sales-quote-stock-table td:nth-child(6) .table-field-align,
+.sales-quote-stock-table td:nth-child(7) .table-field-align,
+.sales-quote-stock-table td:nth-child(8) .table-field-align { justify-content: center; }
+.sales-quote-stock-table td:last-child button { min-width: 0; white-space: nowrap; font-size: 11px; padding: 8px; }
+@media (max-width: 1200px) { .sales-quote-stock-table { min-width: 1180px; } }

@@ -157,20 +157,20 @@ export default function TransactionItemLines({
       {liveItems.map((item) => <option key={item.itemId || item.itemCode} value={itemDisplay(item)} />)}
     </datalist>
 
-    <div className="table-wrap">
-      <table className="data-table line-items-table" style={{ minWidth: showStockOnHand ? 1550 : 1280 }}>
+    <div className={`table-wrap ${showStockOnHand ? "sales-quote-stock-table-wrap" : ""}`}>
+      <table className={`data-table line-items-table ${showStockOnHand ? "sales-quote-stock-table" : ""}`} style={{ minWidth: showStockOnHand ? 1180 : 1280 }}>
         <thead>
           <tr>
-            <th style={{ minWidth: 290 }}>Search / Enter Item</th>
-            <th style={{ width: 100 }}>Item Code</th>
-            <th style={{ minWidth: 220 }}>Item Name</th>
-            <th style={{ width: 95 }}>UOM</th>
-            <th style={{ width: 125 }}>Moving Avg Cost</th>
-            {showStockOnHand && <><th style={{ width: 112 }}>Current SOH</th><th style={{ width: 112 }}>SO Reserved</th><th style={{ width: 112 }}>Available</th></>}
-            <th style={{ width: 100 }}>QTY</th>
-            <th style={{ width: 115 }}>Unit Price</th>
-            <th style={{ width: 110 }}>Total</th>
-            <th style={{ width: 85 }}></th>
+            <th style={{ minWidth: showStockOnHand ? 205 : 290 }}>Search / Enter Item</th>
+            <th style={{ width: showStockOnHand ? 88 : 100 }}>Item Code</th>
+            <th style={{ minWidth: showStockOnHand ? 170 : 220 }}>Item Name</th>
+            <th style={{ width: showStockOnHand ? 67 : 95 }}>UOM</th>
+            <th style={{ width: showStockOnHand ? 94 : 125 }}>Moving Avg Cost</th>
+            {showStockOnHand && <><th style={{ width: 72 }}>Current SOH</th><th style={{ width: 79 }}>SO Reserved</th><th style={{ width: 74 }}>Available</th></>}
+            <th style={{ width: showStockOnHand ? 68 : 100 }}>QTY</th>
+            <th style={{ width: showStockOnHand ? 85 : 115 }}>Unit Price</th>
+            <th style={{ width: showStockOnHand ? 85 : 110 }}>Total</th>
+            <th style={{ width: showStockOnHand ? 70 : 85 }}></th>
           </tr>
         </thead>
         <tbody>
