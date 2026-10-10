@@ -29,7 +29,7 @@ async function main() {
       if (changed.count !== 1) throw new Error(`Counter ${counter.key} changed concurrently; stop and rerun preview`);
     }
   }
-  console.log(`${apply ? "Applied" : "Preview"}: ${candidates} empty-series stale counter(s). Existing document codes were not modified.`);
+  console.log(`${apply ? "Applied" : "Preview"}: ${candidates} empty-series stale counter(s) across ALL recorded doctypes. Existing document codes were not modified.`);
 }
 
 main().catch((err) => { console.error(err); process.exitCode = 1; }).finally(() => prisma.$disconnect());
