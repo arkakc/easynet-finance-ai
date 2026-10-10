@@ -180,7 +180,12 @@ export async function POST(request: Request) {
     if (!row) throw new Error(`${config.label} not found`);
     const current = String(row.status || "DRAFT").toUpperCase();
     if (input.decision === "APPROVE" && current !== "DRAFT") throw new Error(`Only DRAFT documents can be approved. Current status: ${current}`);
-    if (input.decision === "CANCEL" && current !== "DRAFT") throw new Error(`Only DRAFT documents can be cancelled. Current status: ${current}`);
+    if (input.decision === "CANCEL") {
+      const unpostedApprovedPayment = input.recordType === "payment" && current === "APPROVED" && !String(row.journalId || "").trim();
+      if (current !== "DRAFT" && !unpostedApprovedPayment) throw new Error(`Cancellation blocked for ${current} document. Posted payments require controlled accounting reversal.`);
+      if (input.recordType === "payment" && String(row.journalId || "").trim()) throw new Error("Posted Payment Entry cannot be cancelled without GL and bank reversal.");
+      if (!input.note.trim()) throw new Error("A cancellation reason is required.");
+    }
 
     if (input.decision === "CANCEL") {
       const cancelled = await updateRecord(config.table, config.idField, input.recordId, { status: "CANCELLED" }, `finance-controller:${input.note || "cancel"}`);
