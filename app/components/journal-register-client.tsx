@@ -1,5 +1,5 @@
-import LinkedDocumentReference from "@/app/components/linked-document-reference";
 "use client";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
