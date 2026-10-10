@@ -29,6 +29,9 @@ on:
       - "app/globals.css"
       - "app/components/dashboard-client.tsx"
       - "app/api/dashboard-data/route.ts"
+      - "lib/accounting/purchase-commitments.ts"
+      - "scripts/database/finance-close-controls.ts"
+      - "tests/accounting/purchase-commitments.test.ts"
       - "lib/accounting/**"
       - "lib/backend/prisma-store.ts"
       - "prisma/schema.prisma"
@@ -56,4 +59,5 @@ jobs:
       - run: npx tsx --test tests/accounting/stock-delivery-movement.test.ts
       - run: npx tsx --test tests/accounting/settlement-control-account.test.ts
       - run: npx tsx --test tests/accounting/sales-order-reservations.test.ts
+      - run: npx tsx --test tests/accounting/purchase-commitments.test.ts
       - run: npm run typecheck
