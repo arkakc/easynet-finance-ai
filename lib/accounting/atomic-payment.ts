@@ -186,7 +186,7 @@ export async function finalizePaymentAtomic(input: AtomicPaymentFinalizationInpu
       }
       const journal = await tx.journalHeader.findFirst({
         where: { OR: [{ id: source.journalId }, { code: source.journalId }], status: "POSTED" },
-        include: { lines: true },
+        include: { lines: { include: { account: { select: { code: true } } } } },
       });
       if (!journal) throw new Error("Source invoice/bill journal is not POSTED");
       const settlementAccount = sourceControlAccount(
