@@ -14,6 +14,17 @@ type Props={
 };
 type PlannedAdvance={paymentId:string;paymentNumber:string;amount:number;allocated:number;available:number;planned:number;status:string;journalId:string;createdAt:string};
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
+function distributeAdvanceSuggestions(rows:PlannedAdvance[],outstanding:number):Record<string,string>{
+  let remaining=Math.max(0,Number(outstanding)||0);
+  const amounts:Record<string,string>={};
+  for(const row of [...rows].sort((a,b)=>new Date(a.createdAt||0).getTime()-new Date(b.createdAt||0).getTime())){
+    const safe=Math.max(0,Math.min(remaining,Number(row.available)||0));
+    amounts[row.paymentId]=String(Math.round((safe+Number.EPSILON)*100)/100);
+    remaining=Math.max(0,remaining-safe);
+  }
+  return amounts;
+}
+
 function createdValue(row:PlannedAdvance){const t=new Date(row.createdAt||"").getTime();return Number.isFinite(t)?t:0;}
 
 export default function SupplierInvoiceAdvanceAdjustment(props:Props){
@@ -32,7 +43,7 @@ export default function SupplierInvoiceAdvanceAdjustment(props:Props){
     if(!response.ok||!body.ok)throw new Error(body.error||"Supplier Advance plan load failed");
     const rows=(body.availableAdvances||[]) as PlannedAdvance[];
     setPlannedAdvances(rows);
-    setPlannedAmounts(Object.fromEntries(rows.map(row=>[row.paymentId,String(row.planned||Math.min(row.available,Number(props.outstandingAmount||0)))])));
+    setPlannedAmounts(draftInvoice?Object.fromEntries(rows.map(row=>[row.paymentId,String(row.planned||0)])):distributeAdvanceSuggestions(rows,Number(props.outstandingAmount||0)));
     setPlannedTotal(Number(body.plannedTotal||0));
     setProjectedOutstanding(Number(body.projectedOutstanding??props.outstandingAmount??0));
     props.onPlanChange?.({plannedTotal:Number(body.plannedTotal||0),projectedOutstanding:Number(body.projectedOutstanding??props.outstandingAmount??0)});
@@ -55,6 +66,7 @@ export default function SupplierInvoiceAdvanceAdjustment(props:Props){
     const picked=plannedAdvances.filter(row=>Number(row.available)>0.001&&Boolean(row.journalId)).map(row=>({row,amount:Number(plannedAmounts[row.paymentId]||0)})).filter(entry=>entry.amount>0);
     const total=picked.reduce((sum,entry)=>sum+entry.amount,0);
     if(!picked.length){setMessage("Select an advance amount.");return;}
+    if(loading){setMessage("Wait for the latest advance balances.");return;}
     if(picked.some(entry=>!Number.isFinite(entry.amount)||entry.amount>Number(entry.row.available)+0.001)||total>Number(props.outstandingAmount)+0.001){setMessage("Adjustment exceeds invoice outstanding or available advance.");return;}
     if(!window.confirm("Apply "+money(total)+" of Supplier Advance to this invoice? Accounting allocation will be posted."))return;
     setBusyId("allocation");setMessage("Adjusting advance…");
