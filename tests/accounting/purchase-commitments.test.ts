@@ -21,3 +21,9 @@ test("service commitment released when matching supplier bill posted", () => {
   const service = { ...po, lines: [{ itemId: "service", quantity: 2, unitPrice: 250, item: { type: "SERVICE" } }] };
   assert.equal(outstandingPurchaseCommitments([service], [], [{ orderId: "p1", poReference: null, lines: [{ itemId: "service", quantity: 2 }] }]), 0);
 });
+
+test("supplier quotations in PurchaseOrder storage do not count as PO commitments", () => {
+  const supplierQuote = { ...po, id: "sq1", code: "SUPQ-2026-0000001" };
+  assert.equal(outstandingPurchaseCommitments([supplierQuote], [], []), 0);
+  assert.equal(outstandingPurchaseCommitments([supplierQuote, po], [], []), 550);
+});
