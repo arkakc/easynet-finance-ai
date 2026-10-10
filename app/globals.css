@@ -5323,3 +5323,30 @@ form.panel {
 .stock-trace-primary-link { font-weight: 650; text-decoration: none; color: #175cd3; }
 .stock-trace-primary-link:hover { text-decoration: underline; }
 .stock-trace-secondary-label { display: block; margin-top: 4px; color: #63758a; white-space: nowrap; }
+
+/* Shared reference-ID styling across ERP doctypes: links only, never entire rows. */
+a.linked-document-id,
+.document-sheet a[href^="/journals/"],
+.document-sheet a[href^="/transactions/"],
+.document-sheet a[href^="/stock/movement/"],
+.data-table a[href^="/journals/"],
+.data-table a[href^="/transactions/"],
+.data-table a[href^="/stock/movement/"] {
+  color: #175cd3;
+  font-weight: 700;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+a.linked-document-id:hover,
+.document-sheet a[href^="/journals/"]:hover,
+.document-sheet a[href^="/transactions/"]:hover,
+.document-sheet a[href^="/stock/movement/"]:hover,
+.data-table a[href^="/journals/"]:hover,
+.data-table a[href^="/transactions/"]:hover,
+.data-table a[href^="/stock/movement/"]:hover { text-decoration: underline; color: #1045a0; }
+a.linked-document-id:focus-visible,
+.document-sheet a[href^="/journals/"]:focus-visible,
+.document-sheet a[href^="/transactions/"]:focus-visible,
+.data-table a[href^="/journals/"]:focus-visible,
+.data-table a[href^="/transactions/"]:focus-visible { outline: 2px solid #175cd3; outline-offset: 3px; border-radius: 2px; }
+.stock-trace-clickable-row { cursor: auto; }
