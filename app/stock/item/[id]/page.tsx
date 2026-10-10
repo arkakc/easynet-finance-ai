@@ -1,4 +1,5 @@
 import Link from "next/link";
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { notFound } from "next/navigation";
 import { findRecords } from "@/lib/backend/apps-script";
 import { requirePermission } from "@/lib/auth";
@@ -108,13 +109,13 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
               {[...movements].reverse().map((row: any) => <tr key={row.movementId}>
                 <td>{String(row.movementDate||"").slice(0,10)}</td>
                 <td><strong>{row.warehouseCode || "LEGACY / DEFAULT"}</strong>{row.warehouseName ? <><br /><span className="small">{row.warehouseName}</span></> : null}</td>
-                <td><Link prefetch={false} className="linked-document-id" href={`/stock/movement/${encodeURIComponent(row.movementId)}`}><strong>{displayMovementDocument(row)}</strong></Link><span className="small stock-trace-secondary-label">{String(row.movementType || "").replaceAll("_", " ")}{movementLineNumber(row) ? ` · Line ${movementLineNumber(row)}` : ""}</span></td>
+                <td><LinkedDocumentReference kind="stockMovement" id={row.movementId}>{displayMovementDocument(row)}</LinkedDocumentReference><span className="small stock-trace-secondary-label">{String(row.movementType || "").replaceAll("_", " ")}{movementLineNumber(row) ? ` · Line ${movementLineNumber(row)}` : ""}</span></td>
                 <td>{qtyText(row.qtyIn)}</td>
                 <td>{qtyText(row.qtyOut)}</td>
                 <td>{money(row.unitCost)}</td>
                 <td>{money(signedMovementValue(row))}</td>
                 <td>{row.projectId || "—"}</td>
-                <td>{row.sourceDocumentId ? <Link prefetch={false} className="linked-document-id" href={String(row.movementType||"").toUpperCase()==="PURCHASE_RECEIPT"?`/transactions/purchaseOrder/${encodeURIComponent(row.sourceDocumentId)}`:`/document-explorer?documentId=${encodeURIComponent(row.sourceDocumentId)}`}><strong>{row.sourceDocumentId}</strong></Link> : "—"}</td><td>{row.journalId ? <Link prefetch={false} className="linked-document-id" href={`/journals/${encodeURIComponent(row.journalId)}`}>{row.journalId}</Link> : "—"}</td>
+                <td>{row.sourceDocumentId ? <Link prefetch={false} className="linked-document-id" href={String(row.movementType||"").toUpperCase()==="PURCHASE_RECEIPT"?`/transactions/purchaseOrder/${encodeURIComponent(row.sourceDocumentId)}`:`/document-explorer?documentId=${encodeURIComponent(row.sourceDocumentId)}`}><strong>{row.sourceDocumentId}</strong></Link> : "—"}</td><td>{row.journalId ? <LinkedDocumentReference kind="journal" id={row.journalId} /> : "—"}</td>
               </tr>)}
             </tbody>
           </table>
