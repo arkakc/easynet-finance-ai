@@ -7,6 +7,11 @@ import { prisma } from "@/src/lib/prisma";
 const n = (value: unknown) => Number(value || 0);
 const money = (value: unknown) => `K${n(value).toFixed(2)}`;
 const qtyText = (value: unknown) => n(value).toLocaleString(undefined, { maximumFractionDigits: 4 });
+const displayMovementDocument = (row: any) => {
+  const id = String(row.movementId || "");
+  return String(row.movementType || "").toUpperCase() === "PURCHASE_RECEIPT" ? id.replace(/-\d{3}$/, "") : id;
+};
+const movementLineNumber = (row: any) => String(row.movementType || "").toUpperCase() === "PURCHASE_RECEIPT" ? /-(\d{3})$/.exec(String(row.movementId || ""))?.[1] : null;
 const signedMovementValue = (row: any) => {
   const adjustment = n(row.valueAdjustment);
   if (Math.abs(adjustment) > 0.0000001) return adjustment;
@@ -100,10 +105,10 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
             <thead><tr><th>Date</th><th>Warehouse</th><th>Movement</th><th>Qty In</th><th>Qty Out</th><th>Unit Cost</th><th>Value</th><th>Project</th><th>Source Document</th><th>GL Journal</th></tr></thead>
             <tbody>
               {movements.length === 0 && <tr><td colSpan={10}>No stock movements recorded for this item.</td></tr>}
-              {[...movements].reverse().map((row: any) => <tr key={row.movementId}>
+              {[...movements].reverse().map((row: any) => <tr key={row.movementId} className="stock-trace-clickable-row">
                 <td>{String(row.movementDate||"").slice(0,10)}</td>
                 <td><strong>{row.warehouseCode || "LEGACY / DEFAULT"}</strong>{row.warehouseName ? <><br /><span className="small">{row.warehouseName}</span></> : null}</td>
-                <td>{row.movementType}<br /><span className="small">{row.movementId}</span></td>
+                <td><Link prefetch={false} className="stock-trace-primary-link" href={`/stock/movement/${encodeURIComponent(row.movementId)}`}><strong>{displayMovementDocument(row)}</strong></Link><span className="small stock-trace-secondary-label">{String(row.movementType || "").replaceAll("_", " ")}{movementLineNumber(row) ? ` · Line ${movementLineNumber(row)}` : ""}</span></td>
                 <td>{qtyText(row.qtyIn)}</td>
                 <td>{qtyText(row.qtyOut)}</td>
                 <td>{money(row.unitCost)}</td>
