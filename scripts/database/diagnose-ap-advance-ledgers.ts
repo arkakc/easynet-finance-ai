@@ -6,7 +6,7 @@ const asOf=process.argv.find(x=>x.startsWith("--as-of="))?.slice(8)||"2026-10-10
 const end=new Date(`${asOf}T23:59:59.999+10:00`);
 
 async function main(){
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(asOf)||Number.isNaN(end.getTime()))throw Error("Invalid --as-of date");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(asOf)||Number.isNaN(end.getTime()))throw Error("Invalid --as-of date");
   console.log(`READ ONLY AP / advance ledger diagnosis as of ${asOf}`);
   const statements=await buildFinancialStatements({asOf});
   const ap=statements.controls.payables;
