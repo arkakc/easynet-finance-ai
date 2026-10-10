@@ -1,3 +1,4 @@
+import LinkedDocumentReference from "@/app/components/linked-document-reference";
 "use client";
 
 import { useMemo } from "react";
@@ -31,7 +32,7 @@ export default function JournalRegisterClient({ rows, error }: { rows: JournalRe
   const postedCredit = posted.reduce((sum, row) => sum + row.credit, 0);
 
   const columns = useMemo<AdjustableColumn<JournalRegisterRow>[]>(() => [
-    { key: "journalId", label: "Journal ID", mandatory: true, defaultWidth: 190, value: (row) => <strong>{row.journalId}</strong>, sortValue: (row) => row.journalId },
+    { key: "journalId", label: "Journal ID", mandatory: true, defaultWidth: 190, value: (row) => <LinkedDocumentReference kind="journal" id={row.journalId} />, sortValue: (row) => row.journalId },
     { key: "createdAt", label: "Created Date", defaultWidth: 150, value: (row) => date(row.createdAt), sortValue: (row) => row.createdAt },
     { key: "postingDate", label: "Posting Date", defaultWidth: 150, value: (row) => date(row.postingDate), sortValue: (row) => row.postingDate },
     { key: "documentType", label: "Document Type", defaultWidth: 190, value: (row) => row.documentType || "—" },
