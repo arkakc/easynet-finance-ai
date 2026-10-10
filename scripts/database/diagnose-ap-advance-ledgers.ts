@@ -28,7 +28,7 @@ async function main(){
   for(const j of journals){
     const lines=j.lines.filter(l=>/^(211|116)/.test(l.account.code));
     if(!lines.length&&!linked.has(j.id)&&!linked.has(j.code))continue;
-    console.log(`JOURNAL ${j.code} ${j.documentType} date=${j.date.toISOString().slice(0,10)} source=${j.sourceDocId}`);
+    console.log(`JOURNAL ${j.code} date=${j.date.toISOString().slice(0,10)} source=${j.sourceDocId}`);
     for(const l of j.lines)console.log(`  GL ${l.account.code} ${l.account.name}: DR K${money(l.debit)} CR K${money(l.credit)} | ${l.description}`);
   }
   console.log("\nNo data modified. Do NOT execute control-apply based on this report alone.");
