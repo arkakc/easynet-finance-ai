@@ -23,7 +23,7 @@ export default function CustomerInvoiceAdvancePlan(props:Props){
   const[message,setMessage]=useState("");
 
   async function load(){
-    if(!draft){setLoading(false);return;}
+
     setLoading(true);
     try{
       const response=await fetch(`/api/erp/sales-invoice-advance-plan?invoiceId=${encodeURIComponent(props.invoiceId)}`,{cache:"no-store"});
@@ -40,6 +40,27 @@ export default function CustomerInvoiceAdvancePlan(props:Props){
   }
 
   useEffect(()=>{void load();},[props.invoiceId,props.status,props.outstandingAmount]);
+
+  async function applyPostedAdvance(){
+    if(busy)return;
+    const picked=rows.filter(row=>Number(row.available)>0.001&&Boolean(row.journalId)).map(row=>({row,amount:Number(amounts[row.paymentId]||0)})).filter(entry=>entry.amount>0);
+    const total=picked.reduce((sum,entry)=>sum+entry.amount,0);
+    if(!picked.length){setMessage("Select an advance amount.");return;}
+    if(picked.some(entry=>!Number.isFinite(entry.amount)||entry.amount>Number(entry.row.available)+0.001)||total>Number(props.outstandingAmount)+0.001){setMessage("Adjustment exceeds invoice outstanding or available advance.");return;}
+    if(!window.confirm("Apply "+money(total)+" of Customer Advance to this invoice? Accounting allocation will be posted."))return;
+    setBusy(true);setMessage("Adjusting advance…");
+    try {
+      for(const entry of picked){
+        const response=await fetch("/api/erp/advance-allocation",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({paymentId:entry.row.paymentId,partyType:"Customer",againstDocumentType:"Sales Invoice",againstDocumentId:props.invoiceId,amount:entry.amount,allocationDate:new Date().toISOString().slice(0,10),idempotencyKey:crypto.randomUUID()})});
+        const data=await response.json();
+        if(!response.ok||!data.ok)throw new Error(data.error||"Advance allocation failed");
+      }
+      setMessage("Advance adjusted. Invoice balance is refreshing.");
+      window.dispatchEvent(new Event("easynet:transaction-document-updated"));
+      await load();
+    } catch(error){setMessage((error instanceof Error?error.message:"Advance adjustment failed")+". Some allocations may have posted. Refresh before retry.");}
+    finally{setBusy(false);}
+  }
 
   async function save(){
     if(busy)return;
@@ -58,6 +79,18 @@ export default function CustomerInvoiceAdvancePlan(props:Props){
     finally{setBusy(false);}
   }
 
+  if(!draft&&["POSTED","PARTLY_PAID","PARTIAL"].includes(String(props.status||"").toUpperCase())&&Number(props.outstandingAmount)>0.001){
+    const eligible=rows.filter(row=>Number(row.available)>0.001&&Boolean(row.journalId));
+    const available=eligible.reduce((sum,row)=>sum+Number(row.available),0);
+    const suggestion=Math.min(Number(props.outstandingAmount),available);
+    return <section className="panel no-print" style={{marginTop:16}}>
+      <div className="form-title-row"><div><h3>Customer Advance Detected</h3><p className="small">Posted unallocated advances are detected automatically. Confirm the adjustment before creating the final receipt.</p></div><span className="auto-badge">{loading?"Checking…":money(available)+" Available"}</span></div>
+      {message&&<div role="status" className="status-banner" style={{marginTop:12}}>{message}</div>}
+      <div className="document-meta" style={{marginTop:12}}><div><span>Invoice Outstanding</span><strong>{money(props.outstandingAmount)}</strong></div><div><span>Suggested Advance</span><strong>{money(suggestion)}</strong></div><div><span>Estimated Net Receipt</span><strong>{money(Math.max(0,Number(props.outstandingAmount)-suggestion))}</strong></div></div>
+      {!loading&&eligible.length>0&&<><div className="table-wrap" style={{marginTop:12}}><table className="data-table"><thead><tr><th>Advance</th><th>Available</th><th>Apply</th></tr></thead><tbody>{eligible.map(row=><tr key={row.paymentId}><td><Link href={`/transactions/payment/${encodeURIComponent(row.paymentId)}`}>{row.paymentNumber||row.paymentId}</Link></td><td>{money(row.available)}</td><td><input type="number" min="0" max={Math.min(Number(row.available),Number(props.outstandingAmount))} step="0.01" value={amounts[row.paymentId]??"0"} onChange={event=>setAmounts(current=>({...current,[row.paymentId]:event.target.value}))} disabled={Boolean(busy)}/></td></tr>)}</tbody></table></div><div className="button-row" style={{marginTop:12}}><button type="button" disabled={Boolean(busy)} onClick={()=>void applyPostedAdvance()}>{busy?"Adjusting…":"Adjust Advance & Refresh Invoice"}</button></div></>}
+      {!loading&&!eligible.length&&!message&&<p className="small">No eligible unallocated Customer Advance found.</p>}
+    </section>;
+  }
   if(!draft)return null;
   const enteredTotal=rows.reduce((sum,row)=>sum+Number(amounts[row.paymentId]||0),0);
   return <section className="panel table-wrap no-print" style={{marginTop:20}}>
