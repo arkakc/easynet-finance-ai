@@ -11,6 +11,17 @@ type Props={
 };
 type PlannedAdvance={paymentId:string;paymentNumber:string;amount:number;allocated:number;available:number;planned:number;status:string;journalId:string;createdAt:string};
 const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
+function distributeAdvanceSuggestions(rows:PlannedAdvance[],outstanding:number):Record<string,string>{
+  let remaining=Math.max(0,Number(outstanding)||0);
+  const amounts:Record<string,string>={};
+  for(const row of [...rows].sort((a,b)=>new Date(a.createdAt||0).getTime()-new Date(b.createdAt||0).getTime())){
+    const safe=Math.max(0,Math.min(remaining,Number(row.available)||0));
+    amounts[row.paymentId]=String(Math.round((safe+Number.EPSILON)*100)/100);
+    remaining=Math.max(0,remaining-safe);
+  }
+  return amounts;
+}
+
 
 export default function CustomerInvoiceAdvancePlan(props:Props){
   const draft=String(props.status||"").toUpperCase()==="DRAFT";
@@ -31,7 +42,7 @@ export default function CustomerInvoiceAdvancePlan(props:Props){
       if(!response.ok||!body.ok)throw new Error(body.error||"Customer Advance plan load failed");
       const next=(body.availableAdvances||[]) as PlannedAdvance[];
       setRows(next);
-      setAmounts(Object.fromEntries(next.map(row=>[row.paymentId,String(row.planned||Math.min(row.available,Number(props.outstandingAmount||0)))])));
+      setAmounts(draft?Object.fromEntries(next.map(row=>[row.paymentId,String(row.planned||0)])):distributeAdvanceSuggestions(next,Number(props.outstandingAmount||0)));
       setPlannedTotal(Number(body.plannedTotal||0));
       setProjectedOutstanding(Number(body.projectedOutstanding??props.outstandingAmount??0));
       props.onPlanChange?.({plannedTotal:Number(body.plannedTotal||0),projectedOutstanding:Number(body.projectedOutstanding??props.outstandingAmount??0)});
