@@ -24,7 +24,7 @@ export function documentSeriesId(documentName: string, year = new Date().getUTCF
  * Format: PREFIX-YYYY-0000001
  * Uses an atomic database counter per prefix/year so the visible series is sequential.
  */
-async function existingVisibleSequenceMax(prefix: string, year: number) {
+export async function existingVisibleSequenceMax(prefix: string, year: number) {
   const start = `${prefix}-${year}-`;
   const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, deliveryNotes, purchaseReceipts, customers, suppliers, projects, items] = await Promise.all([
     prisma.quote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
@@ -64,24 +64,19 @@ export async function nextDocumentSeriesId(documentName: string, year = new Date
     });
     return `${prefix}-${year}-${String(Number(row.valueInt || 1)).padStart(7, "0")}`;
   }
-
   const initialSequence = (await existingVisibleSequenceMax(prefix, year)) + 1;
   const row = await prisma.globalSettings.upsert({
     where: { key },
     create: {
-      key,
-      valueInt: initialSequence,
+      key, valueInt: initialSequence,
       description: `Sequential document counter for ${prefix}-${year}`,
       updatedBy: "document-numbering",
     },
-    update: {
-      valueInt: { increment: 1 },
-      updatedBy: "document-numbering",
-    },
+    update: { valueInt: { increment: 1 }, updatedBy: "document-numbering" },
     select: { valueInt: true },
   });
   const sequence = Math.max(initialSequence, Number(row.valueInt || initialSequence));
-  return `${prefix}-${year}-${String(sequence).padStart(6, "0")}`;
+  return `${prefix}-${year}-${String(sequence).padStart(7, "0")}`;
 }
 
 export function documentLineId(documentId: string, lineNo: number) {
