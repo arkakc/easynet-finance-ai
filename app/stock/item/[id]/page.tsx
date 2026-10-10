@@ -34,27 +34,30 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
   const balanceQty = qtyIn - qtyOut;
   const bookValue = movements.reduce((sum: number, row: any) => sum + signedMovementValue(row), 0);
   const movingAverage = balanceQty > 0 ? bookValue / balanceQty : n(item.defaultRate);
+  const lastMovement = movements.length ? movements[movements.length - 1] : null;
   const warehouseBalances = await prisma.warehouseStockBalance.findMany({
     where: { itemId: String(item.itemId || id) },
     include: { warehouse: true },
     orderBy: [{ warehouse: { code: "asc" } }],
   });
 
-  return <div className="document-page">
+  return <div className="document-page unified-item-detail">
     <div className="document-toolbar no-print">
-      <Link prefetch={false} href="/stock">← Back to Items & Stock</Link>
+      <Link prefetch={false} href="/stock">← Back to Item List</Link>
     </div>
 
     <section className="document-sheet">
       <header className="document-header">
         <div>
-          <div className="eyebrow">ITEM MASTER</div>
+          <div className="eyebrow">ITEM MASTER · INVENTORY & ACCOUNTING</div>
           <h1>{item.itemName || item.itemCode || item.itemId}</h1>
           <div className="document-number">{item.itemCode || item.itemId}</div>
         </div>
         <div className={`status-pill status-${String(item.active).toLowerCase() === "false" ? "cancelled" : "approved"}`}>{String(item.active).toLowerCase() === "false" ? "INACTIVE" : "ACTIVE"}</div>
       </header>
 
+      <div className="item-detail-summary"><div><span>Quantity on hand</span><strong>{qtyText(balanceQty)}</strong></div><div><span>Moving average</span><strong>{money(movingAverage)}</strong></div><div><span>Inventory value</span><strong>{money(bookValue)}</strong></div><div><span>Movements</span><strong>{movements.length}</strong></div></div>
+      <h3 className="item-detail-heading">Item information & GL setup</h3>
       <div className="document-meta">
         <div><span>Item Code</span><strong>{item.itemCode || item.itemId}</strong></div>
         <div><span>Item Name</span><strong>{item.itemName || "—"}</strong></div>
@@ -66,10 +69,12 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
         <div><span>Revenue Account</span><strong>{item.revenueAccount || "—"}</strong></div>
         <div><span>Cost Account</span><strong>{item.costAccount || "—"}</strong></div>
         <div><span>Tax Code</span><strong>{item.taxCode || "—"}</strong></div>
+        <div><span>Deferred Revenue (Months)</span><strong>{n(item.deferredRevenueMonths)}</strong></div>
+        <div><span>Total Qty In / Out</span><strong>{qtyText(qtyIn)} / {qtyText(qtyOut)}</strong></div>
       </div>
 
       <div className="document-lines">
-        <h3>Warehouse Balances</h3>
+        <h3>Warehouse balances</h3>
         <div className="table-wrap">
           <table className="data-table">
             <thead><tr><th>Warehouse</th><th>Qty</th><th>Reserved</th><th>Available</th><th>Moving Average</th><th>Book Value</th></tr></thead>
@@ -89,22 +94,22 @@ export default async function ItemMasterDetailPage({ params }: { params: Promise
       </div>
 
       <div className="document-lines">
-        <h3>Movement & Source Document Tracking</h3>
+        <h3>Stock movement, valuation & GL trace</h3>
         <div className="table-wrap">
           <table className="data-table">
-            <thead><tr><th>Date</th><th>Warehouse</th><th>Movement</th><th>Qty In</th><th>Qty Out</th><th>Unit Cost</th><th>Value</th><th>Project</th><th>Source Document</th></tr></thead>
+            <thead><tr><th>Date</th><th>Warehouse</th><th>Movement</th><th>Qty In</th><th>Qty Out</th><th>Unit Cost</th><th>Value</th><th>Project</th><th>Source Document</th><th>GL Journal</th></tr></thead>
             <tbody>
-              {movements.length === 0 && <tr><td colSpan={9}>No stock movements recorded for this item.</td></tr>}
+              {movements.length === 0 && <tr><td colSpan={10}>No stock movements recorded for this item.</td></tr>}
               {[...movements].reverse().map((row: any) => <tr key={row.movementId}>
-                <td>{row.movementDate}</td>
+                <td>{String(row.movementDate||"").slice(0,10)}</td>
                 <td><strong>{row.warehouseCode || "LEGACY / DEFAULT"}</strong>{row.warehouseName ? <><br /><span className="small">{row.warehouseName}</span></> : null}</td>
                 <td>{row.movementType}<br /><span className="small">{row.movementId}</span></td>
                 <td>{qtyText(row.qtyIn)}</td>
                 <td>{qtyText(row.qtyOut)}</td>
                 <td>{money(row.unitCost)}</td>
-                <td>{money(row.value)}</td>
+                <td>{money(signedMovementValue(row))}</td>
                 <td>{row.projectId || "—"}</td>
-                <td>{row.sourceDocumentId ? <Link prefetch={false} href={`/transactions/purchaseOrder/${encodeURIComponent(row.sourceDocumentId)}`}><strong>{row.sourceDocumentId}</strong></Link> : "—"}</td>
+                <td>{row.sourceDocumentId ? <Link prefetch={false} href={String(row.movementType||"").toUpperCase()==="PURCHASE_RECEIPT"?`/transactions/purchaseOrder/${encodeURIComponent(row.sourceDocumentId)}`:`/document-explorer?documentId=${encodeURIComponent(row.sourceDocumentId)}`}><strong>{row.sourceDocumentId}</strong></Link> : "—"}</td><td>{row.journalId ? <Link prefetch={false} href={`/journals/${encodeURIComponent(row.journalId)}`}>{row.journalId}</Link> : "—"}</td>
               </tr>)}
             </tbody>
           </table>
