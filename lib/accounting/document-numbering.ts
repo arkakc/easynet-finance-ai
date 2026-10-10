@@ -21,12 +21,12 @@ export function documentSeriesId(documentName: string, year = new Date().getUTCF
 
 /**
  * User-facing document number generator.
- * Format: PREFIX-YYYY-000001
+ * Format: PREFIX-YYYY-0000001
  * Uses an atomic database counter per prefix/year so the visible series is sequential.
  */
 async function existingVisibleSequenceMax(prefix: string, year: number) {
   const start = `${prefix}-${year}-`;
-  const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, deliveryNotes, purchaseReceipts] = await Promise.all([
+  const [quotes, invoices, purchaseOrders, supplierBills, payments, expenses, deliveryNotes, purchaseReceipts, customers, suppliers, projects, items] = await Promise.all([
     prisma.quote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
     prisma.invoice.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
     prisma.purchaseOrder.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
@@ -35,8 +35,12 @@ async function existingVisibleSequenceMax(prefix: string, year: number) {
     prisma.expense.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
     prisma.deliveryNote.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
     prisma.purchaseReceipt.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
+    prisma.customer.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
+    prisma.supplier.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
+    prisma.project.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
+    prisma.item.findMany({ where: { code: { startsWith: start } }, select: { code: true } }),
   ]);
-  return [...quotes, ...invoices, ...purchaseOrders, ...supplierBills, ...payments, ...expenses, ...deliveryNotes, ...purchaseReceipts]
+  return [...quotes, ...invoices, ...purchaseOrders, ...supplierBills, ...payments, ...expenses, ...deliveryNotes, ...purchaseReceipts, ...customers, ...suppliers, ...projects, ...items]
     .reduce((max, row) => {
       const value = String(row.code || "");
       if (!value.startsWith(start)) return max;
@@ -58,7 +62,7 @@ export async function nextDocumentSeriesId(documentName: string, year = new Date
       data: { valueInt: { increment: 1 }, updatedBy: "document-numbering" },
       select: { valueInt: true },
     });
-    return `${prefix}-${year}-${String(Number(row.valueInt || 1)).padStart(6, "0")}`;
+    return `${prefix}-${year}-${String(Number(row.valueInt || 1)).padStart(7, "0")}`;
   }
 
   const initialSequence = (await existingVisibleSequenceMax(prefix, year)) + 1;
@@ -82,4 +86,19 @@ export async function nextDocumentSeriesId(documentName: string, year = new Date
 
 export function documentLineId(documentId: string, lineNo: number) {
   return `${documentId}-${String(lineNo).padStart(3, "0")}`;
+}
+
+/**
+ * Read-only preview. Does not reserve a number or change any database row.
+ * Save/creation must obtain its own authoritative number from nextDocumentSeriesId.
+ */
+export async function previewDocumentSeriesId(documentName: string, year = new Date().getUTCFullYear()) {
+  const prefix = normalizedPrefix(documentName);
+  const key = `document_series:${prefix}:${year}`;
+  const [counter, inUse] = await Promise.all([
+    prisma.globalSettings.findUnique({ where: { key }, select: { valueInt: true } }),
+    existingVisibleSequenceMax(prefix, year),
+  ]);
+  const next = Math.max(Number(counter?.valueInt || 0), inUse) + 1;
+  return `${prefix}-${year}-${String(next).padStart(7, "0")}`;
 }

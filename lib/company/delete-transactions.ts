@@ -314,6 +314,11 @@ export async function deleteCompanyTransactions(options: DeleteTransactionsOptio
       },
     });
 
+    // Clear only generated document counters. Other master/company settings remain intact.
+    // Preview numbering starts at 1 for emptied transaction series; existing master
+    // identities still prevent reuse of their numbers.
+    await tx.globalSettings.deleteMany({ where: { key: { startsWith: "document_series:" } } });
+
     // 21. Find admin user ID for audit log
     let adminUserId = options.adminUserId;
     if (!adminUserId) {

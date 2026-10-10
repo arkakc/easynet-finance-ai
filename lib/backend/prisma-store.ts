@@ -871,7 +871,7 @@ export async function prismaAppendRecord<T = any>(
 ): Promise<T> {
   switch (table) {
     case "Customers": {
-      const code = String(record.customerCode || record.customerId || generatedCode("CUS"));
+      const code = String(record.customerCode || record.customerId || await nextDocumentSeriesId("CUS"));
       const created = await prisma.customer.create({
         data: {
           id: record.customerId ? String(record.customerId) : undefined,
@@ -891,7 +891,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "Suppliers": {
-      const code = String(record.supplierCode || record.supplierId || generatedCode("SUP"));
+      const code = String(record.supplierCode || record.supplierId || await nextDocumentSeriesId("SUP"));
       const created = await prisma.supplier.create({
         data: {
           id: record.supplierId ? String(record.supplierId) : undefined,
@@ -910,7 +910,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "Projects": {
-      const code = String(record.projectCode || record.projectId || generatedCode("PJ"));
+      const code = String(record.projectCode || record.projectId || await nextDocumentSeriesId("PJ"));
       const customerId = record.customerId ? String(record.customerId) : null;
       let matchedCustomerId: string | null = null;
       if (customerId) {
@@ -936,7 +936,7 @@ export async function prismaAppendRecord<T = any>(
     }
 
     case "Items": {
-      const code = String(record.itemCode || record.itemId || generatedCode("ITM"));
+      const code = String(record.itemCode || record.itemId || await nextDocumentSeriesId("ITM"));
       const requestedType = String(record.itemType || "STOCK").toUpperCase();
       const itemType = requestedType === "STOCK" ? "GOOD" : requestedType === "NON_STOCK" ? "NON_INVENTORY" : requestedType;
       const created = await prisma.item.create({

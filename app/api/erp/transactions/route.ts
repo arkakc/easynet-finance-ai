@@ -9,7 +9,7 @@ import { finalizePaymentAtomic } from "@/lib/accounting/atomic-payment";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
 import { round2 } from "@/lib/accounting/inventory";
 import { prisma } from "@/src/lib/prisma";
-import { nextDocumentSeriesId } from "@/lib/accounting/document-numbering";
+import { nextDocumentSeriesId, previewDocumentSeriesId } from "@/lib/accounting/document-numbering";
 import {
   prismaDeleteQuote,
   prismaDeleteInvoice,
@@ -43,10 +43,10 @@ const SERIES: Record<string, { table: string; field: string; prefix: string; pay
 const CASH_BANK_IDS = new Set(["ACC-1110", "ACC-1120", "ACC-1121"]);
 
 function pngYear() { return new Intl.DateTimeFormat("en", { timeZone: "Pacific/Port_Moresby", year: "numeric" }).format(new Date()); }
-async function nextNumber(action: string) {
+async function nextNumber(action: string, preview = false) {
   const config = SERIES[action];
   if (!config) return "";
-  return nextDocumentSeriesId(config.prefix, Number(pngYear()));
+  return preview ? previewDocumentSeriesId(config.prefix, Number(pngYear())) : nextDocumentSeriesId(config.prefix, Number(pngYear()));
 }
 function permissionForAction(action: string, partyType?: string): Permission | undefined {
   if (action === "createPayment" || action === "finalizePayment" || action === "allocateAdvance") return partyType === "Supplier" ? "purchase.write" : "sales.write";
@@ -148,7 +148,7 @@ export async function GET(request: Request) {
       const permission = permissionForAction(nextAction, partyType);
       if (!permission || !SERIES[nextAction]) return NextResponse.json({ ok: false, error: "Unsupported document type" }, { status: 400 });
       await requirePermission(permission);
-      return NextResponse.json({ ok: true, action: nextAction, nextNumber: await nextNumber(nextAction) });
+      return NextResponse.json({ ok: true, action: nextAction, nextNumber: await nextNumber(nextAction, true) });
     }
 
     const user = await requirePermission("dashboard.read");
@@ -457,7 +457,9 @@ export async function POST(request: Request) {
 
     let payload = body.payload || {};
     const series = body.action ? SERIES[body.action] : undefined;
-    if (body.action && series && !String(payload[series.payloadField] || "").trim()) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
+    // Never trust the UI preview as a reserved sequence. Allocate an authoritative
+    // number only when the create request is submitted.
+    if (body.action && series) payload = { ...payload, [series.payloadField]: await nextNumber(body.action) };
 
     let itemLinking: { created: number; linked: number; temporary: number } | undefined;
     if (body.action && ["createQuote", "createSalesOrder", "createInvoice", "createSupplierQuote", "createPurchaseOrder"].includes(body.action)) {
