@@ -3,6 +3,7 @@ import { documentSeriesId } from "@/lib/accounting/document-numbering";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { runAtomicAccounting } from "@/lib/accounting/atomic-posting";
 import { INITIAL_ACCOUNT_IDS } from "@/lib/accounting/chart-of-accounts";
+import { sourceControlAccount } from "@/lib/accounting/settlement-control-account";
 import { prisma } from "@/src/lib/prisma";
 import { assertSettlementCurrency, realizedFxForSettlement, resolveDocumentExchangeRate, roundCurrency } from "@/lib/accounting/currency";
 
@@ -416,6 +417,34 @@ export async function allocateAdvancePaymentAtomic(input: {
       };
     }
 
+    // Advance allocations must clear the very same AR/AP control account
+    // credited/debited by the original invoice journal. A configured or
+    // historical control account may differ from INITIAL_ACCOUNT_IDS.
+    const sourceDocument = customer
+      ? await tx.invoice.findFirst({
+          where: { OR: [{ id: input.againstDocumentId }, { code: input.againstDocumentId }] },
+          select: { journalId: true, glPosted: true },
+        })
+      : await tx.supplierBill.findFirst({
+          where: { OR: [{ id: input.againstDocumentId }, { code: input.againstDocumentId }] },
+          select: { journalId: true, glPosted: true },
+        });
+    if (!sourceDocument?.glPosted || !sourceDocument.journalId) {
+      throw new Error("Source invoice/bill must have a posted GL journal before advance allocation");
+    }
+    const sourceJournal = await tx.journalHeader.findFirst({
+      where: {
+        OR: [{ id: sourceDocument.journalId }, { code: sourceDocument.journalId }],
+        status: "POSTED",
+      },
+      include: { lines: { include: { account: { select: { code: true } } } } },
+    });
+    if (!sourceJournal) throw new Error("Source invoice/bill GL journal is not POSTED");
+    const settlementControlAccount = sourceControlAccount(
+      sourceJournal.lines,
+      customer ? "RECEIVABLE" : "PAYABLE",
+    );
+
     const settlementBaseAmount = Number(allocation.settlementBaseAmount || 0);
     const documentBaseAmount = Number(allocation.documentBaseAmount || 0);
     const settlementExchangeRate = Number(allocation.settlementExchangeRate || 1);
@@ -447,7 +476,7 @@ export async function allocateAdvancePaymentAtomic(input: {
             description: "Apply customer advance",
           },
           {
-            accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
+            accountId: settlementControlAccount,
             credit: documentBaseAmount,
             ...transactionAudit("credit", documentExchangeRate),
             customerId: partyRef,
@@ -457,7 +486,7 @@ export async function allocateAdvancePaymentAtomic(input: {
         ]
       : [
           {
-            accountId: INITIAL_ACCOUNT_IDS.accountsPayable,
+            accountId: settlementControlAccount,
             debit: documentBaseAmount,
             ...transactionAudit("debit", documentExchangeRate),
             supplierId: partyRef,
