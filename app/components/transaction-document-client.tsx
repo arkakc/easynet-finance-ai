@@ -432,7 +432,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             </div>
           </details>
         )}
-        {record && rowStatus === "DRAFT" && (
+        {record && (rowStatus === "DRAFT" || (type === "payment" && rowStatus === "APPROVED" && !String(record.journalId || "").trim())) && (
           <DocumentWorkflowActions
             recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"}
             recordId={id}
@@ -540,20 +540,18 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             Invoice Settlement
           </button>
         )}
-        <button
-          type="button"
-          disabled={deleteBusy}
-          className="danger-button"
-          style={{
-            color: "#dc2626",
-            borderColor: "#fca5a5",
-            background: "#fef2f2",
-            cursor: deleteBusy ? "not-allowed" : "pointer"
-          }}
-          onClick={() => void handleDeleteDocument()}
-        >
-          {deleteBusy ? "Deleting…" : "Delete"}
-        </button>
+        {record && rowStatus === "DRAFT" && !String(record.journalId || "").trim() && (
+          <button
+            type="button"
+            disabled={deleteBusy}
+            className="danger-button"
+            style={{color:"#dc2626",borderColor:"#fca5a5",background:"#fef2f2"}}
+            onClick={() => void handleDeleteDocument()}
+            title="The server validates accounting and linked-document dependencies before deletion"
+          >
+            {deleteBusy ? "Deleting…" : "Delete Draft"}
+          </button>
+        )}
         <PrintButton />
       </div>
     </div>
