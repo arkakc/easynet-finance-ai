@@ -27,6 +27,8 @@ on:
       - "app/components/sales-invoice-cycle.tsx"
       - "app/components/delivery-note-client.tsx"
       - "app/globals.css"
+      - "app/components/dashboard-client.tsx"
+      - "app/api/dashboard-data/route.ts"
       - "lib/accounting/**"
       - "lib/backend/prisma-store.ts"
       - "prisma/schema.prisma"
