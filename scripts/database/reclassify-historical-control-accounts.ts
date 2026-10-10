@@ -24,6 +24,7 @@ async function scan(): Promise<Proposed[]> {
     if (!payment.allocations.length) continue;
     if (payment.allocations.length !== 1) throw new Error(`Payment ${payment.code} has multiple allocations; manual review required`);
     const allocation = payment.allocations[0];
+    if (!allocation.journalId) throw new Error(`Allocation ${allocation.code} has no posted settlement journal; manual review required`);
     const alreadyCorrected = await prisma.journalHeader.findUnique({ where: { sourceDocId: `CONTROL-RECLASS:${payment.id}` } });
     if (alreadyCorrected) {
       if (alreadyCorrected.status !== "POSTED") throw new Error(`Prior correction is not POSTED: ${payment.code}`);
@@ -38,16 +39,16 @@ async function scan(): Promise<Proposed[]> {
     if (!document?.journalId || !document.glPosted || document.currency !== "PGK") throw new Error(`Source document for ${payment.code} is not valid posted PGK invoice/bill`);
     if ((side === "AR" ? (document as any).customerId !== payment.customerId : (document as any).supplierId !== payment.supplierId)) throw new Error(`Party mismatch for ${payment.code}`);
     const journals = await prisma.journalHeader.findMany({
-      where: { OR: [{ id: document.journalId }, { code: document.journalId }, { id: payment.journalId! }, { code: payment.journalId! }] },
+      where: { OR: [{ id: document.journalId }, { code: document.journalId }, { id: allocation.journalId }, { code: allocation.journalId }] },
       include: { lines: { include: { account: { select: { code: true, type: true } } } } },
     });
     const original = journals.find((j) => j.id === document.journalId || j.code === document.journalId);
-    const settlement = journals.find((j) => j.id === payment.journalId || j.code === payment.journalId);
+    const settlement = journals.find((j) => j.id === allocation.journalId || j.code === allocation.journalId);
     if (!original || !settlement || original.status !== "POSTED" || settlement.status !== "POSTED") throw new Error(`Missing posted source/settlement journal for ${payment.code}`);
     const originalId = sourceControlAccount(original.lines, side === "AR" ? "RECEIVABLE" : "PAYABLE");
     const settlementLines = settlement.lines.filter((line) => side === "AR"
-      ? Number(line.credit) > 0 && /^settle accounts receivable$/i.test(line.description.trim())
-      : Number(line.debit) > 0 && /^settle accounts payable$/i.test(line.description.trim()));
+      ? Number(line.credit) > 0 && /^settle accounts receivable(?: from advance)?$/i.test(line.description.trim())
+      : Number(line.debit) > 0 && /^settle accounts payable(?: from advance)?$/i.test(line.description.trim()));
     if (settlementLines.length !== 1) throw new Error(`Ambiguous settlement journal for ${payment.code}`);
     const settlementLine = settlementLines[0];
     const settlementAmount = round(side === "AR" ? Number(settlementLine.credit) : Number(settlementLine.debit));
@@ -55,14 +56,14 @@ async function scan(): Promise<Proposed[]> {
     if (settlementAmount <= 0 || Math.abs(settlementAmount - Number(allocation.baseAmount || allocation.amount)) > 0.01) {
       throw new Error(`Allocation GL amount mismatch for ${payment.code}`);
     }
-    if (originalId === settlementLine.accountId) continue;
-    const sourceAccount = original.lines.find((line) => line.accountId === originalId)?.account;
+    if (originalId === settlementLine.account.code) continue;
+    const sourceAccount = original.lines.find((line) => line.account.code === originalId)?.account;
     if (!sourceAccount || sourceAccount.type !== (side === "AR" ? "ASSET" : "LIABILITY")) throw new Error(`Original control account has invalid type for ${payment.code}`);
     proposed.push({
       paymentId: payment.id, paymentCode: payment.code, invoiceCode: document.code, side,
       partyId: String(side === "AR" ? payment.customerId : payment.supplierId),
       sourceId: originalId, sourceCode: sourceAccount.code,
-      settledId: settlementLine.accountId, settledCode: settlementLine.account.code, amount: settlementAmount,
+      settledId: settlementLine.account.code, settledCode: settlementLine.account.code, amount: settlementAmount,
     });
   }
   return proposed;
