@@ -3,15 +3,18 @@ import { requirePermission } from "@/lib/auth";
 import { buildFinancialStatements } from "@/lib/accounting/financial-statements";
 import { pngToday } from "@/lib/accounting/period-close";
 import { prisma } from "@/src/lib/prisma";
+import { outstandingPurchaseCommitments } from "@/lib/accounting/purchase-commitments";
 
 type DashboardKPI = { key: string; value: string | number; updatedAt: string };
 
 const numberValue = (value: unknown) => Number(value || 0);
 
 async function localDashboardData() {
-  const [statements, purchaseOrders, draftApprovals, activeProjects, sourcePending] = await Promise.all([
+  const [statements, purchaseOrders, receipts, supplierBills, draftApprovals, activeProjects, sourcePending] = await Promise.all([
     buildFinancialStatements({ asOf: pngToday() }),
-    prisma.purchaseOrder.findMany({ where: { status: { notIn: ["BILLED", "CLOSED", "Cancelled"] } } }),
+    prisma.purchaseOrder.findMany({ where: { status: { in: ["SENT", "PARTIAL_RECEIVED", "RECEIVED"] } }, include: { lines: { include: { item: { select: { type: true } } } } } }),
+    prisma.stockMovement.findMany({ where: { type: "PURCHASE_RECEIPT" }, select: { referenceId: true, itemId: true, quantity: true } }),
+    prisma.supplierBill.findMany({ where: { glPosted: true }, select: { orderId: true, poReference: true, lines: { select: { itemId: true, quantity: true } } } }),
     prisma.approvalRequest.count({ where: { status: { in: ["PENDING", "IN_REVIEW"] } } }),
     prisma.project.count({ where: { status: "ACTIVE" } }),
     prisma.document.count({ where: { fileUrl: null, status: { not: "ARCHIVED" } } }),
@@ -25,7 +28,7 @@ async function localDashboardData() {
   const gstPayable = gstLiability - gstAsset;
   const revenue = statements.profitAndLoss.totals.revenue;
   const expensesTotal = statements.profitAndLoss.totals.expenses;
-  const poCommitments = purchaseOrders.reduce((total, order) => total + numberValue(order.total) - numberValue(order.amountReceived), 0);
+  const poCommitments = outstandingPurchaseCommitments(purchaseOrders, receipts, supplierBills);
   const updatedAt = new Date().toISOString();
 
   return {
