@@ -22,6 +22,10 @@ export default function PaymentFinalSave({record,onFinalized}:{record:PaymentRec
   const[message,setMessage]=useState(""),[busy,setBusy]=useState(false),[documents,setDocuments]=useState<any[]>([]),[loadingDocs,setLoadingDocs]=useState(false),[accounts,setAccounts]=useState<CashBankAccount[]>([]),[masters,setMasters]=useState<any>({customers:[],suppliers:[],projects:[]});
   const[selectedAccountId,setSelectedAccountId]=useState(String(record.cashBankAccountId||"")),[amountValue,setAmountValue]=useState(Number(record.amount||0)),[journalId,setJournalId]=useState(String(record.journalId||""));
   const[advanceSummary,setAdvanceSummary]=useState<AdvanceSummary|null>(null),[allocationAmounts,setAllocationAmounts]=useState<Record<string,string>>({});
+  const[supplierAdvances,setSupplierAdvances]=useState<{paymentId:string;paymentNumber:string;remaining:number;source:string}[]>([]);
+  const[advanceReviewLoading,setAdvanceReviewLoading]=useState(false);
+  const[advanceReviewError,setAdvanceReviewError]=useState("");
+
   const finalized=Boolean(journalId),approved=String(record.status||"").toUpperCase()==="APPROVED";
   const partyType=String(record.partyType||"");const customer=partyType==="Customer";const supplier=partyType==="Supplier";const pay=String(record.paymentType||"").toUpperCase()==="PAY";
   const refund=customer&&pay&&String(record.againstDocumentType||"").toLowerCase().includes("credit note");
@@ -48,8 +52,39 @@ export default function PaymentFinalSave({record,onFinalized}:{record:PaymentRec
   }
   useEffect(()=>{if(advanceMode)void loadAdvanceWorkspace();},[advanceMode,record.paymentId,sourceId]);
 
+
+  useEffect(()=>{
+    if(!approved||finalized||!supplier||!pay||!String(record.againstDocumentId||"").trim())return;
+    let alive=true;
+    void(async()=>{
+      setAdvanceReviewLoading(true);setAdvanceReviewError("");
+      try{
+        const response=await fetch("/api/erp/transactions",{cache:"no-store"});
+        const data=await response.json();
+        if(!response.ok||!data.ok)throw new Error(data.error||"Advance lookup failed");
+        const candidates=(data.payments||[]).filter((entry:any)=>
+          String(entry.partyType||"")==="Supplier"&&String(entry.partyId||"")===String(record.partyId||"")&&
+          String(entry.paymentType||"").toUpperCase()==="PAY"&&
+          !String(entry.againstDocumentId||"").trim()&&Boolean(String(entry.journalId||"").trim())&&
+          ["POSTED","CLEARED"].includes(String(entry.status||"").toUpperCase())&&
+          (!sourceId||String(entry.sourceDocumentId||"")===sourceId||marker(entry,"PO")===sourceId)
+        );
+        const results=await Promise.all(candidates.map(async(entry:any)=>{
+          const response=await fetch(`/api/erp/advance-allocation?paymentId=${encodeURIComponent(String(entry.paymentId))}`,{cache:"no-store"});
+          const data=await response.json();
+          if(!response.ok||!data.ok)throw new Error(data.error||"Advance balance lookup failed");
+          return {paymentId:String(entry.paymentId),paymentNumber:String(entry.paymentNumber||entry.paymentId),remaining:Number(data.summary?.remainingAmount||0),source:String(entry.sourceDocumentId||marker(entry,"PO")||"")};
+        }));
+        if(alive)setSupplierAdvances(results.filter(row=>row.remaining>0.001));
+      }catch(error){if(alive)setAdvanceReviewError(error instanceof Error?error.message:"Advance review failed");}
+      finally{if(alive)setAdvanceReviewLoading(false);}
+    })();
+    return()=>{alive=false;};
+  },[approved,finalized,supplier,pay,record.partyId,record.againstDocumentId,sourceId]);
+
   async function finalSave(event:FormEvent<HTMLFormElement>){
     event.preventDefault();if(finalized||busy)return;
+    if(supplier&&pay&&String(record.againstDocumentId||"").trim()&&(advanceReviewLoading||Boolean(advanceReviewError)||supplierAdvances.length>0)){setMessage("Review and allocate available supplier advances before Final Save.");return;}
     if(insufficientFunds&&selectedAccount){setMessage(`Insufficient funds in ${selectedAccount.accountName} (${selectedAccount.accountId}). Available ${money(selectedAccount.balance)}, payment ${money(amountValue)}.`);return;}
     if(!window.confirm("Are you sure you want to finalize this Payment Entry? This will create the accounting effect.")){setMessage("Final Save cancelled. The form is still editable.");return;}
     setBusy(true);setMessage("Final Saving Payment Entry… Please wait until accounting posting is complete.");
@@ -93,8 +128,16 @@ export default function PaymentFinalSave({record,onFinalized}:{record:PaymentRec
         <label>Payment Method<select name="paymentMethod" defaultValue={record.paymentMethod||""} required disabled={finalized||busy}><option value="">Select method</option><option>Cash</option><option>Bank Transfer</option><option>Card</option><option>Cheque</option></select></label>
         <label>Cash / Bank Account<select name="cashBankAccountId" value={selectedAccountId} onChange={e=>setSelectedAccountId(e.target.value)} required disabled={finalized||busy}><option value="">Select Cash / Bank account</option>{accounts.map(account=><option key={account.accountId} value={account.accountId}>{account.accountCode || account.accountId} — {account.accountName || account.accountId} · Balance {money(account.balance)}</option>)}</select>{selectedAccount&&<span className="small">Available balance: <strong>{money(selectedAccount.balance)}</strong></span>}</label>
         <label className="form-wide">Reference<input name="reference" defaultValue={record.reference||""} placeholder="Bank / receipt reference" disabled={finalized||busy}/></label>
+        {supplier&&pay&&againstId&&<div className="form-wide panel" style={{marginTop:10}}>
+          <strong>Supplier Advance Adjustment Review</strong>
+          {advanceReviewLoading?<p>Checking posted supplier advances…</p>:advanceReviewError?<p role="alert">{advanceReviewError}. Final Save is held until advances can be verified.</p>:supplierAdvances.length?<>
+            <p>Unallocated supplier advance is available. Allocate it against this invoice before making the remaining bank payment. Do not pay the full invoice twice.</p>
+            {supplierAdvances.map(a=><p key={a.paymentId}><Link prefetch={false} href={`/transactions/payment/${encodeURIComponent(a.paymentId)}`}>{a.paymentNumber}</Link> · Available {money(a.remaining)} · {a.source||"General advance"}</p>)}
+            <p className="small">Open the linked Advance Payment, allocate to this Supplier Invoice, then refresh this payment and update its cash amount to the new outstanding balance.</p>
+          </>:<p className="small">No unallocated matching posted Supplier Advance found.</p>}
+        </div>}
         {insufficientFunds&&selectedAccount&&<div className="form-wide status-banner">Insufficient funds: {selectedAccount.accountName} ({selectedAccount.accountId}) has {money(selectedAccount.balance)}, but this payment is {money(amountValue)}. Final Save is blocked.</div>}
-        {!finalized&&<div className="form-wide"><button type="submit" disabled={busy||insufficientFunds||!selectedAccountId}>{busy?"Saving…":"Final Save"}</button></div>}
+        {!finalized&&<div className="form-wide"><button type="submit" disabled={busy||insufficientFunds||!selectedAccountId||(supplier&&pay&&Boolean(againstId)&&(advanceReviewLoading||Boolean(advanceReviewError)||supplierAdvances.length>0))}>{busy?"Saving…":"Final Save"}</button></div>}
       </form>
       {message&&<div className="status-banner" style={{marginTop:14}}>{message}</div>}
       {navigation}
