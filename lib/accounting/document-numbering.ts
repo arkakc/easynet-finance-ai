@@ -25,7 +25,7 @@ export function documentSeriesId(documentName: string, year = new Date().getUTCF
  * Format: PREFIX-YYYY-0000001
  * Uses an atomic database counter per prefix/year so the visible series is sequential.
  */
-export /**
+/**
  * Shared collision scan for every persisted model with a unique document code.
  * Adding a new Prisma document model with a 'code' field makes it participate
  * automatically, instead of maintaining a fragile list of doctypes.
