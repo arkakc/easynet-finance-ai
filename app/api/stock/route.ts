@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "@/lib/env";
 import { prisma } from "@/src/lib/prisma";
 import { stockMovementQuantities } from "@/lib/accounting/stock-movement-direction";
+import { salesOrderReservations } from "@/lib/accounting/sales-order-reservations";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
 import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { ensureAccountingInfrastructure } from "@/lib/accounting/infrastructure";
@@ -144,7 +145,7 @@ export async function GET(request: Request) {
     const backendConfigured = false;
     if (!backendConfigured) {
       await prisma.$transaction(async (tx) => { await ensureDefaultWarehouse(tx); });
-      const [items, movements, purchaseOrders, poLines, warehouses, warehouseBalances] = await Promise.all([
+      const [items, movements, purchaseOrders, poLines, warehouses, warehouseBalances, salesOrders] = await Promise.all([
         prisma.item.findMany({
           include: {
             _count: {
@@ -167,7 +168,9 @@ export async function GET(request: Request) {
         prisma.pOLine.findMany(),
         prisma.warehouse.findMany({ where: { isActive: true }, orderBy: [{ isDefault: "desc" }, { code: "asc" }] }),
         prisma.warehouseStockBalance.findMany({ include: { warehouse: true, item: { select: { code: true, name: true } } }, orderBy: [{ warehouse: { code: "asc" } }, { item: { code: "asc" } }] }),
+        prisma.quote.findMany({ where: { code: { startsWith: "SO-" } }, select: { id: true, code: true, status: true, lines: { select: { itemId: true, quantity: true } } } }),
       ]);
+      const soReserved = salesOrderReservations(salesOrders, movements.map(m => ({ referenceId: m.referenceId, itemId: m.itemId, type: m.type, quantity: m.quantity })));
       const localItems = items.map((item) => {
         const rows = movements.filter((movement) => movement.itemId === item.id);
         const state = inventoryState(rows.map((row) => {
@@ -227,6 +230,8 @@ export async function GET(request: Request) {
           usageCount,
           usageReasons,
           stockQty: state.qty,
+          reservedQty: soReserved.get(item.id) || 0,
+          availableQty: round4(Math.max(0, state.qty - (soReserved.get(item.id) || 0))),
           stockValue,
           deferredRevenueMonths: Number(item.deferredRevenueMonths || 0),
         };
