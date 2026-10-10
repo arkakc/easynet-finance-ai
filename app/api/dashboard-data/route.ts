@@ -12,7 +12,7 @@ const numberValue = (value: unknown) => Number(value || 0);
 async function localDashboardData() {
   const [statements, purchaseOrders, receipts, supplierBills, draftApprovals, activeProjects, sourcePending] = await Promise.all([
     buildFinancialStatements({ asOf: pngToday() }),
-    prisma.purchaseOrder.findMany({ where: { status: { in: ["SENT", "PARTIAL_RECEIVED", "RECEIVED"] } }, include: { lines: { include: { item: { select: { type: true } } } } } }),
+    prisma.purchaseOrder.findMany({ where: { code: { startsWith: "PO-" }, status: { in: ["SENT", "PARTIAL_RECEIVED", "RECEIVED"] } }, include: { lines: { include: { item: { select: { type: true } } } } } }),
     prisma.stockMovement.findMany({ where: { type: "PURCHASE_RECEIPT" }, select: { referenceId: true, itemId: true, quantity: true } }),
     prisma.supplierBill.findMany({ where: { glPosted: true }, select: { orderId: true, poReference: true, lines: { select: { itemId: true, quantity: true } } } }),
     prisma.approvalRequest.count({ where: { status: { in: ["PENDING", "IN_REVIEW"] } } }),
