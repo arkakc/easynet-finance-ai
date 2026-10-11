@@ -64,7 +64,7 @@ export async function POST(request:Request) {
       if(!doc||doc.status!=="POSTED"||!doc.journalId)throw new Error("Only POSTED GST Settlement may be reversed");
       if(doc.createdBy.toLowerCase()===actor&&!user.roles.includes("System Manager"))throw new Error("Independent checker is required for GST reversal");
       const reversal=await reversePostedJournal({journalId:doc.journalId,reversalDate:raw.reversalDate,reason:"GST Settlement "+doc.code+": "+raw.reason,createdBy:actor,approvedBy:actor});
-      await prisma.gstSettlement.update({where:{id:doc.id},data:{status:"CANCELLED",cancelledBy:actor,cancelledAt:new Date(),cancelReason:"Reversed by "+reversal.reversalJournalId+": "+raw.reason}});
+      await prisma.gstSettlement.update({where:{id:doc.id},data:{status:"CANCELLED",reversalJournalId:reversal.reversalDatabaseId,cancelledBy:actor,cancelledAt:new Date(),cancelReason:"Reversed by "+reversal.reversalJournalId+": "+raw.reason}});
       return NextResponse.json({ok:true,record:{id:doc.id,code:doc.code,status:"CANCELLED",journalId:doc.journalId,reversalJournalId:reversal.reversalJournalId}});
     }
     if(!raw.id)throw new Error("GST settlement document ID is required");
