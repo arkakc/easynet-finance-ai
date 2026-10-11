@@ -1988,6 +1988,7 @@ model GstSettlement {
   inputGst          Decimal  @default(0)
   netPayable        Decimal  @default(0)
   journalId         String?  @unique
+  reversalJournalId String?  @unique
   createdBy         String
   updatedBy         String?
   submittedBy       String?
