@@ -159,6 +159,7 @@ export default function FinanceSetupPage() {
   const [coaLoading, setCoaLoading] = useState(false);
   const [coaView, setCoaView] = useState<"tree" | "list">("tree");
   const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [autoMappingResult, setAutoMappingResult] = useState<{ mappedAccounts: number; mappedCenters: number; unresolved: string[]; error?: string } | null>(null);
   const [mappingSuggestionNotes, setMappingSuggestionNotes] = useState<MappingSuggestionNotes>({});
   const [mappingProposals, setMappingProposals] = useState<Partial<Record<MappingAccountKey, { code: string; score: number }>>>({});
   const [costCenters, setCostCenters] = useState<CostCenterOption[]>([]);
@@ -553,7 +554,7 @@ export default function FinanceSetupPage() {
   };
   const confidenceLabel = (score: number) => score >= 58 ? "high confidence" : score >= 34 ? "medium confidence" : "low confidence";
   const suggestMappingAccounts = async () => {
-    setAiSuggesting(true); setError(""); setMessage("");
+    setAiSuggesting(true); setError(""); setMessage(""); setAutoMappingResult(null);
     try {
       let accounts = setupAccounts;
       if (!accounts.length) accounts = await loadSetupAccounts();
@@ -566,7 +567,7 @@ export default function FinanceSetupPage() {
       const notes: MappingSuggestionNotes = {};
       const selectedAccounts: Partial<Record<MappingAccountKey, string>> = {};
       let selectedCenterCount = 0;
-      let skipped = 0;
+      const unresolved: string[] = [];
       for (const field of mappingAccountFields) {
         const currentCode = cleanAccountCode(String(config[field.configKey] || ""));
         if (currentCode.trim()) {
@@ -586,7 +587,7 @@ export default function FinanceSetupPage() {
           selectedAccounts[field.configKey] = best.account.accountCode;
           notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (auto-set, high confidence)`;
         } else {
-          skipped++;
+          unresolved.push(field.label);
           notes[field.configKey] = `${field.label}: ${best ? "ambiguous / low-confidence match" : "no matching ledger"}; manual review required`;
         }
       }
@@ -604,7 +605,7 @@ export default function FinanceSetupPage() {
           selectedCenters[field.configKey] = selection.code;
           selectedCenterCount++;
         } else {
-          skipped++;
+          unresolved.push(field.label);
         }
       }
       // One local state update; Save & Continue still performs the server-side setup validation.
@@ -615,8 +616,9 @@ export default function FinanceSetupPage() {
       } as Config));
       setMappingProposals(proposals);
       setMappingSuggestionNotes(notes);
-      setMessage(`Auto-set ${Object.keys(selectedAccounts).length} account mapping(s) and ${selectedCenterCount} Cost Centre mapping(s). ${skipped} unresolved field(s) require manual review. Review selections and save to validate. No journals were posted.`);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Automatic account and Cost Centre mapping failed"); }
+      setAutoMappingResult({ mappedAccounts: Object.keys(selectedAccounts).length, mappedCenters: selectedCenterCount, unresolved });
+      setMessage(`Auto-mapping finished. ${Object.keys(selectedAccounts).length} accounts and ${selectedCenterCount} Cost Centres selected; ${unresolved.length} need review.`);
+    } catch (reason) { const detail = reason instanceof Error ? reason.message : "Automatic account and Cost Centre mapping failed"; setError(detail); setAutoMappingResult({ mappedAccounts: 0, mappedCenters: 0, unresolved: [], error: detail }); }
     finally { setAiSuggesting(false); }
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
@@ -781,6 +783,16 @@ export default function FinanceSetupPage() {
         <strong>Auto account & Cost Centre mapping review</strong>
         <p className="small">Auto-set uses matching active posting ledger accounts from the COA and active leaf Cost Centre master records. Existing selections are preserved. Ambiguous or missing matches require manual review; Save & Continue validates the result. No journals are posted.</p>
       </div>
+      {autoMappingResult && <div role="status" aria-live="polite" className={autoMappingResult.error || autoMappingResult.unresolved.length ? "form-wide warning-panel" : "form-wide conversion-box"}>
+        <strong>{autoMappingResult.error ? "Auto-mapping failed" : autoMappingResult.unresolved.length ? "Auto-mapping completed: review required" : "Successfully mapped. Please Save & Continue."}</strong>
+        {autoMappingResult.error ? <p className="small">{autoMappingResult.error} Check the COA and Cost Centre masters, then retry.</p> : <>
+          <p className="small">Accounts auto-set: <strong>{autoMappingResult.mappedAccounts}</strong> · Cost Centres auto-set: <strong>{autoMappingResult.mappedCenters}</strong> · Pending manual review: <strong>{autoMappingResult.unresolved.length}</strong>.</p>
+          {autoMappingResult.unresolved.length === 0 ? <p className="small">Review the selected defaults, then click Save & Continue to validate and save. No journal entries were created.</p> : <>
+            <p className="small">Complete these fields before Save & Continue: {autoMappingResult.unresolved.join("; ")}. Existing selections were preserved. No journal entries were created.</p>
+            <p className="small">After completing the missing fields, click Save & Continue to validate your setup.</p>
+          </>}
+        </>}
+      </div>}
       {renderQuickAccountCreator()}
       {renderQuickCostCenterCreator()}
       {Object.keys(mappingSuggestionNotes).length > 0 && <div className="form-wide conversion-box">
