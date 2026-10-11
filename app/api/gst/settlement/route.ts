@@ -129,6 +129,7 @@ export async function POST(request:Request) {
         return {id:updated.id,code:updated.code,status:updated.status};
       }
       if(document.status!=="PENDING")throw new Error("Only PENDING documents may be approved");
+      await assertNoPriorPeriodSettlement(tx,document.period,document.id);
       if(maker===actor&&!user.roles.includes("System Manager"))throw new Error("Maker cannot approve own document");
       const paymentDate=businessDate(document.paymentDate);
       const gst=await gstPeriodBalances(tx,document.period,paymentDate);
