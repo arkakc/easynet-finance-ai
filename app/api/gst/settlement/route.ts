@@ -112,7 +112,7 @@ export async function POST(request:Request) {
       if(document.status!=="PENDING")throw new Error("Only PENDING documents may be approved");
       if(maker===actor&&!user.roles.includes("System Manager"))throw new Error("Maker cannot approve own document");
       const paymentDate=businessDate(document.paymentDate);
-      const gst=await gstSettlementBalances(tx,paymentDate);
+      const gst=await gstPeriodBalances(tx,document.period,paymentDate);
       if(gst.net<=0||Math.abs(gst.net-Number(document.netPayable))>0.001||Math.abs(gst.outputDue-Number(document.outputGst))>0.001||Math.abs(gst.inputCredit-Number(document.inputGst))>0.001)throw new Error("GST changed since submission. Reject, recalculate and resubmit.");
       const bank=await tx.bankAccount.findUnique({where:{id:document.bankAccountId},include:{chartOfAccounts:true}});
       if(!bank?.isActive||bank.currency!=="PGK"||!bank.chartOfAccounts?.isActive||!bank.chartOfAccountsId)throw new Error("Bank mapping invalid");
