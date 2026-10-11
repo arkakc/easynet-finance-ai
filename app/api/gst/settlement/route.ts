@@ -50,7 +50,7 @@ export async function POST(request: Request) {
         postingDate: input.paymentDate, reference: ref, remarks: "GST payment subject to approved IRC return and banking evidence",
         makerEmail: maker.email, lines: [
           { accountId: "2120", debit: calculated.outputDue, description: "Clear output GST liability" },
-          { accountId: "1140", credit: calculated.inputCredit, description: "Apply eligible input GST credit" },
+          ...(calculated.inputCredit > 0 ? [{ accountId: "1140", credit: calculated.inputCredit, description: "Apply eligible input GST credit" }] : []),
           { accountId: bank.chartOfAccounts.code, credit: calculated.net, description: "GST payment to IRC" },
         ],
       }, tx);
