@@ -48,8 +48,10 @@ export async function gstPeriodBalances(tx: Prisma.TransactionClient, period: st
     if (!account||!account.isActive||account.children.length) throw new Error("Invalid GST posting ledger: "+code);
     const lines = await tx.journalLine.findMany({
       where: {accountId:account.id,journal:{status:"POSTED",date:{gte:start,lte:end},
-        sourceDocType:{not:"GST_SETTLEMENT"},
-        ...(ids.length?{reversalOfJournalId:{notIn:ids}}:{})}},
+        AND: [
+          { OR: [{sourceDocType:null},{sourceDocType:{not:"GST_SETTLEMENT"}}] },
+          ...(ids.length ? [{ OR: [{reversalOfJournalId:null},{reversalOfJournalId:{notIn:ids}}] }] : []),
+        ]}},
       select:{debit:true,credit:true},
     });
     return {id:account.id,debit:round(lines.reduce((s,l)=>s+Number(l.debit),0)),credit:round(lines.reduce((s,l)=>s+Number(l.credit),0))};
