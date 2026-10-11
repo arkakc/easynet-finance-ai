@@ -4,6 +4,7 @@ import { normalizeAccountingDate } from "@/lib/accounting/loan";
 import { appendAuditEvent } from "@/lib/security/audit";
 import { prisma } from "@/src/lib/prisma";
 import { isUnlinkedBankLedger } from "@/lib/accounting/bank-ledger-status";
+import { GST_SETTLEMENT_PREFIX, gstSettlementBalances } from "@/lib/accounting/gst-settlement";
 
 export type ManualJournalLineInput = {
   accountId: string;
@@ -415,6 +416,23 @@ export async function approvePendingManualJournal(
     }
 
     const totals = await validatePersistedPendingJournal(tx, journal);
+    if (String(journal.reference || "").startsWith(GST_SETTLEMENT_PREFIX)) {
+      const otherPending = await tx.journalHeader.findFirst({
+        where: { status: "PENDING", reference: { startsWith: GST_SETTLEMENT_PREFIX }, id: { not: journal.id } },
+        select: { code: true },
+      });
+      if (otherPending) throw new Error("Another GST settlement awaits decision: " + otherPending.code);
+      const postingDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(journal.date);
+      const gst = await gstSettlementBalances(tx, postingDate);
+      if (gst.net <= 0 || journal.lines.length !== 3) throw new Error("GST balances changed; reject and regenerate the settlement");
+      const check = (accountId: string, debit: number, credit: number) =>
+        journal.lines.some(line => line.accountId === accountId && Math.abs(Number(line.debit) - debit) < 0.001 && Math.abs(Number(line.credit) - credit) < 0.001);
+      const bankLine = journal.lines.find(line => line.accountId !== gst.output.id && line.accountId !== gst.input.id);
+      if (!bankLine || !check(gst.output.id, gst.outputDue, 0) || !check(gst.input.id, 0, gst.inputCredit)
+        || !check(bankLine.accountId, 0, gst.net)) {
+        throw new Error("GST balance changed since submission. Reject and regenerate the settlement.");
+      }
+    }
     const now = new Date();
     const updated = await tx.journalHeader.update({
       where: { id: journal.id },
