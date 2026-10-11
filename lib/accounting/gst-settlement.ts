@@ -1,0 +1,1 @@
+export const GST_SETTLEMENT_PREFIX = "GST-SETTLEMENT:";
