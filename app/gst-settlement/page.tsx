@@ -16,6 +16,8 @@ export default function GstSettlementPage(){
  const [error,setError]=useState("");
  const [message,setMessage]=useState("");
  const [reason,setReason]=useState("");
+ const [reversalDate,setReversalDate]=useState("");
+ const [eligibilityConfirmed,setEligibilityConfirmed]=useState(false);
  const [busy,setBusy]=useState(false);
  const [selected,setSelected]=useState<RecordRow|null>(null);
  async function reload(){
@@ -28,24 +30,24 @@ export default function GstSettlementPage(){
  }
  useEffect(()=>{void reload().catch(e=>setError(String(e)));},[]);
  function choose(row:RecordRow){
-  setId(row.id);setSelected(row);setDate(row.paymentDate);setPeriod(row.period);setBankId(row.bankAccountId);setRef(row.paymentReference);setPreview(null);setError("");setMessage("");
+  setId(row.id);setSelected(row);setEligibilityConfirmed(false);setReversalDate(row.paymentDate);setDate(row.paymentDate);setPeriod(row.period);setBankId(row.bankAccountId);setRef(row.paymentReference);setPreview(null);setError("");setMessage("");
  }
  function clear(){
-  setId("");setSelected(null);setPreview(null);setRef("");setBankId("");setReason("");setError("");setMessage("");
+  setId("");setSelected(null);setEligibilityConfirmed(false);setPreview(null);setRef("");setBankId("");setReason("");setError("");setMessage("");
  }
  async function calculate(){
   setBusy(true);setError("");setMessage("");setPreview(null);
   try{
-   const res=await fetch("/api/gst/settlement?date="+encodeURIComponent(date),{cache:"no-store"});
+   const res=await fetch("/api/gst/settlement?date="+encodeURIComponent(date)+"&period="+encodeURIComponent(period),{cache:"no-store"});
    const body=await res.json();if(!res.ok||!body.ok)throw new Error(body.error||"Calculation failed");
    setPreview(body);if(!bankId)setBankId(body.banks[0]?.id||"");
   }catch(e){setError(e instanceof Error?e.message:"Calculation failed");}
   finally{setBusy(false);}
  }
- async function action(act:"SAVE"|"SUBMIT"|"APPROVE"|"REJECT"|"CANCEL"){
+ async function action(act:"SAVE"|"SUBMIT"|"APPROVE"|"REJECT"|"CANCEL"|"REVERSE"){
   setBusy(true);setError("");setMessage("");
   try{
-   const res=await fetch("/api/gst/settlement",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:act,id:id||undefined,paymentDate:date,period,bankAccountId:bankId,paymentReference:ref,reason})});
+   const res=await fetch("/api/gst/settlement",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:act,id:id||undefined,paymentDate:date,period,bankAccountId:bankId,paymentReference:ref,reason,reversalDate,eligibilityConfirmed})});
    const body=await res.json();if(!res.ok||!body.ok)throw new Error(body.error||"Action failed");
    setMessage(body.record.code+" → "+body.record.status+(body.record.journalId?" · Linked journal "+body.record.journalId:""));
    const list=await fetch("/api/gst/settlement",{cache:"no-store"}).then(r=>r.json());
@@ -74,11 +76,13 @@ export default function GstSettlementPage(){
    {selected&&<div className="form-wide"><strong>Saved GST Snapshot</strong><p>Output {money(selected.outputGst)}, Input {money(selected.inputGst)}, Net {money(selected.netPayable)}</p>{selected.journalId&&<Link href={"/journals/"+selected.journalId}>Open Linked Posted Journal</Link>}</div>}
    {selected?.rejectionReason&&<p className="form-wide">Reject reason: {selected.rejectionReason}</p>}
    {selected?.cancelReason&&<p className="form-wide">Cancel reason: {selected.cancelReason}</p>}
-   {editable&&<div className="form-wide button-row"><button type="button" disabled={busy||!bankId||!ref.trim()||!date||!period} onClick={()=>void action("SAVE")}>{id?"Save Changes":"Save Draft"}</button>{id&&<button type="button" disabled={busy} onClick={()=>void action("SUBMIT")}>Submit for Approval</button>}</div>}
+   {selected&&editable&&<div className="form-wide"><label><input type="checkbox" checked={eligibilityConfirmed} onChange={e=>setEligibilityConfirmed(e.target.checked)}/> I have reviewed applicable IRC GST period, tax evidence and input-tax-credit eligibility.</label></div>}
+   {editable&&<div className="form-wide button-row"><button type="button" disabled={busy||!bankId||!ref.trim()||!date||!period} onClick={()=>void action("SAVE")}>{id?"Save Changes":"Save Draft"}</button>{id&&<button type="button" disabled={busy} disabled={busy||!eligibilityConfirmed} onClick={()=>void action("SUBMIT")}>Submit for Approval</button>}</div>}
    {selected?.status==="PENDING"&&<div className="form-wide button-row"><button type="button" disabled={busy} onClick={()=>void action("APPROVE")}>Approve &amp; Auto Post Journal</button></div>}
+   {selected?.status==="POSTED"&&<div className="form-wide"><h3>Controlled Cancellation (Reversal)</h3><p>Checker permission required. Creates a separate posted reversal journal; the original remains immutable.</p><label>Reversal date<input type="date" value={reversalDate} onChange={e=>setReversalDate(e.target.value)} /></label><label>Cancellation / Reversal reason<input value={reason} onChange={e=>setReason(e.target.value)} /></label><button type="button" disabled={busy||!reversalDate||!reason.trim()} onClick={()=>void action("REVERSE")}>Reverse Posted Settlement</button></div>}
    {selected&&["DRAFT","REJECTED","PENDING"].includes(selected.status)&&<div className="form-wide"><label>Rejection / Cancellation Reason<input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Required for reject or cancel"/></label><div className="button-row">{selected.status==="PENDING"&&<button type="button" disabled={busy||!reason.trim()} onClick={()=>void action("REJECT")}>Reject</button>}<button type="button" disabled={busy||!reason.trim()} onClick={()=>void action("CANCEL")}>Cancel Document</button></div></div>}
    {message&&<p role="status" className="form-wide">{message}</p>}{error&&<p role="alert" className="form-wide">{error}</p>}
-   <p className="form-wide small">Only checker approval posts the journal. This GL-based calculator is cumulative through payment date, not an IRC statutory return. Confirm eligibility and payment evidence; posted cancellation requires an authorised reversal.</p>
+   <p className="form-wide small">Only checker approval posts the journal. This GL-based calculator is for the selected month only; it excludes GST settlement postings, but is not an IRC-certified statutory return. Validate eligible input GST, tax codes and documentary evidence. Confirm eligibility and payment evidence; posted cancellation requires an authorised reversal.</p>
   </section>
  </div>;
 }
