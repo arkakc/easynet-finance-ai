@@ -2007,36 +2007,3 @@ model GstSettlement {
   @@index([period, status])
   @@index([paymentDate])
 }
-
-
-
-model PurchaseReturn {
-  id                String   @id @default(cuid())
-  code              String   @unique
-  supplierBillId    String
-  itemId            String
-  quantity          Decimal
-  netAmount         Decimal  @default(0)
-  gstAmount         Decimal  @default(0)
-  totalAmount       Decimal  @default(0)
-  returnDate        DateTime
-  reason            String
-  status            String   @default("DRAFT")
-  journalId         String?  @unique
-  createdBy         String
-  updatedBy         String?
-  submittedAt       DateTime?
-  approvedBy        String?
-  approvedAt        DateTime?
-  rejectedBy        String?
-  rejectedAt        DateTime?
-  rejectionReason   String?
-  cancelledBy       String?
-  cancelledAt       DateTime?
-  cancelReason      String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  @@index([supplierBillId, status])
-  @@index([itemId])
-}
