@@ -424,11 +424,11 @@ export async function approvePendingManualJournal(
       if (otherPending) throw new Error("Another GST settlement awaits decision: " + otherPending.code);
       const postingDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(journal.date);
       const gst = await gstSettlementBalances(tx, postingDate);
-      if (gst.net <= 0 || journal.lines.length !== 3) throw new Error("GST balances changed; reject and regenerate the settlement");
+      if (gst.net <= 0 || journal.lines.length !== (gst.inputCredit > 0 ? 3 : 2)) throw new Error("GST balances changed; reject and regenerate the settlement");
       const check = (accountId: string, debit: number, credit: number) =>
         journal.lines.some(line => line.accountId === accountId && Math.abs(Number(line.debit) - debit) < 0.001 && Math.abs(Number(line.credit) - credit) < 0.001);
       const bankLine = journal.lines.find(line => line.accountId !== gst.output.id && line.accountId !== gst.input.id);
-      if (!bankLine || !check(gst.output.id, gst.outputDue, 0) || !check(gst.input.id, 0, gst.inputCredit)
+      if (!bankLine || !check(gst.output.id, gst.outputDue, 0) || (gst.inputCredit > 0 && !check(gst.input.id, 0, gst.inputCredit))
         || !check(bankLine.accountId, 0, gst.net)) {
         throw new Error("GST balance changed since submission. Reject and regenerate the settlement.");
       }
