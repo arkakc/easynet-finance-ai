@@ -23,7 +23,8 @@ export default function GstSettlementPage(){
   const data=await res.json();
   if(!res.ok||!data.ok)throw new Error(data.error||"Cannot load GST documents");
   setRecords(data.records||[]);
-  if(id){const row=(data.records||[]).find((r:RecordRow)=>r.id===id);if(row)setSelected(row);}
+  const requested=id||new URLSearchParams(window.location.search).get("document")||"";
+  if(requested){const row=(data.records||[]).find((r:RecordRow)=>r.id===requested);if(row)choose(row);}
  }
  useEffect(()=>{void reload().catch(e=>setError(String(e)));},[]);
  function choose(row:RecordRow){
