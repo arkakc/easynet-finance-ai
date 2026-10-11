@@ -64,7 +64,7 @@ async function main() {
   // GST against those GL movements AFTER excluding approved settlement entries
   // and their posted counter-entries. Reversals cancel the clearing, not tax.
   const settlementJournalIds = new Set(journals
-    .filter(j => j.sourceDocType === "GST_SETTLEMENT")
+    .filter(j => j.sourceDocType === "GST_SETTLEMENT" || String(j.reference || "").startsWith("GST-SETTLEMENT:"))
     .map(j => j.id));
   const settlementMovements = journals.filter(j =>
     settlementJournalIds.has(j.id) ||
