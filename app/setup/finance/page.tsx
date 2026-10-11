@@ -555,71 +555,109 @@ export default function FinanceSetupPage() {
   const confidenceLabel = (score: number) => score >= 58 ? "high confidence" : score >= 34 ? "medium confidence" : "low confidence";
   const suggestMappingAccounts = async () => {
     setAiSuggesting(true); setError(""); setMessage(""); setAutoMappingResult(null);
+    const selectedAccounts: Partial<Record<MappingAccountKey, string>> = {};
+    const selectedCenters: Record<string, string> = {};
+    const notes: MappingSuggestionNotes = {};
+    const unresolved: string[] = [];
+    let createdAccounts = 0;
+    let createdCenters = 0;
     try {
-      let accounts = setupAccounts;
-      if (!accounts.length) accounts = await loadSetupAccounts();
-      const activeLedgers = accounts.filter((account) => account.active && !account.isGroup);
-      if (!activeLedgers.length) throw new Error("No active posting ledger accounts found. Import a Chart of Accounts first.");
-      // Cost centres are separate master data; never derive them from GL account codes.
+      const accounts = await loadSetupAccounts();
+      if (!accounts.some((account) => account.active && !account.isGroup)) throw new Error("No posting accounts in the COA. Create or import the Chart of Accounts first.");
+      const available = [...accounts];
       const centers = await loadCostCenters();
-      const activeLeafCenters = centers.filter((center) => center.isActive && !center.isGroup && center.childCount === 0);
-      const proposals: Partial<Record<MappingAccountKey, { code: string; score: number }>> = {};
-      const notes: MappingSuggestionNotes = {};
-      const selectedAccounts: Partial<Record<MappingAccountKey, string>> = {};
-      let selectedCenterCount = 0;
-      const unresolved: string[] = [];
+      const availableCenters = [...centers];
+      const existingCodes = new Set(accounts.map((account) => account.accountCode));
+      let nextCode = 0;
       for (const field of mappingAccountFields) {
-        const currentCode = cleanAccountCode(String(config[field.configKey] || ""));
-        if (currentCode.trim()) {
-          notes[field.configKey] = `${field.label}: existing selection preserved`;
+        const old = cleanAccountCode(String(config[field.configKey] || ""));
+        if (old && available.some((a) => a.accountCode === old && a.active && !a.isGroup && accountTypeAllowed(a, field.allowedTypes))) {
+          notes[field.configKey] = `${field.label}: previous selection preserved (${old})`;
           continue;
         }
-        const candidates = activeLedgers.filter((account) => accountTypeAllowed(account, field.allowedTypes));
-        const ranked = candidates
+        const profile = suggestionProfiles[field.configKey];
+        const ranked = available.filter((a) => a.active && !a.isGroup && accountTypeAllowed(a, field.allowedTypes))
           .map((account) => ({ account, score: scoreSuggestedAccount(field, account) }))
-          .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode, undefined, { numeric: true }));
+          .sort((a,b) => b.score - a.score || a.account.accountCode.localeCompare(b.account.accountCode, undefined, { numeric: true }));
         const best = ranked[0];
-        const runnerUp = ranked[1];
-        // Fail closed: a weak or nearly tied suggestion is NOT an accounting-safe mapping.
-        const confident = Boolean(best && best.score >= 58 && (!runnerUp || best.score - runnerUp.score >= 12));
-        if (confident && best) {
-          proposals[field.configKey] = { code: best.account.accountCode, score: best.score };
-          selectedAccounts[field.configKey] = best.account.accountCode;
-          notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (auto-set, high confidence)`;
-        } else {
-          unresolved.push(field.label);
-          notes[field.configKey] = `${field.label}: ${best ? "ambiguous / low-confidence match" : "no matching ledger"}; manual review required`;
+        // Require positive evidence of intended role. Type alone is never sufficient.
+        const semantic = (account: SetupAccount) => {
+          const name = account.accountName.toLowerCase();
+          const keywords = profile?.positive || field.label.toLowerCase().split(/[^a-z]+/).filter((s) => s.length > 3);
+          const negatives = profile?.negative || [];
+          return keywords.some((word) => name.includes(word)) && !negatives.some((word) => name.includes(word));
+        };
+        const matched = ranked.find((candidate) => semantic(candidate.account));
+        if (matched) {
+          selectedAccounts[field.configKey] = matched.account.accountCode;
+          notes[field.configKey] = `${field.label}: ${accountLabel(matched.account)} (matched COA)`;
+          continue;
         }
-      }
-      const selectedCenters: Record<string, string> = {};
-      for (const field of ERP_COST_CENTER_SETTING_FIELDS) {
-        if (String(config[field.configKey] || "").trim()) continue;
-        const normalizedRole = field.label.toLowerCase().replace(/cost centre|cost center|default/g, "").trim();
-        const roleWords = normalizedRole.split(/[^a-z0-9]+/).filter((part) => part.length > 3);
-        const matches = activeLeafCenters.filter((center) => {
-          const name = `${center.code} ${center.name}`.toLowerCase();
-          return roleWords.length > 0 && roleWords.every((word) => name.includes(word));
+        // No reliable semantic match: create a dedicated posting ledger of the correct type,
+        // rather than incorrectly mapping Bank to Cash or AP to Payroll Payable.
+        const preferred = field.allowedTypes.find((type) => type !== "INCOME") || field.allowedTypes[0];
+        const type = createAccountType(preferred);
+        const prefix: Record<string, string> = { ASSET: "18", CONTRA_ASSET: "18", LIABILITY: "28", CONTRA_LIABILITY: "28", EQUITY: "38", REVENUE: "48", EXPENSE: "68" };
+        let code: string;
+        do { nextCode++; code = `${prefix[type] || "98"}${String(nextCode).padStart(4, "0")}`; } while (existingCodes.has(code));
+        const response = await fetch("/api/ui/accounts", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, name: field.label.replace(/^Default /, ""), type,
+            normalBalance: normalBalanceForType(type), currency: config.baseCurrency || "PGK",
+            description: `Auto-created for finance setup: ${field.label}. Review classification before go-live.`, isActive: true }),
         });
-        const selection = matches.length === 1 ? matches[0] : activeLeafCenters.length === 1 ? activeLeafCenters[0] : null;
-        if (selection) {
-          selectedCenters[field.configKey] = selection.code;
-          selectedCenterCount++;
-        } else {
-          unresolved.push(field.label);
+        const payload = await response.json() as { ok?: boolean; error?: string; account?: AccountApiRow };
+        if (!response.ok || !payload.ok) {
+          unresolved.push(`${field.label}: ${payload.error || "ledger creation failed"}`);
+          continue;
         }
+        const created = normalizeSetupAccount(payload.account || { accountCode: code, accountName: field.label, accountType: type });
+        available.push(created); existingCodes.add(code);
+        selectedAccounts[field.configKey] = code;
+        createdAccounts++;
+        notes[field.configKey] = `${field.label}: ${code} ${created.accountName} (new ledger, review before go-live)`;
       }
-      // One local state update; Save & Continue still performs the server-side setup validation.
-      setConfig((current) => ({
-        ...current,
-        ...Object.fromEntries(Object.entries(selectedAccounts).filter(([key]) => !String(current[key as MappingAccountKey] || "").trim())),
-        ...Object.fromEntries(Object.entries(selectedCenters).filter(([key]) => !String(current[key as keyof Config] || "").trim())),
-      } as Config));
-      setMappingProposals(proposals);
+      for (const field of ERP_COST_CENTER_SETTING_FIELDS) {
+        const value = cleanCostCenterCode(String(config[field.configKey] || ""));
+        const active = availableCenters.filter((center) => center.isActive && !center.isGroup && center.childCount === 0);
+        const validCurrent = active.find((center) => center.code === value);
+        if (validCurrent) continue;
+        const role = field.configKey === "defaultCostCenter" ? "Main" : field.configKey === "roundOffCostCenter" ? "Round Off" : "Asset Depreciation";
+        let selected = active.find((center) => center.name.toLowerCase() === role.toLowerCase());
+        if (!selected && field.configKey !== "defaultCostCenter") selected = active.find((center) => center.name.toLowerCase() === "main");
+        if (!selected && active.length === 1) selected = active[0];
+        if (!selected) {
+          const response = await fetch("/api/cost-centers", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: role, code: "", parentRef: "", description: `Finance setup default: ${field.label}`, isActive: true }),
+          });
+          const payload = await response.json() as { ok?: boolean; error?: string; row?: CostCenterOption };
+          if (!response.ok || !payload.ok || !payload.row?.code) {
+            unresolved.push(`${field.label}: ${payload.error || "Cost Centre creation failed"}`);
+            continue;
+          }
+          selected = payload.row;
+          availableCenters.push(selected);
+          createdCenters++;
+        }
+        selectedCenters[field.configKey] = selected.code;
+      }
+      await loadSetupAccounts();
+      await loadCostCenters();
+      setConfig((current) => ({ ...current, ...selectedAccounts, ...selectedCenters } as Config));
       setMappingSuggestionNotes(notes);
-      setAutoMappingResult({ mappedAccounts: Object.keys(selectedAccounts).length, mappedCenters: selectedCenterCount, unresolved });
-      setMessage(`Auto-mapping finished. ${Object.keys(selectedAccounts).length} accounts and ${selectedCenterCount} Cost Centres selected; ${unresolved.length} need review.`);
-    } catch (reason) { const detail = reason instanceof Error ? reason.message : "Automatic account and Cost Centre mapping failed"; setError(detail); setAutoMappingResult({ mappedAccounts: 0, mappedCenters: 0, unresolved: [], error: detail }); }
-    finally { setAiSuggesting(false); }
+      setMappingProposals({});
+      setAutoMappingResult({ mappedAccounts: Object.keys(selectedAccounts).length, mappedCenters: Object.keys(selectedCenters).length, unresolved });
+      setMessage(unresolved.length
+        ? `Auto-fill incomplete: ${unresolved.length} field(s) need action. Created ${createdAccounts} ledgers and ${createdCenters} Cost Centres.`
+        : `Successfully auto-filled all account and Cost Centre fields. Created ${createdAccounts} missing ledgers and ${createdCenters} Cost Centres. Review, then Save & Continue.`);
+    } catch (reason) {
+      const detail = reason instanceof Error ? reason.message : "Auto-fill failed";
+      setError(detail);
+      setAutoMappingResult({ mappedAccounts: Object.keys(selectedAccounts).length, mappedCenters: Object.keys(selectedCenters).length, unresolved: [...unresolved, detail], error: detail });
+      // Preserve partial progress to avoid duplicate master creation on retry.
+      setConfig((current) => ({ ...current, ...selectedAccounts, ...selectedCenters } as Config));
+    } finally { setAiSuggesting(false); }
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
   const gstSetupReady = Boolean(config.gstStatus && (!["REGISTERED", "VERIFIED"].includes(config.gstStatus) || (config.gstNumber.trim() && config.gstEvidenceDocName.trim() && (config.gstEvidenceDocId.trim() || gstCertificateFile))));
@@ -781,7 +819,7 @@ export default function FinanceSetupPage() {
       </div>
       <div className="form-wide warning-panel">
         <strong>Auto account & Cost Centre mapping review</strong>
-        <p className="small">Auto-set uses matching active posting ledger accounts from the COA and active leaf Cost Centre master records. Existing selections are preserved. Ambiguous or missing matches require manual review; Save & Continue validates the result. No journals are posted.</p>
+        <p className="small">Auto-fill matches suitable COA posting ledgers by role and account type, creates dedicated correctly typed ledgers when missing, and sets up active Cost Centre masters as needed. You can change every selection manually before Save & Continue. Review new accounts before go-live. No journals are posted.</p>
       </div>
       {autoMappingResult && <div role="status" aria-live="polite" className={autoMappingResult.error || autoMappingResult.unresolved.length ? "form-wide warning-panel" : "form-wide conversion-box"}>
         <strong>{autoMappingResult.error ? "Auto-mapping failed" : autoMappingResult.unresolved.length ? "Auto-mapping completed: review required" : "Successfully mapped. Please Save & Continue."}</strong>
@@ -797,7 +835,7 @@ export default function FinanceSetupPage() {
       {renderQuickCostCenterCreator()}
       {Object.keys(mappingSuggestionNotes).length > 0 && <div className="form-wide conversion-box">
         <strong>Auto-mapping results</strong>
-        <p className="small">High-confidence ledger matches have been filled into empty fields. Existing selections are protected. Low-confidence or missing matches must be selected manually before saving.</p>
+        <p className="small">All unmapped roles have been filled using matching posting ledgers or newly created dedicated ledgers. Review account classification and change any selection before saving.</p>
         {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <div key={field.settingKey} className="button-row" style={{ justifyContent: "space-between", marginTop: 8 }}><span className="small">{mappingSuggestionNotes[field.configKey]}</span>{mappingProposals[field.configKey] && mappingProposals[field.configKey]!.score >= 34 && !String(config[field.configKey] || "").trim() && <button type="button" className="secondary-btn" onClick={() => { const proposed = mappingProposals[field.configKey]; if (proposed) setConfig((current) => String(current[field.configKey] || "").trim() ? current : { ...current, [field.configKey]: proposed.code }); }}>Apply suggestion</button>}</div> : null)}
       </div>}
       <div className="form-wide settings-section-title">
