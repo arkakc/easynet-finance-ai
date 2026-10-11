@@ -569,8 +569,27 @@ export default function FinanceSetupPage() {
       const availableCenters = [...centers];
       const existingCodes = new Set(accounts.map((account) => account.accountCode));
       let nextCode = 0;
+      // Prefer existing operational COA posting accounts, not automatically created substitutes.
+      // Exact-code hints are company-specific and only accepted if type and posting status agree.
+      const existingRoleCodes: Partial<Record<MappingAccountKey, string[]>> = {
+        defaultBankAccount: ["1121", "1120"],
+        defaultCashAccount: ["1111", "1110"],
+        defaultReceivableAccount: ["1131", "1130"],
+        defaultPayableAccount: ["2111", "2110"],
+        defaultInventoryAccount: ["1161", "1150"],
+        stockReceivedButNotBilledAccount: ["2152", "2150"],
+      };
       for (const field of mappingAccountFields) {
         const old = cleanAccountCode(String(config[field.configKey] || ""));
+        const existingPreferred = (existingRoleCodes[field.configKey] || [])
+          .map((code) => available.find((a) => a.accountCode === code && a.active && !a.isGroup && accountTypeAllowed(a, field.allowedTypes)))
+          .find((account) => Boolean(account));
+        const previouslyAutoCreated = Boolean(old && /^18\\d{4}$/.test(old) && ["defaultBankAccount", "defaultCashAccount"].includes(field.configKey));
+        if (existingPreferred && (!old || previouslyAutoCreated)) {
+          selectedAccounts[field.configKey] = existingPreferred.accountCode;
+          notes[field.configKey] = `${field.label}: ${accountLabel(existingPreferred)} (existing COA preferred)`;
+          continue;
+        }
         if (old && available.some((a) => a.accountCode === old && a.active && !a.isGroup && accountTypeAllowed(a, field.allowedTypes))) {
           notes[field.configKey] = `${field.label}: previous selection preserved (${old})`;
           continue;
@@ -819,7 +838,7 @@ export default function FinanceSetupPage() {
       </div>
       <div className="form-wide warning-panel">
         <strong>Auto account & Cost Centre mapping review</strong>
-        <p className="small">Auto-fill matches suitable COA posting ledgers by role and account type, creates dedicated correctly typed ledgers when missing, and sets up active Cost Centre masters as needed. You can change every selection manually before Save & Continue. Review new accounts before go-live. No journals are posted.</p>
+        <p className="small">Auto-fill first reuses verified operational COA ledger codes (e.g. 1121 Bank, 1111 Cash, 1131 AR, 2111 AP), then matches suitable COA posting ledgers by role and account type, and only creates dedicated ledgers when no valid role match exists, and sets up active Cost Centre masters as needed. You can change every selection manually before Save & Continue. Review new accounts before go-live. No journals are posted.</p>
       </div>
       {autoMappingResult && <div role="status" aria-live="polite" className={autoMappingResult.error || autoMappingResult.unresolved.length ? "form-wide warning-panel" : "form-wide conversion-box"}>
         <strong>{autoMappingResult.error ? "Auto-mapping failed" : autoMappingResult.unresolved.length ? "Auto-mapping completed: review required" : "Successfully mapped. Please Save & Continue."}</strong>
