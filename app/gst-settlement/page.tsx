@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 type Bank={id:string;name:string;code:string;ledger?:string};
 type Preview={balances:{outputDue:number;inputCredit:number;net:number};banks:Bank[]};
-type RecordRow={id:string;code:string;period:string;paymentDate:string;bankAccountId:string;paymentReference:string;status:string;outputGst:number;inputGst:number;netPayable:number;journalId?:string|null;rejectionReason?:string|null;cancelReason?:string|null;createdBy:string};
+type RecordRow={id:string;code:string;period:string;paymentDate:string;bankAccountId:string;paymentReference:string;status:string;outputGst:number;inputGst:number;netPayable:number;journalId?:string|null;reversalJournalId?:string|null;rejectionReason?:string|null;cancelReason?:string|null;createdBy:string};
 const money=(n:number)=>"K"+Number(n||0).toFixed(2);
 export default function GstSettlementPage(){
  const [records,setRecords]=useState<RecordRow[]>([]);
@@ -73,7 +73,7 @@ export default function GstSettlementPage(){
    <label>IRC / Payment Reference<input value={ref} disabled={!editable} onChange={e=>setRef(e.target.value)} placeholder="Tax return / bank reference"/></label>
    {editable&&<div className="form-wide"><button type="button" disabled={busy} onClick={()=>void calculate()}>Calculate GST Automatically</button></div>}
    {preview&&<div className="form-wide"><h3>System GST Calculation</h3><p>Output GST {money(preview.balances.outputDue)} | Input GST {money(preview.balances.inputCredit)} | <strong>Net Payable {money(preview.balances.net)}</strong></p></div>}
-   {selected&&<div className="form-wide"><strong>Saved GST Snapshot</strong><p>Output {money(selected.outputGst)}, Input {money(selected.inputGst)}, Net {money(selected.netPayable)}</p>{selected.journalId&&<Link href={"/journals/"+selected.journalId}>Open Linked Posted Journal</Link>}</div>}
+   {selected&&<div className="form-wide"><strong>Saved GST Snapshot</strong><p>Output {money(selected.outputGst)}, Input {money(selected.inputGst)}, Net {money(selected.netPayable)}</p>{selected.journalId&&<Link href={"/journals/"+selected.journalId}>Open Linked Posted Journal</Link>}{selected.reversalJournalId&&<> · <Link href={"/journals/"+selected.reversalJournalId}>Open Reversal Journal</Link></>}</div>}
    {selected?.rejectionReason&&<p className="form-wide">Reject reason: {selected.rejectionReason}</p>}
    {selected?.cancelReason&&<p className="form-wide">Cancel reason: {selected.cancelReason}</p>}
    {selected&&editable&&<div className="form-wide"><label><input type="checkbox" checked={eligibilityConfirmed} onChange={e=>setEligibilityConfirmed(e.target.checked)}/> I have reviewed applicable IRC GST period, tax evidence and input-tax-credit eligibility.</label></div>}
