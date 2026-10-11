@@ -89,17 +89,7 @@ export default function CollapsibleSidebarNav({ groups, compact = false }: Props
           </span>
         </button>
         <div className="nav-links" id={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`}>
-          {group.label === "Accounting" && group.links.some((link) => link.href === "/gst-settlement") ? (
-            <div className="nav-tax-group">
-              <div className="nav-tax-group-heading">Tax &amp; GST</div>
-              {group.links.filter((link) => link.href === "/gst-settlement").map((link) => link.disabled ? (
-                <span key={link.href} className="nav-disabled-link" aria-disabled="true">{link.label}</span>
-              ) : (
-                <Link key={link.href} prefetch={false} href={link.href} className={hrefIsActive(link.href, pathname, searchParams) ? "active" : undefined}>{link.label}</Link>
-              ))}
-            </div>
-          ) : null}
-          {group.links.filter((link) => !(group.label === "Accounting" && link.href === "/gst-settlement")).map((link) => link.disabled ? (
+          {group.links.map((link) => link.disabled ? (
             <span key={`${group.label}-${link.label}`} className="nav-disabled-link" aria-disabled="true" title={link.disabledReason || "Unavailable"}>
               {link.label}
             </span>
