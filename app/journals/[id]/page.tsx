@@ -32,9 +32,15 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           select: { id: true, code: true },
         })
       : null;
-  const sourceDocumentNumber = sourceDocument?.code || header.sourceDocId || "—";
+  const gstDocument = String(header.sourceDocType || "").toUpperCase() === "GST_SETTLEMENT"
+    ? await prisma.gstSettlement.findFirst({
+        where: { OR: [{ id: header.sourceDocId || "" }, { code: header.sourceDocId || "" }] },
+        select: { id: true, code: true },
+      })
+    : null;
+  const sourceDocumentNumber = gstDocument?.code || sourceDocument?.code || header.sourceDocId || "—";
   const sourceType = String(header.sourceDocType || "").toUpperCase();
-  const sourceHref = sourceDocument
+  const sourceHref = gstDocument ? `/gst-settlement?document=${encodeURIComponent(gstDocument.id)}` : sourceDocument
     ? paymentSourceTypes.has(sourceType)
       ? `/transactions/payment/${encodeURIComponent(sourceDocument.id)}`
       : sourceType === "SUPPLIER_BILL"

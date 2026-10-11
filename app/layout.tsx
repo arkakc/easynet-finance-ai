@@ -60,7 +60,7 @@ const groups: readonly NavGroup[] = [
     ],
   },
   {
-    label: "Accounts",
+    label: "Accounting",
     icon: "📑",
     links: [
       ["Chart of Accounts", "/accounts", "accounts.read"],
@@ -72,6 +72,7 @@ const groups: readonly NavGroup[] = [
       ["Journal Reversal", "/journals/reverse", "accounts.write"],
       ["Statements", "/statements", "accounts.read"],
       ["Bank Reconciliation", "/banking", "accounts.read"],
+      ["GST Settlement & Payment", "/gst-settlement", "accounts.read"],
       ["Deferred Revenue", "/deferred-revenue", "post.approve"],
       ["Month-End Close", "/period-close", "post.approve"],
       ["Budgets", "/budgets", "accounts.read"],
