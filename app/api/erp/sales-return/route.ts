@@ -93,6 +93,10 @@ export async function POST(request: Request) {
   try {
     await requirePermission("sales.write");
     const input = createSchema.parse(await request.json());
+    const identifiers = input.lines.map(line => line.itemId);
+    if (new Set(identifiers).size !== identifiers.length) {
+      throw new Error("Return each item only once per document. Combine duplicate quantities before submission.");
+    }
     const result = await createSalesCreditNote(input);
     return NextResponse.json({ ok: true, creditNote: result });
   } catch (error) {
