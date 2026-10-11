@@ -1974,3 +1974,36 @@ model PosSession {
   @@index([cashierId])
   @@index([status])
 }
+
+
+model GstSettlement {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  period            String
+  paymentDate       DateTime
+  bankAccountId     String
+  paymentReference  String
+  status            String   @default("DRAFT")
+  outputGst         Decimal  @default(0)
+  inputGst          Decimal  @default(0)
+  netPayable        Decimal  @default(0)
+  journalId         String?  @unique
+  createdBy         String
+  updatedBy         String?
+  submittedBy       String?
+  submittedAt       DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  rejectedBy        String?
+  rejectedAt        DateTime?
+  rejectionReason   String?
+  cancelledBy       String?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([period, status])
+  @@index([paymentDate])
+}
+
