@@ -558,26 +558,65 @@ export default function FinanceSetupPage() {
       let accounts = setupAccounts;
       if (!accounts.length) accounts = await loadSetupAccounts();
       const activeLedgers = accounts.filter((account) => account.active && !account.isGroup);
-      if (!activeLedgers.length) throw new Error("No active ledger accounts found. Import or refresh the Chart of Accounts first.");
+      if (!activeLedgers.length) throw new Error("No active posting ledger accounts found. Import a Chart of Accounts first.");
+      // Cost centres are separate master data; never derive them from GL account codes.
+      const centers = await loadCostCenters();
+      const activeLeafCenters = centers.filter((center) => center.isActive && !center.isGroup && center.childCount === 0);
       const proposals: Partial<Record<MappingAccountKey, { code: string; score: number }>> = {};
       const notes: MappingSuggestionNotes = {};
+      const selectedAccounts: Partial<Record<MappingAccountKey, string>> = {};
+      let selectedCenterCount = 0;
+      let skipped = 0;
       for (const field of mappingAccountFields) {
+        const currentCode = cleanAccountCode(String(config[field.configKey] || ""));
+        if (currentCode.trim()) {
+          notes[field.configKey] = `${field.label}: existing selection preserved`;
+          continue;
+        }
         const candidates = activeLedgers.filter((account) => accountTypeAllowed(account, field.allowedTypes));
         const ranked = candidates
           .map((account) => ({ account, score: scoreSuggestedAccount(field, account) }))
           .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode, undefined, { numeric: true }));
         const best = ranked[0];
-        if (best && best.score > 0) {
+        const runnerUp = ranked[1];
+        // Fail closed: a weak or nearly tied suggestion is NOT an accounting-safe mapping.
+        const confident = Boolean(best && best.score >= 58 && (!runnerUp || best.score - runnerUp.score >= 12));
+        if (confident && best) {
           proposals[field.configKey] = { code: best.account.accountCode, score: best.score };
-          notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (${confidenceLabel(best.score)})`;
+          selectedAccounts[field.configKey] = best.account.accountCode;
+          notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (auto-set, high confidence)`;
         } else {
-          notes[field.configKey] = `${field.label}: no accurate active ledger match found`;
+          skipped++;
+          notes[field.configKey] = `${field.label}: ${best ? "ambiguous / low-confidence match" : "no matching ledger"}; manual review required`;
         }
       }
+      const selectedCenters: Record<string, string> = {};
+      for (const field of ERP_COST_CENTER_SETTING_FIELDS) {
+        if (String(config[field.configKey] || "").trim()) continue;
+        const normalizedRole = field.label.toLowerCase().replace(/cost centre|cost center|default/g, "").trim();
+        const roleWords = normalizedRole.split(/[^a-z0-9]+/).filter((part) => part.length > 3);
+        const matches = activeLeafCenters.filter((center) => {
+          const name = `${center.code} ${center.name}`.toLowerCase();
+          return roleWords.length > 0 && roleWords.every((word) => name.includes(word));
+        });
+        const selection = matches.length === 1 ? matches[0] : activeLeafCenters.length === 1 ? activeLeafCenters[0] : null;
+        if (selection) {
+          selectedCenters[field.configKey] = selection.code;
+          selectedCenterCount++;
+        } else {
+          skipped++;
+        }
+      }
+      // One local state update; Save & Continue still performs the server-side setup validation.
+      setConfig((current) => ({
+        ...current,
+        ...Object.fromEntries(Object.entries(selectedAccounts).filter(([key]) => !String(current[key as MappingAccountKey] || "").trim())),
+        ...Object.fromEntries(Object.entries(selectedCenters).filter(([key]) => !String(current[key as keyof Config] || "").trim())),
+      } as Config));
       setMappingProposals(proposals);
       setMappingSuggestionNotes(notes);
-      setMessage("Account mapping suggestions are ready for review. No account mappings have been changed.");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "AI suggested account selection failed"); }
+      setMessage(`Auto-set ${Object.keys(selectedAccounts).length} account mapping(s) and ${selectedCenterCount} Cost Centre mapping(s). ${skipped} unresolved field(s) require manual review. Review selections and save to validate. No journals were posted.`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Automatic account and Cost Centre mapping failed"); }
     finally { setAiSuggesting(false); }
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
@@ -735,18 +774,18 @@ export default function FinanceSetupPage() {
         </div>
         <div className="button-row">
           <button type="button" className="secondary-btn" onClick={() => void loadSetupAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{coaLoading ? "Loading accounts…" : "Refresh account list"}</button>
-          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "AI suggesting…" : "Suggest Account Mappings"}</button>
+          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "Auto-setting…" : "AI Auto Set All Account Mapping & Cost Centres"}</button>
         </div>
       </div>
       <div className="form-wide warning-panel">
-        <strong>Account mapping review required</strong>
-        <p className="small">Select correct active ledger accounts from your Chart of Accounts. Suggestions never automatically overwrite existing mappings. Group accounts are blocked.</p>
+        <strong>Auto account & Cost Centre mapping review</strong>
+        <p className="small">Auto-set uses matching active posting ledger accounts from the COA and active leaf Cost Centre master records. Existing selections are preserved. Ambiguous or missing matches require manual review; Save & Continue validates the result. No journals are posted.</p>
       </div>
       {renderQuickAccountCreator()}
       {renderQuickCostCenterCreator()}
       {Object.keys(mappingSuggestionNotes).length > 0 && <div className="form-wide conversion-box">
-        <strong>Suggested mappings (not applied)</strong>
-        <p className="small">Review each suggested mapping before applying. Low-confidence suggestions require manual selection. Existing mapping selections are protected.</p>
+        <strong>Auto-mapping results</strong>
+        <p className="small">High-confidence ledger matches have been filled into empty fields. Existing selections are protected. Low-confidence or missing matches must be selected manually before saving.</p>
         {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <div key={field.settingKey} className="button-row" style={{ justifyContent: "space-between", marginTop: 8 }}><span className="small">{mappingSuggestionNotes[field.configKey]}</span>{mappingProposals[field.configKey] && mappingProposals[field.configKey]!.score >= 34 && !String(config[field.configKey] || "").trim() && <button type="button" className="secondary-btn" onClick={() => { const proposed = mappingProposals[field.configKey]; if (proposed) setConfig((current) => String(current[field.configKey] || "").trim() ? current : { ...current, [field.configKey]: proposed.code }); }}>Apply suggestion</button>}</div> : null)}
       </div>}
       <div className="form-wide settings-section-title">
