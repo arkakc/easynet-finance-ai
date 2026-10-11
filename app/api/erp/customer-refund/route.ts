@@ -62,11 +62,17 @@ async function refundableBalance(creditNote: any) {
       && String(row.status || "").toUpperCase() === "POSTED"
       && Boolean(row.journalId))
     .reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
+  const reservedDraftRefunds = round2((payments.rows || [])
+    .filter((row: any) => String(row.partyType || "") === "Customer"
+      && String(row.paymentType || "").toUpperCase() === "PAY"
+      && ["DRAFT", "PENDING"].includes(String(row.status || "").toUpperCase()))
+    .reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0));
   return {
     currency: transactionCurrency,
     creditCreated,
     refunded,
-    refundable: round2(Math.max(0, creditCreated - refunded)),
+    reservedDraftRefunds,
+    refundable: round2(Math.max(0, creditCreated - refunded - reservedDraftRefunds)),
   };
 }
 
