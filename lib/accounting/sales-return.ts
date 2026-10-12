@@ -28,6 +28,10 @@ export async function createSalesCreditNote(input: {
   reason: string;
   lines: SalesReturnLineInput[];
 }) {
+  const ids = input.lines.map(line => String(line.itemId || "").trim());
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("Duplicate items in Sales Return are not allowed; combine their quantities.");
+  }
   const original = (await findRecords<any>("Invoices", { invoiceId: input.invoiceId }, 1)).rows[0];
   if (!original || isCreditNote(original)) throw new Error("Original Sales Invoice not found");
   if (!["POSTED", "PARTLY_PAID", "PAID"].includes(String(original.status || "").toUpperCase())) {

@@ -13,9 +13,10 @@ const money=(value:unknown)=>`K${Number(value||0).toFixed(2)}`;
 const createdValue=(row:Payment)=>{const t=new Date(row.createdAt||"").getTime();return Number.isFinite(t)?t:0;};
 
 export default function SupplierAdvanceChainSummary(props:Props){
+  const[applying,setApplying]=useState(false),[refreshKey,setRefreshKey]=useState(0);
   const[payments,setPayments]=useState<Payment[]>([]),[settlementPayments,setSettlementPayments]=useState<Payment[]>([]),[summaries,setSummaries]=useState<Record<string,Summary>>({}),[bills,setBills]=useState<SupplierBill[]>([]),[po,setPo]=useState<PurchaseOrder|null>(null),[loading,setLoading]=useState(true),[message,setMessage]=useState("");
   const marker=`PO:${props.poId}|`;
-  useEffect(()=>{let active=true;void(async()=>{setLoading(true);try{const response=await fetch("/api/erp/transactions",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Supplier advance chain load failed");if(!active)return;const allPayments=(body.payments||[]) as Payment[];const linked=allPayments.filter((row:Payment)=>String(row.partyType||"")==="Supplier"&&String(row.paymentType||"").toUpperCase()==="PAY"&&String(row.partyId||"")===props.supplierId&&!['CANCELLED','REVERSED'].includes(String(row.status||"").toUpperCase())&&(String(row.sourceDocumentId||"")===props.poId||String(row.reference||"").startsWith(marker))&&!String(row.againstDocumentId||"").trim());setPayments(linked);const billRefs=new Set([props.billId,props.billNumber].map(value=>String(value||"").trim()).filter(Boolean));const directSettlements=props.billId?allPayments.filter((row:Payment)=>String(row.partyType||"")==="Supplier"&&String(row.paymentType||"").toUpperCase()==="PAY"&&String(row.partyId||"")===props.supplierId&&Boolean(String(row.journalId||"").trim())&&["POSTED","CLEARED"].includes(String(row.status||"").toUpperCase())&&billRefs.has(String(row.againstDocumentId||"").trim())):[];setSettlementPayments(directSettlements);setBills((body.supplierBills||[]).filter((row:SupplierBill)=>String(row.poId||row.sourceDocumentId||"")===props.poId));setPo((body.purchaseOrders||[]).find((row:PurchaseOrder)=>String(row.poId||"")===props.poId)||null);const posted=linked.filter((row:Payment)=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));const next:Record<string,Summary>={};await Promise.all(posted.map(async(row:Payment)=>{try{const r=await fetch(`/api/erp/advance-allocation?paymentId=${encodeURIComponent(row.paymentId)}`,{cache:"no-store"});const b=await r.json();if(r.ok&&b.ok)next[row.paymentId]=b.summary;}catch{}}));if(active)setSummaries(next);}catch(error){if(active)setMessage(error instanceof Error?error.message:"Supplier advance chain load failed");}finally{if(active)setLoading(false);}})();return()=>{active=false;};},[props.poId,props.supplierId]);
+  useEffect(()=>{let active=true;void(async()=>{setLoading(true);try{const response=await fetch("/api/erp/transactions",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Supplier advance chain load failed");if(!active)return;const allPayments=(body.payments||[]) as Payment[];const linked=allPayments.filter((row:Payment)=>String(row.partyType||"")==="Supplier"&&String(row.paymentType||"").toUpperCase()==="PAY"&&String(row.partyId||"")===props.supplierId&&!['CANCELLED','REVERSED'].includes(String(row.status||"").toUpperCase())&&(String(row.sourceDocumentId||"")===props.poId||String(row.reference||"").startsWith(marker))&&!String(row.againstDocumentId||"").trim());setPayments(linked);const billRefs=new Set([props.billId,props.billNumber].map(value=>String(value||"").trim()).filter(Boolean));const directSettlements=props.billId?allPayments.filter((row:Payment)=>String(row.partyType||"")==="Supplier"&&String(row.paymentType||"").toUpperCase()==="PAY"&&String(row.partyId||"")===props.supplierId&&Boolean(String(row.journalId||"").trim())&&["POSTED","CLEARED"].includes(String(row.status||"").toUpperCase())&&billRefs.has(String(row.againstDocumentId||"").trim())):[];setSettlementPayments(directSettlements);setBills((body.supplierBills||[]).filter((row:SupplierBill)=>String(row.poId||row.sourceDocumentId||"")===props.poId));setPo((body.purchaseOrders||[]).find((row:PurchaseOrder)=>String(row.poId||"")===props.poId)||null);const posted=linked.filter((row:Payment)=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId));const next:Record<string,Summary>={};await Promise.all(posted.map(async(row:Payment)=>{try{const r=await fetch(`/api/erp/advance-allocation?paymentId=${encodeURIComponent(row.paymentId)}`,{cache:"no-store"});const b=await r.json();if(r.ok&&b.ok)next[row.paymentId]=b.summary;}catch{}}));if(active)setSummaries(next);}catch(error){if(active)setMessage(error instanceof Error?error.message:"Supplier advance chain load failed");}finally{if(active)setLoading(false);}})();return()=>{active=false;};},[props.poId,props.supplierId,refreshKey]);
 
   const posted=useMemo(()=>payments.filter(row=>String(row.status||"").toUpperCase()==="POSTED"&&Boolean(row.journalId)),[payments]);
   const advanceCreated=useMemo(()=>payments.reduce((sum,row)=>sum+Number(row.amount||0),0),[payments]);
@@ -29,11 +30,55 @@ export default function SupplierAdvanceChainSummary(props:Props){
   const normalSupplierPayments=useMemo(()=>settlementPayments.reduce((sum,row)=>sum+Number(row.amount||0),0),[settlementPayments]);
   const billTotal=Number(props.billTotal||0),billOutstanding=Number(props.billOutstanding||0);
   const totalSettled=props.billId?Math.max(0,billTotal-billOutstanding):0;
+  const suggestedAdvance = props.context==="invoice" && billOutstanding>0.001
+    ? [...posted].sort((a,b)=>createdValue(a)-createdValue(b)).map(payment=>({
+        payment,available:Number(summaries[payment.paymentId]?.remainingAmount||0),
+      })).find(row=>row.available>0.001)
+    : undefined;
+  const suggestedAmount = suggestedAdvance ? Math.round(Math.min(suggestedAdvance.available,billOutstanding)*100)/100 : 0;
+  async function applySuggestedAdvance(){
+    if (!props.billId||!suggestedAdvance||suggestedAmount<=0||applying)return;
+    setApplying(true);setMessage("");
+    try{
+      const parts=new Intl.DateTimeFormat("en-US",{timeZone:"Pacific/Port_Moresby",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+      const m=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+      const allocationDate=`${m.year}-${m.month}-${m.day}`;
+      const response=await fetch("/api/erp/advance-allocation",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          paymentId:suggestedAdvance.payment.paymentId,partyType:"Supplier",
+          againstDocumentType:"Supplier Invoice",againstDocumentId:props.billId,
+          amount:suggestedAmount,allocationDate,
+          idempotencyKey:`supplier-invoice-suggest:${props.billId}:${suggestedAdvance.payment.paymentId}:${suggestedAmount}`,
+        }),
+      });
+      const body=await response.json();
+      if(!response.ok||!body.ok)throw new Error(body.error||"Supplier Advance adjustment failed");
+      setMessage(`Advance ${money(body.result?.allocatedAmount||suggestedAmount)} allocated. Invoice outstanding: ${money(body.result?.documentOutstanding)}. Linked journal: ${body.result?.journalId||"see allocation"}.`);
+      window.dispatchEvent(new Event("easynet:transaction-document-updated"));
+      setRefreshKey(key=>key+1);
+    }catch(error){setMessage(error instanceof Error?error.message:"Advance adjustment failed");}
+    finally{setApplying(false);}
+  }
   if(!loading&&payments.length===0&&settlementPayments.length===0&&props.context!=="invoice")return null;
 
   return <section className="panel no-print" style={{marginTop:20}}>
     <div className="form-title-row"><div><h3>{props.context==="invoice"?"Supplier Invoice Settlement Summary":"Supplier Advance Payment Status"}</h3><p className="small">{props.context==="invoice"?"Shows advance adjustments, posted supplier payments, total settled and the remaining invoice balance.":"Tracks the same supplier advance through Purchase Order → Supplier Invoice → partial/full allocation. Unused advance stays available for later invoices from this PO."}</p></div><span className="auto-badge">{loading?"Loading…":props.context==="invoice"?`Settled ${money(totalSettled)}`:`PO Advance ${money(advancePosted)}`}</span></div>
     {message&&<div className="status-banner" style={{marginTop:12}}>{message}</div>}
+    {props.context==="invoice"&&!loading&&suggestedAdvance&&suggestedAmount>0&&(
+      <div className="conversion-box" style={{marginTop:16,padding:16}}>
+        <strong>Supplier Advance Detected: Suggested Adjustment {money(suggestedAmount)}</strong>
+        <p className="small">
+          Posted advance {suggestedAdvance.payment.paymentNumber||suggestedAdvance.payment.paymentId} has {money(suggestedAdvance.available)} remaining.
+          Against this invoice outstanding {money(billOutstanding)}, the system recommends applying {money(suggestedAmount)}.
+          Estimated payable afterward: <strong>{money(Math.max(0,billOutstanding-suggestedAmount))}</strong>.
+        </p>
+        <button type="button" disabled={applying} onClick={()=>void applySuggestedAdvance()}>
+          {applying?"Applying…":`Confirm & Apply Advance ${money(suggestedAmount)}`}
+        </button>
+        <p className="small">No new bank payment. Confirmation posts the existing supplier-advance allocation journal and updates AP/outstanding. Approval policy is enforced by the allocation API.</p>
+      </div>
+    )}
     {!loading&&<>
       <div className="document-meta" style={{marginTop:14}}>
         <div><span>Purchase Order</span><strong><Link prefetch={false} href={`/transactions/purchaseOrder/${encodeURIComponent(props.poId)}`}>{po?.poNumber||props.poId}</Link></strong></div>

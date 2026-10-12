@@ -2007,4 +2007,3 @@ model GstSettlement {
   @@index([period, status])
   @@index([paymentDate])
 }
-

@@ -93,6 +93,24 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
 
     const customerRef = credit.customer?.code || credit.customerId;
     const projectRef = credit.project?.code || credit.projectId || original.project?.code || original.projectId || "";
+    const settingRows = await tx.globalSettings.findMany({
+      where: { key: { in: [
+        "default_receivable_account", "default_deferred_revenue_account",
+        "default_inventory_account", "default_income_account",
+        "default_cost_of_goods_sold_account", "output_gst_account",
+      ] } },
+      select: { key: true, value: true },
+    });
+    const settings = new Map(settingRows.map(row => [row.key, String(row.value || "").trim()]));
+    const mapped = (key: string, fallback: string) => {
+      const value = settings.get(key) || "";
+      return value ? (value.toUpperCase().startsWith("ACC-") ? value : "ACC-" + value) : fallback;
+    };
+    const arAccount = mapped("default_receivable_account", INITIAL_ACCOUNT_IDS.accountsReceivable);
+    const customerCreditAccount = mapped("default_deferred_revenue_account", INITIAL_ACCOUNT_IDS.customerAdvances);
+    const inventoryAccount = mapped("default_inventory_account", INITIAL_ACCOUNT_IDS.inventory);
+    const defaultRevenueAccount = mapped("default_income_account", "ACC-4100");
+    const outputGstAccount = mapped("output_gst_account", INITIAL_ACCOUNT_IDS.gstPayable);
     const postingLines: AtomicPostingLine[] = [];
 
     const revenue = new Map<string, number>();
@@ -100,7 +118,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
       const accountId = String(
         line.revenueAccount
         || line.item?.revenueAccount
-        || "ACC-4100",
+        || defaultRevenueAccount,
       );
       const amount = round2(Number(line.amount || 0));
       if (amount > 0) {
@@ -124,7 +142,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     const gst = round2(Number(credit.taxTotal || 0));
     if (gst > 0) {
       postingLines.push({
-        accountId: INITIAL_ACCOUNT_IDS.gstPayable,
+        accountId: outputGstAccount,
         debit: toBaseAmount(gst, creditFx.currency, creditFx.baseCurrency, creditFx.exchangeRate),
         transactionCurrency: creditFx.currency,
         exchangeRate: creditFx.exchangeRate,
@@ -144,7 +162,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
 
     if (arCredit > 0) {
       postingLines.push({
-        accountId: INITIAL_ACCOUNT_IDS.accountsReceivable,
+        accountId: arAccount,
         credit: toBaseAmount(arCredit, originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate),
         transactionCurrency: originalFx.currency,
         exchangeRate: originalFx.exchangeRate,
@@ -157,7 +175,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
     }
     if (customerCredit > 0) {
       postingLines.push({
-        accountId: INITIAL_ACCOUNT_IDS.customerAdvances,
+        accountId: customerCreditAccount,
         credit: toBaseAmount(customerCredit, originalFx.currency, originalFx.baseCurrency, originalFx.exchangeRate),
         transactionCurrency: originalFx.currency,
         exchangeRate: originalFx.exchangeRate,
@@ -338,7 +356,7 @@ export async function postSalesCreditNoteAtomic(input: AtomicSalesCreditNoteInpu
 
     if (inventoryDebit > 0) {
       postingLines.push({
-        accountId: INITIAL_ACCOUNT_IDS.inventory,
+        accountId: inventoryAccount,
         debit: inventoryDebit,
         transactionCurrency: originalFx.baseCurrency,
         exchangeRate: 1,

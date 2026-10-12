@@ -46,6 +46,26 @@ export async function GET(request:Request) {
     return NextResponse.json({ok:true,records:records.map(record=>({...record,outputGst:Number(record.outputGst),inputGst:Number(record.inputGst),netPayable:Number(record.netPayable),paymentDate:businessDate(record.paymentDate)}))});
   }catch(err){return responseError(err);}
 }
+async function assertNoPriorPeriodSettlement(tx: import("@prisma/client").Prisma.TransactionClient, period: string, excludingId: string) {
+  const prior = await tx.gstSettlement.findFirst({
+    where: { id: { not: excludingId }, period, status: "POSTED" },
+    select: { code: true },
+  });
+  if (prior) throw new Error("GST period already settled by document: " + prior.code);
+  const legacy = await tx.journalHeader.findFirst({
+    where: {
+      status: "POSTED",
+      reference: { startsWith: "GST-SETTLEMENT:" + period + ":" },
+      OR: [
+        { sourceDocType: { not: "GST_SETTLEMENT" } },
+        { sourceDocType: null },
+      ],
+    },
+    select: { code: true },
+  });
+  if (legacy) throw new Error("GST period already settled by legacy journal " + legacy.code + ". Do not pay it twice; reconcile or reverse the existing payment first.");
+}
+
 export async function POST(request:Request) {
   try {
     const raw=schema.parse(await request.json());
@@ -101,8 +121,7 @@ export async function POST(request:Request) {
         const paymentDate=businessDate(document.paymentDate);
         const gst=await gstPeriodBalances(tx,document.period,paymentDate);
         if(!raw.eligibilityConfirmed)throw new Error("Confirm GST supporting documents, input eligibility and reporting period before submission");
-        const prior=await tx.gstSettlement.findFirst({where:{id:{not:document.id},period:document.period,status:"POSTED"},select:{code:true}});
-        if(prior)throw new Error("GST period already settled: "+prior.code);
+        await assertNoPriorPeriodSettlement(tx,document.period,document.id);
         if(gst.net<=0)throw new Error("No GST payable; submission blocked");
         const bank=await tx.bankAccount.findUnique({where:{id:document.bankAccountId},include:{chartOfAccounts:true}});
         if(!bank?.isActive||bank.currency!=="PGK"||!bank.chartOfAccounts?.isActive)throw new Error("Choose active linked PGK Bank");
@@ -110,6 +129,7 @@ export async function POST(request:Request) {
         return {id:updated.id,code:updated.code,status:updated.status};
       }
       if(document.status!=="PENDING")throw new Error("Only PENDING documents may be approved");
+      await assertNoPriorPeriodSettlement(tx,document.period,document.id);
       if(maker===actor&&!user.roles.includes("System Manager"))throw new Error("Maker cannot approve own document");
       const paymentDate=businessDate(document.paymentDate);
       const gst=await gstPeriodBalances(tx,document.period,paymentDate);

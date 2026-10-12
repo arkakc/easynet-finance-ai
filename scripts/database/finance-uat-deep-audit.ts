@@ -60,11 +60,29 @@ async function main() {
   const expectedGstInput = round(snapshot.payables.inputGst);
   const gstPayable = round([...trial.entries()].filter(([k]) => /^2120$/.test(k)).reduce((sum, [,v]) => sum - v, 0));
   const gstReceivable = round([...trial.entries()].filter(([k]) => /^1140$/.test(k)).reduce((sum, [,v]) => sum + v, 0));
-  console.log(`GST diagnostic (gross posted invoices/bills, not statutory return): output docs ${expectedGstOutput}, GL 2120 ${gstPayable}; input docs ${expectedGstInput}, GL 1140 ${gstReceivable}`);
-  if (Math.abs(expectedGstOutput - gstPayable) > 0.01) warn("Output GST document total differs from GL 2120 (review credit notes, adjustments, timing, and custom tax ledgers)");
-  else ok("Output GST diagnostic matches GL 2120");
-  if (Math.abs(expectedGstInput - gstReceivable) > 0.01) warn("Input GST document total differs from GL 1140 (review refunds, adjustments, timing, and custom tax ledgers)");
-  else ok("Input GST diagnostic matches GL 1140");
+  // A posted GST payment clears the tax control accounts. Compare source-document
+  // GST against those GL movements AFTER excluding approved settlement entries
+  // and their posted counter-entries. Reversals cancel the clearing, not tax.
+  const settlementJournalIds = new Set(journals
+    .filter(j => j.sourceDocType === "GST_SETTLEMENT" || String(j.reference || "").startsWith("GST-SETTLEMENT:"))
+    .map(j => j.id));
+  const settlementMovements = journals.filter(j =>
+    settlementJournalIds.has(j.id) ||
+    (j.reversalOfJournalId && settlementJournalIds.has(j.reversalOfJournalId))
+  );
+  const clearingOutput = round(settlementMovements.flatMap(j => j.lines)
+    .filter(line => line.account.code === "2120")
+    .reduce((sum, line) => sum + value(line.debit) - value(line.credit), 0));
+  const clearingInput = round(settlementMovements.flatMap(j => j.lines)
+    .filter(line => line.account.code === "1140")
+    .reduce((sum, line) => sum + value(line.credit) - value(line.debit), 0));
+  const outputBeforeSettlement = round(gstPayable + clearingOutput);
+  const inputBeforeSettlement = round(gstReceivable + clearingInput);
+  console.log(`GST diagnostic (source docs vs non-settlement GL): output docs ${expectedGstOutput}, GL ${outputBeforeSettlement}; input docs ${expectedGstInput}, GL ${inputBeforeSettlement}; settlement net clear output ${clearingOutput}, input ${clearingInput}`);
+  if (Math.abs(expectedGstOutput - outputBeforeSettlement) > 0.01) warn("Output GST sources differ from non-settlement GL 2120: inspect credit notes, adjustments, tax mapping and dates");
+  else ok("Output GST reconciles excluding settlement/reversal movements");
+  if (Math.abs(expectedGstInput - inputBeforeSettlement) > 0.01) warn("Input GST sources differ from non-settlement GL 1140: inspect supplier returns, adjustments, tax mapping and dates");
+  else ok("Input GST reconciles excluding settlement/reversal movements");
   const mappedCodes = new Set(bankAccounts.map((b) => b.chartOfAccounts?.code).filter(Boolean));
   for (const bank of bankAccounts) {
     if (!bank.chartOfAccounts) warn(`Bank ${bank.code} lacks ledger mapping`);
