@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { deriveFinanceInsights } from "@/lib/reporting/management-insights";
 import { useEffect, useMemo, useState } from "react";
 import { completedMonthlyPeriods, monthlyAnniversaryDate, normalizeAccountingDate } from "@/lib/accounting/loan";
 
@@ -88,6 +89,11 @@ export default function DashboardClient() {
   const arDifference = n(get("arReconciliationDifference"));
   const apDifference = n(get("apReconciliationDifference"));
 
+  const managementInsights = loaded && !backendError ? deriveFinanceInsights({
+    revenue, expenses, cashBank, receivables: accountsReceivable, payables: accountsPayable,
+    purchaseCommitments: poCommitments, arDifference, apDifference,
+  }) : [];
+
   const activeLoan = String(get("loanStatus")).toUpperCase() === "ACTIVE";
   let nextLoanAccrual = "";
   if (activeLoan) {
@@ -166,6 +172,23 @@ export default function DashboardClient() {
           <p className="small">Input GST recoverability depends on valid documentation and applicable PNG GST rules. The displayed amount is the GL balance, not verified tax-return eligibility.</p>
         </section>
       )}
+
+      <section className="panel" aria-label="Phase 7 management insights">
+        <h3>Management Insights</h3>
+        <p className="small">Derived from existing posted financial figures. These indicators are informational, not forecasts or additional accounting entries.</p>
+        {!loaded ? <p>Loading management insights…</p> : backendError ? <p>Insights unavailable while financial data is unavailable.</p> : (
+          <div className="grid dashboard-grid">
+            {managementInsights.map((item) => (
+              <div className="card" key={item.key}>
+                <div className="label">{item.label}</div>
+                <div className="value">{item.value === null ? "N/A" : item.unit === "percent" ? item.value.toFixed(2) + "%" : money(item.value)}</div>
+                <p className="small">{item.explanation}</p>
+                {item.status === "warning" && <strong role="status">Review required</strong>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div>
         <section className="panel">
