@@ -1,3 +1,4 @@
+import { calculateBudgetActuals, summarizeCostCenters } from "@/lib/reporting/budget-performance";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { env } from "@/lib/env";
@@ -41,37 +42,24 @@ export async function GET() {
         prisma.journalHeader.findMany({ where: { status: "POSTED" } }),
         prisma.journalLine.findMany({ include: { journal: true } }),
       ]);
-      const postingDate = new Map(headers.map((row) => [row.id, row.date]));
-      const calculated = budgets.map((budget) => {
-        const period = budget.periodValue || budget.period.toUpperCase();
-        const actual = lines
-          .filter((line) => line.accountId === budget.accountId && (!budget.projectId || line.projectId === budget.projectId))
-          .filter((line) => {
-            const date = postingDate.get(line.journalId);
-            if (!date || date.getUTCFullYear() !== budget.fiscalYear) return false;
-            return period === "ANNUAL" || period === "YEARLY" || period === `${budget.fiscalYear}` || date.toISOString().startsWith(period);
-          })
-          .reduce((sum, line) => {
-            const type = accounts.find((account) => account.id === line.accountId)?.type;
-            return sum + (["Income", "Liability", "Equity"].includes(type || "") ? Number(line.credit) - Number(line.debit) : Number(line.debit) - Number(line.credit));
-          }, 0);
-        const budgetAmount = Number(budget.budgetAmount);
-        return {
-          budgetId: budget.code,
-          financialYear: String(budget.fiscalYear),
-          period,
-          accountId: budget.accountId || "",
-          projectId: budget.projectId || "",
-          budgetAmount,
-          actualAmount: round2(actual),
-          variance: round2(budgetAmount - actual),
-        };
-      });
+      const posted = new Set(headers.map(row => row.id));
+      const journalDates = new Map(headers.map(row => [row.id, new Intl.DateTimeFormat("en-CA", { timeZone: "Pacific/Port_Moresby", year: "numeric", month: "2-digit", day: "2-digit" }).format(row.date)]));
+      const postedLines = lines.filter(line => posted.has(line.journalId)).map(line => ({
+        accountId: line.accountId, projectId: line.projectId || "", costCenter: line.costCenter || "",
+        date: journalDates.get(line.journalId) || "", debit: Number(line.debit), credit: Number(line.credit),
+      }));
+      const accountTypes = accounts.map(row => ({ accountId: row.id, accountType: row.type }));
+      const calculated = calculateBudgetActuals(budgets.map(budget => ({
+        budgetId: budget.code, financialYear: String(budget.fiscalYear),
+        period: budget.periodValue || budget.period.toUpperCase(),
+        accountId: budget.accountId || "", projectId: budget.projectId || "",
+        budgetAmount: Number(budget.budgetAmount),
+      })), postedLines, accountTypes);
+      const years = [...new Set(budgets.map(row => String(row.fiscalYear)))];
       return NextResponse.json({
-        ok: true,
-        source: "prisma",
-        budgets: calculated,
-        accounts: accounts.map((row) => ({ accountId: row.id, accountCode: row.code, accountName: row.name })),
+        ok: true, source: "prisma", budgets: calculated,
+        costCenters: Object.fromEntries(years.map(year => [year, summarizeCostCenters(postedLines, accountTypes, year)])),
+        accounts: accounts.map(row => ({ accountId: row.id, accountCode: row.code, accountName: row.name })),
       });
     }
     const [budgets, accounts, headers, lines] = await Promise.all([

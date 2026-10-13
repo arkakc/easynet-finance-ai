@@ -11,6 +11,8 @@ type Budget = {
   budgetAmount: number | string;
   actualAmount: number | string;
   variance: number | string;
+  utilizationPercent?: number | null;
+  overspent?: boolean;
 };
 
 type Account = {
@@ -31,6 +33,9 @@ export default function BudgetsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [message, setMessage] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [costCenters, setCostCenters] = useState<Record<string, { costCenter: string; actualAmount: number }[]>>({});
 
   async function load() {
     try {
@@ -41,6 +46,7 @@ export default function BudgetsPage() {
       if (!b.ok) throw new Error(b.error || "Budget load failed");
       if (!m.ok) throw new Error(m.error || "Project load failed");
       setBudgets(b.budgets || []);
+      setCostCenters(b.costCenters || {});
       setAccounts(b.accounts || []);
       setProjects(m.projects || []);
     } catch (e) {
@@ -71,8 +77,10 @@ export default function BudgetsPage() {
     }
   }
 
-  const totalBudget = budgets.reduce((sum, b) => sum + Number(b.budgetAmount || 0), 0);
-  const totalActual = budgets.reduce((sum, b) => sum + Number(b.actualAmount || 0), 0);
+  const filtered = budgets.filter(b => (!yearFilter || b.financialYear === yearFilter) && (!projectFilter || b.projectId === projectFilter));
+  const years = [...new Set(budgets.map(b => b.financialYear))].sort().reverse();
+  const totalBudget = filtered.reduce((sum, b) => sum + Number(b.budgetAmount || 0), 0);
+  const totalActual = filtered.reduce((sum, b) => sum + Number(b.actualAmount || 0), 0);
   const totalVariance = totalBudget - totalActual;
 
   return (
@@ -98,10 +106,16 @@ export default function BudgetsPage() {
         </div>
       </div>
 
+      <section className="panel">
+        <h3>Reporting Filters</h3>
+        <label>Financial year <select value={yearFilter} onChange={e => setYearFilter(e.target.value)}><option value="">All years</option>{years.map(y => <option key={y} value={y}>{y}</option>)}</select></label>
+        <label>Project <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}><option value="">All projects</option>{projects.map(p => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}</select></label>
+        <p className="small">Actuals reflect posted GL only. Company-wide allocation excludes project-specific entries.</p>
+      </section>
       <div className="grid">
         <div className="card">
           <div className="label">Active Budgets</div>
-          <div className="value">{budgets.length}</div>
+          <div className="value">{filtered.length}</div>
         </div>
         <div className="card">
           <div className="label">Total Budget Amount</div>
@@ -187,10 +201,10 @@ export default function BudgetsPage() {
             </tr>
           </thead>
           <tbody>
-            {budgets.map((row) => {
+            {filtered.map((row) => {
               const budget = Number(row.budgetAmount || 0);
               const actual = Number(row.actualAmount || 0);
-              const utilisation = budget ? (actual / budget) * 100 : 0;
+              const utilisation = row.utilizationPercent ?? (budget ? (actual / budget) * 100 : null);
               return (
                 <tr key={row.budgetId}>
                   <td>
@@ -208,18 +222,26 @@ export default function BudgetsPage() {
                     </strong>
                   </td>
                   <td>
-                    <span className="auto-badge">{utilisation.toFixed(1)}%</span>
+                    <span className="auto-badge">{utilisation === null ? "N/A" : `${utilisation.toFixed(1)}%`}</span>
+                    {row.overspent && <strong style={{ color: "#dc2626" }}> Over budget</strong>}
                   </td>
                 </tr>
               );
             })}
-            {!budgets.length && (
+            {!filtered.length && (
               <tr>
                 <td colSpan={9}>No budgets created yet.</td>
               </tr>
             )}
           </tbody>
         </table>
+      </section>
+      <section className="panel table-wrap">
+        <h3>Cost Centre Posted Expenses</h3>
+        <p className="small">Cost centre actuals use posted expense accounts. The existing budget schema has no cost-centre allocation field, so these are not cost-centre budget variances.</p>
+        {yearFilter ? <table className="data-table"><thead><tr><th>Cost centre</th><th>Actual expenses (PGK)</th></tr></thead>
+          <tbody>{(costCenters[yearFilter] || []).map(c => <tr key={c.costCenter}><td>{c.costCenter}</td><td>{money(c.actualAmount)}</td></tr>)}
+          {!(costCenters[yearFilter] || []).length && <tr><td colSpan={2}>No posted cost-centre expenses for this year.</td></tr>}</tbody></table> : <p>Select a year to see cost-centre expenses.</p>}
       </section>
     </>
   );
