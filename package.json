@@ -22,6 +22,8 @@
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
     "db:uat:deep-audit": "tsx scripts/database/finance-uat-deep-audit.ts",
     "db:uat:close-controls": "tsx scripts/database/finance-close-controls.ts",
+    "db:phase6:release-readiness": "tsx scripts/database/phase6-release-readiness.ts",
+    "db:phase6:verify-isolated": "tsx scripts/database/verify-phase6-conversion-claims.ts",
     "db:uat:po-diagnose": "tsx scripts/database/diagnose-po-commitment.ts",
     "db:reconcile:control-preview": "tsx scripts/database/reclassify-historical-control-accounts.ts",
     "db:reconcile:control-apply": "tsx scripts/database/reclassify-historical-control-accounts.ts --apply",
