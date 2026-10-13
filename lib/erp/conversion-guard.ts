@@ -25,9 +25,10 @@ export async function withConversionGuard<T>(kind: string, sourceId: string, exe
     await prisma.approvalRequest.update({ where: { id: lock.id }, data: { status: "APPROVED", approvedAt: new Date() } });
     return result;
   } catch (error) {
-    // Release only our own lock. A partial downstream write may have happened;
-    // every caller MUST recheck the target before creating it on retry.
-    await prisma.approvalRequest.delete({ where: { id: lock.id } }).catch(() => undefined);
+    // A downstream write may have partially succeeded. Keep the unique claim
+    // until an operator reconciles the source/target pair. Never automatically
+    // release it and risk creating another financially significant document.
+    await prisma.approvalRequest.update({ where: { id: lock.id }, data: { status: "IN_REVIEW", approverComment: "Conversion failed or downstream outcome uncertain; reconcile before retrying." } }).catch(() => undefined);
     throw error;
   }
 }
