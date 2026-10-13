@@ -10,6 +10,10 @@ type Evidence = {
 export default function DocumentEvidencePanels({ type, id }: { type: string; id: string }) {
   const [data, setData] = useState<Evidence | null>(null);
   const [error, setError] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     setData(null);
@@ -22,15 +26,33 @@ export default function DocumentEvidencePanels({ type, id }: { type: string; id:
       setData({ attachments: body.attachments || [], events: body.events || [] });
     }).catch(err => { if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Evidence unavailable"); });
     return () => controller.abort();
-  }, [type, id]);
+  }, [type, id, refresh]);
+  async function upload() {
+    if (!file || uploading) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const body = new FormData();
+      body.set("type", type); body.set("id", id); body.set("file", file);
+      const response = await fetch("/api/erp/document-evidence/file", { method: "POST", body });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "Upload failed");
+      setFile(null);
+      setRefresh(n => n + 1);
+    } catch (error) { setUploadError(error instanceof Error ? error.message : "Upload failed"); }
+    finally { setUploading(false); }
+  }
   return <>
     <section id="document-attachments" className="panel" aria-label="Document attachments">
       <h2>Attachments</h2>
       {error ? <p className="small" role="status">{error}</p> : !data ? <p className="small">Loading attachment records…</p> :
-        data.attachments.length ? <ul>{data.attachments.map(file => <li key={file.id}>
-          <strong>{file.name}</strong> <span className="small">({file.code}, {file.status})</span>
+        data.attachments.length ? <ul>{data.attachments.map(item => <li key={item.id}>
+          <strong>{item.name}</strong> <span className="small">({item.code}, {item.status})</span>
+          <span> · <a href={`/api/erp/document-evidence/file?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&attachmentId=${encodeURIComponent(item.id)}&preview=1`} target="_blank" rel="noopener noreferrer">Preview</a> · <a href={`/api/erp/document-evidence/file?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&attachmentId=${encodeURIComponent(item.id)}`}>Download</a></span>
         </li>)}</ul> : <p className="small">No linked attachment records found.</p>}
-      <p className="small">Metadata only. Attachment viewing and upload remain governed by the existing Documents module.</p>
+      <div className="button-row no-print" style={{ flexWrap: "wrap" }}><input aria-label="Choose evidence attachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={event => setFile(event.target.files?.[0] || null)} /><button type="button" disabled={!file || uploading} onClick={() => void upload()}>{uploading ? "Uploading…" : "Upload Evidence"}</button></div>
+      {uploadError && <p role="alert" className="small">{uploadError}</p>}
+      <p className="small">PDF or image, maximum 10 MB. Private local storage is intended for local deployment; durable production storage requires separate configuration.</p>
     </section>
     <section id="document-activity" className="panel" aria-label="Document audit activity">
       <h2>Activity & Audit</h2>
