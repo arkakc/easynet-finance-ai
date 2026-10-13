@@ -22,6 +22,10 @@ async function access(type: string, write = false) {
 function validId(id: string) { return id.length > 0 && id.length <= 180; }
 
 export async function POST(req: NextRequest) {
+  const origin = req.headers.get("origin");
+  if (!origin || origin !== req.nextUrl.origin) return NextResponse.json({ ok: false, error: "Cross-origin upload blocked" }, { status: 403 });
+  const length = Number(req.headers.get("content-length") || 0);
+  if (length > 11 * 1024 * 1024) return NextResponse.json({ ok: false, error: "Upload limit exceeded" }, { status: 413 });
   const form = await req.formData();
   const type = String(form.get("type") || "");
   const id = String(form.get("id") || "").trim();
@@ -40,6 +44,11 @@ export async function POST(req: NextRequest) {
       documentType: auth.selected.documentTypes[0], createdBy: auth.user.userId,
       fileUrl: saved.location, fileSize: saved.size, mimeType: saved.mime,
     }, select: { id: true, code: true } });
+    await prisma.auditLog.create({ data: {
+      action: "ATTACH", entityType: auth.selected.table === "PurchaseOrders" ? "PurchaseOrder" : auth.selected.table.slice(0, -1),
+      entityId: id, description: `Uploaded evidence ${result.code}`,
+      actorEmail: auth.user.email, userId: auth.user.userId, outcome: "SUCCESS",
+    } });
     return NextResponse.json({ ok: true, attachment: result }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Evidence upload failed" }, { status: 400 });
