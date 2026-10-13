@@ -416,7 +416,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const showLegacyPrevious=Boolean(previous)&&documentLinks.length===0;
 
   return <div className="document-page">
-    <DocumentActionBar back={<>
+    <DocumentActionBar status={String(publicStatus)} back={<>
 
         {paymentSourceBack
           ? <Link prefetch={false} href={paymentSourceBack.href}>← Back to {paymentSourceBack.label}</Link>
@@ -536,6 +536,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             Invoice Settlement
           </button>
         )}
+        {record && rowStatus === "DRAFT" && !String(record.journalId || "").trim() && (
         <button
           type="button"
           disabled={deleteBusy}
@@ -550,12 +551,15 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         >
           {deleteBusy ? "Deleting…" : "Delete"}
         </button>
+        )}
         <PrintButton />
     </DocumentActionBar>
     {record && <DocumentSectionTabs tabs={[
       { id: "details", label: "Details", href: "#document-details" },
       ...(type !== "expense" ? [{ id: "workflow", label: "Document Flow", href: "#document-workflow" }] : []),
+      ...(documentLinks.length || previous ? [{ id: "related", label: "Related Documents", href: "#document-related" }] : []),
       ...(record.journalId ? [{ id: "accounting", label: "Accounting", href: `/journals/${encodeURIComponent(String(record.journalId))}`, external: true }] : []),
+      ...(record.createdAt || record.updatedAt ? [{ id: "history", label: "History", href: "#document-history" }] : []),
       { id: "actions", label: "Actions", href: "#document-actions" },
     ]} />}
     <section className="document-sheet" id="document-details">
@@ -636,6 +640,22 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </>:null}
     </section>
 
+    {record && (documentLinks.length > 0 || previous) && (
+      <section className="panel" id="document-related" aria-label="Related documents">
+        <h2>Related Documents</h2>
+        <p className="small">Linked source documents from the current record. Full relationship explorer shows the complete chain.</p>
+        {previous && <p><strong>{previous.label}:</strong> <Link prefetch={false} href={href(previous.type, previous.id)}>{previous.number}</Link></p>}
+        <p><Link prefetch={false} href={explorerHref}>Open Document Relationship Explorer</Link></p>
+      </section>
+    )}
+    {record && (record.createdAt || record.updatedAt) && (
+      <section className="panel" id="document-history" aria-label="Document timestamps">
+        <h2>History</h2>
+        <p className="small">Available record timestamps only. This is not a complete approval or audit event history.</p>
+        {record.createdAt && <p>Created: <time>{String(record.createdAt)}</time></p>}
+        {record.updatedAt && <p>Last updated: <time>{String(record.updatedAt)}</time></p>}
+      </section>
+    )}
     <div id="document-actions" />
     {record&&<>
       {isSalesOrder&&salesOrderSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="order" sourceQuoteId={salesOrderSourceQuoteId} customerId={String(record.customerId||"")} quoteTotal={n(record.totalAmount)}/>}
