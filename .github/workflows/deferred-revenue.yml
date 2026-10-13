@@ -27,6 +27,11 @@ on:
       - "app/components/sales-invoice-cycle.tsx"
       - "app/components/delivery-note-client.tsx"
       - "app/globals.css"
+      - "app/layout.tsx"
+      - "app/workspace/**"
+      - "app/components/unified-module-workspace.tsx"
+      - "lib/workspaces/**"
+      - "tests/workspaces/**"
       - "app/components/dashboard-client.tsx"
       - "app/api/dashboard-data/route.ts"
       - "lib/accounting/purchase-commitments.ts"
@@ -60,4 +65,5 @@ jobs:
       - run: npx tsx --test tests/accounting/settlement-control-account.test.ts
       - run: npx tsx --test tests/accounting/sales-order-reservations.test.ts
       - run: npx tsx --test tests/accounting/purchase-commitments.test.ts
+      - run: npx tsx --test tests/workspaces/module-workspaces.test.ts
       - run: npm run typecheck

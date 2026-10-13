@@ -24,6 +24,7 @@ const groups: readonly NavGroup[] = [
     label: "Dashboard",
     icon: "📊",
     links: [
+      ["Home Workspace", "/workspace/home", "dashboard.read"],
       ["Management Dashboard", "/dashboard", "dashboard.read"],
       ["Control Centre", "/controls", "dashboard.read"],
       ["Approvals", "/approvals", "post.approve"],
@@ -33,6 +34,7 @@ const groups: readonly NavGroup[] = [
     label: "Sales",
     icon: "💼",
     links: [
+      ["Sales Workspace", "/workspace/sales", "sales.read"],
       ["Sales Transactions", "/transactions?module=sales", "sales.read"],
       ["Customers", "/customers", "sales.read"],
       ["Projects", "/projects/master", "sales.read"],
@@ -44,6 +46,7 @@ const groups: readonly NavGroup[] = [
     label: "Purchase",
     icon: "🛒",
     links: [
+      ["Purchases Workspace", "/workspace/purchases", "purchase.read"],
       ["Purchase Transactions", "/transactions?module=purchase", "purchase.read"],
       ["Suppliers", "/suppliers", "purchase.read"],
       ["Projects", "/projects/master", "purchase.read"],
@@ -54,6 +57,7 @@ const groups: readonly NavGroup[] = [
     label: "Stock & Assets",
     icon: "📦",
     links: [
+      ["Inventory Workspace", "/workspace/inventory", "stock.read"],
       ["Items & Stock", "/stock", "stock.read"],
       ["Warehouse Stock", "/stock/warehouses", "stock.read"],
       ["Fixed Assets", "/assets", "stock.read"],
@@ -63,6 +67,8 @@ const groups: readonly NavGroup[] = [
     label: "Accounts",
     icon: "📑",
     links: [
+      ["Accounting Workspace", "/workspace/accounting", "accounts.read"],
+      ["Banking Workspace", "/workspace/banking", "accounts.read"],
       ["Chart of Accounts", "/accounts", "accounts.read"],
       ["Document Relationship Explorer", "/document-explorer", "dashboard.read"],
       ["Manual Journal Entry", "/manual-journal-entry", "accounts.write"],
@@ -82,12 +88,13 @@ const groups: readonly NavGroup[] = [
   {
     label: "Projects",
     icon: "🏗️",
-    links: [["Projects", "/projects", "dashboard.read"]],
+    links: [["Projects Workspace", "/workspace/projects", "dashboard.read"], ["Projects", "/projects", "dashboard.read"]],
   },
   {
     label: "Reports",
     icon: "📈",
     links: [
+      ["Reports Workspace", "/workspace/reports", "reports.read"],
       ["Financial Reports", "/reports", "reports.read"],
       ["General Ledger", "/reports/general-ledger", "reports.read"],
       ["Trial Balance", "/reports/trial-balance", "reports.read"],
