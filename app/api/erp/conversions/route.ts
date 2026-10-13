@@ -1,4 +1,5 @@
 import { withConversionGuard } from "@/lib/erp/conversion-guard";
+import { assertSuccessfulConversionResponse } from "@/lib/erp/conversion-response";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { requirePermission } from "@/lib/auth";
@@ -120,8 +121,7 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: body.action, payload, secret: env.APP_SECRET }),
     }));
-    const resultBody = await conversionResponse.clone().json().catch(() => null) as { ok?: boolean; error?: string } | null;
-    if (!conversionResponse.ok || resultBody?.ok !== true) throw new Error(resultBody?.error || "Controlled conversion outcome uncertain; reconcile linked documents before retrying.");
+    await assertSuccessfulConversionResponse(conversionResponse);
     return conversionResponse;
     });
   } catch (error) {
