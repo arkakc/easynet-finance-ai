@@ -81,6 +81,11 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         {!visible.length && <p className="unified-workspace-empty">No matching registers. Try another search or category.</p>}
       </div>
     </section>
+    {(workspace.id === "sales" || workspace.id === "purchases") && <div className="unified-workspace-summary" aria-label="Recent transaction summary">
+      <div><span>Recent Documents</span><strong>{recentDocuments.length}</strong></div>
+      <div><span>Document Types</span><strong>{registerKinds.length - 1}</strong></div>
+      <div><span>Statuses Found</span><strong>{registerStatuses.length - 1}</strong></div>
+    </div>}
     {(workspace.id === "sales" || workspace.id === "purchases") && <section className="panel unified-workspace-content unified-workspace-recent" aria-label="Recent business documents">
       <div className="unified-workspace-section-head">
         <div><h2>Recent Documents</h2><p className="small">Read-only preview of up to 40 recent records. Use the register above for full history, approval and posting.</p></div>
