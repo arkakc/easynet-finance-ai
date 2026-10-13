@@ -34,8 +34,7 @@ function hrefIsActive(href: string, pathname: string, searchParams: URLSearchPar
 export default function CollapsibleSidebarNav({ groups, compact = false }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const [touched, setTouched] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(groups.filter(group=>group.links.some(link=>hrefIsActive(link.href,pathname,searchParams))).map(group=>group.label)));
   const autoCollapseTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
@@ -65,7 +64,6 @@ export default function CollapsibleSidebarNav({ groups, compact = false }: Props
   }, []);
 
   const toggle = (label: string) => {
-    setTouched(true);
     if (compact) return;
     setExpanded((current) => {
       const next = new Set(current);
@@ -86,7 +84,7 @@ export default function CollapsibleSidebarNav({ groups, compact = false }: Props
   return <nav>
     {groups.map((group) => {
       const isCurrent = group.links.some(link => hrefIsActive(link.href, pathname, searchParams));
-      const isCollapsed = compact || (!expanded.has(group.label) && (touched || !isCurrent));
+      const isCollapsed = compact || !expanded.has(group.label);
       const Icon = menuIcons[group.label] || Package;
       return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"} ${isCurrent ? "current" : ""} ${compact ? "nav-section-compact" : ""}`} key={group.label} title={compact ? group.label : undefined}>
         <button type="button" className="nav-label" onClick={() => toggle(group.label)} aria-expanded={!isCollapsed} aria-controls={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`} aria-label={compact ? group.label : undefined}>
