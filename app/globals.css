@@ -1321,6 +1321,11 @@ label:has(textarea[required])::after,
 .ef-signin-input:focus-within{border-color:#1764bb;box-shadow:0 0 0 3px rgba(23,100,187,.13)}
 .ef-signin-input input{border:0;background:transparent;outline:0;min-width:0;flex:1;color:#172b48;font:inherit;font-size:13px;height:100%}
 .ef-signin-input input::placeholder{color:#9aa7b8}
+.ef-signin-input input:-webkit-autofill,
+.ef-signin-input input:-webkit-autofill:hover,
+.ef-signin-input input:-webkit-autofill:focus,
+.ef-signin-input input:-webkit-autofill:active{-webkit-box-shadow:0 0 0 1000px #fff inset!important;box-shadow:0 0 0 1000px #fff inset!important;-webkit-text-fill-color:#172b48!important;caret-color:#172b48;transition:background-color 9999s ease-out 0s}
+.ef-signin-input input:autofill{background-color:#fff!important;color:#172b48!important}
 .ef-signin-reveal{display:grid;place-items:center;border:0;background:transparent;color:#60738d;cursor:pointer;padding:5px}
 .ef-signin-submit{display:flex;align-items:center;justify-content:center;gap:9px;background:#0858b9;color:white;border:0;border-radius:5px;min-height:43px;font-size:13px;font-weight:700;cursor:pointer;margin-top:13px;transition:background .15s}
 .ef-signin-submit:hover:not(:disabled){background:#084795}
