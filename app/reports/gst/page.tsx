@@ -78,6 +78,16 @@ export default async function GstReportPage() {
   const inputGst = gstLines.filter((line) => line.accountId === "ACC-2122").reduce((sum, line) => sum + n(line.debit) - n(line.credit), 0);
   const outputGst = gstLines.filter((line) => line.accountId === "ACC-2121").reduce((sum, line) => sum + n(line.credit) - n(line.debit), 0);
   const netPayable = outputGst - inputGst;
+  const gstByMonth = new Map<string, { output: number; input: number }>();
+  for (const line of gstLines) {
+    const month = String(header.get(String(line.journalId))?.postingDate || "").slice(0, 7);
+    if (!/^\\d{4}-\\d{2}$/.test(month)) continue;
+    const current = gstByMonth.get(month) || { output: 0, input: 0 };
+    if (line.accountId === "ACC-2121") current.output += n(line.credit) - n(line.debit);
+    if (line.accountId === "ACC-2122") current.input += n(line.debit) - n(line.credit);
+    gstByMonth.set(month, current);
+  }
+  const monthlyGst = [...gstByMonth].sort((a, b) => b[0].localeCompare(a[0]));
 
   return (
     <>
@@ -101,6 +111,15 @@ export default async function GstReportPage() {
         </div>
       </div>
 
+      <section className="panel table-wrap">
+        <h3>Monthly Posted GST Movement</h3>
+        <p className="small">Monthly output and input GST control account movements from posted journals only. This management breakdown is not the IRC GST-01 filing. Source tax documents and eligibility must be reviewed separately.</p>
+        <p><Link href="/reports">Financial Statements</Link></p>
+        <table className="data-table"><thead><tr><th>Month</th><th>Output GST</th><th>Input GST</th><th>Net movement</th></tr></thead><tbody>
+          {monthlyGst.map(([month, value]) => <tr key={month}><td>{month}</td><td>{money(value.output)}</td><td>{money(value.input)}</td><td>{money(value.output - value.input)}</td></tr>)}
+          {!monthlyGst.length && <tr><td colSpan={4}>No posted GST control movements.</td></tr>}
+        </tbody></table>
+      </section>
       <div className="grid">
         <div className="card"><div className="label">GST Control Status</div><div className="value small-value">{status}</div></div>
         <div className="card"><div className="label">Output GST</div><div className="value">{money(outputGst)}</div></div>
