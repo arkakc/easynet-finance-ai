@@ -15,14 +15,14 @@ const formatted = (value: unknown, currency: string) => {
 };
 export default function DocumentFinancialPanels({ record }: { record: FinRecord }) {
   const currency = String(record.currency || "PGK");
-  const settlement: Array<[string, unknown]> = [
+  const settlement = ([
     ["Total", record.totalAmount ?? record.amount],
     ["Paid", record.paidAmount],
     ["Outstanding", record.outstandingAmount],
     ["Allocated", record.allocatedAmount],
     ["Unallocated", record.unallocatedAmount],
-  ].filter(([, value]) => isPresent(value));
-  const tax: Array<[string, unknown]> = [["Net", record.netAmount], ["GST", record.gstAmount]].filter(([, value]) => isPresent(value));
+  ] satisfies Array<[string, unknown]>).filter(([, value]) => isPresent(value));
+  const tax = ([["Net", record.netAmount], ["GST", record.gstAmount]] satisfies Array<[string, unknown]>).filter(([, value]) => isPresent(value));
   const journalId = String(record.journalId || "").trim();
   return <>
     <section className="panel phase3-document-panel" id="document-settlement" aria-label="Settlement overview">
