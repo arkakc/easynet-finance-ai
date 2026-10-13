@@ -3,6 +3,7 @@
 import Link from "next/link";
 import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import DocumentIdentityHeader from "@/app/components/document-identity-header";
+import DocumentCrossModuleLinks from "@/app/components/document-cross-module-links";
 import { useEffect, useState } from "react";
 
 type Warehouse={warehouseId:string;warehouseCode:string;warehouseName:string;isDefault?:boolean};
@@ -126,6 +127,7 @@ export default function PurchaseReceiptClient({id}:{id:string}){
         )}
       </div>
     </div>
+    <DocumentCrossModuleLinks type="purchaseOrder" documentId={String(receipt.receiptNumber || id)} record={{ journalId: receipt.journalId, sourceDocumentId: receipt.purchaseOrderId }} links={receipt.purchaseOrderId ? [{ id: String(receipt.purchaseOrderId), number: String(receipt.purchaseOrderId), type: "purchaseOrder", href: "/transactions/purchaseOrder/" + encodeURIComponent(String(receipt.purchaseOrderId)), direction: "previous", stage: 20 }] : []} />
     <section className="document-sheet">
       <DocumentIdentityHeader title="Purchase Receipt / GRN" number={String(receipt.receiptNumber || "")} status={submitted ? "SUBMITTED" : status} journalId={receipt.journalId ? String(receipt.journalId) : null} />
 
