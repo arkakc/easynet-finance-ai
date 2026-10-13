@@ -17,6 +17,7 @@
     "db:backup:install-daily": "powershell -ExecutionPolicy Bypass -File scripts/database/install-windows-backup-task.ps1",
     "db:backup:remove-daily": "powershell -ExecutionPolicy Bypass -File scripts/database/remove-windows-backup-task.ps1",
     "db:restore": "tsx scripts/database/restore.ts",
+    "db:restore:verify-isolated": "tsx scripts/database/verify-isolated-sqlite-restore.ts",
     "db:reconcile:snapshot": "tsx scripts/database/reconciliation-snapshot.ts",
     "db:sequence:preview": "tsx scripts/database/repair-empty-document-series.ts",
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
