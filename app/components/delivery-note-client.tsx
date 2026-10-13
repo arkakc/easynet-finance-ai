@@ -114,7 +114,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
         )}
       </div>
     </div>
-    <DocumentCrossModuleLinks type="quote" documentId={String(note.deliveryNumber || id)} record={{ journalId: note.journalId, sourceDocumentId: note.salesOrderId }} links={[]} />
+    <DocumentCrossModuleLinks type="quote" documentId={String(note.deliveryNumber || id)} record={{ journalId: note.journalId, sourceDocumentId: note.salesOrderId }} links={note.salesOrderId ? [{ id: String(note.salesOrderId), number: String(note.salesOrderId), type: "quote", href: "/transactions/quote/" + encodeURIComponent(String(note.salesOrderId)), direction: "previous", stage: 20 }] : []} />
     <section className="document-sheet">
       <DocumentIdentityHeader title="Delivery Note / Stock Out" number={String(note.deliveryNumber || "")} status={status} journalId={note.journalId ? String(note.journalId) : null} />
 
