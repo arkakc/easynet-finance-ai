@@ -38,7 +38,7 @@ async function main() {
     };
     const sourceId = "ISOLATED-PO-1";
     let writes = 0;
-    const run = () => executeWithConversionClaim(store, "purchaseOrderToBill", sourceId, async () => {
+    const run = () => executeWithConversionClaim(store as never, "purchaseOrderToBill", sourceId, async () => {
       writes++;
       await new Promise(resolve => setTimeout(resolve, 30));
       return "created";
