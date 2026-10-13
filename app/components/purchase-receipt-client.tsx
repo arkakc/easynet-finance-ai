@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import LinkedDocumentReference from "@/app/components/linked-document-reference";
+import DocumentIdentityHeader from "@/app/components/document-identity-header";
 import { useEffect, useState } from "react";
 
 type Warehouse={warehouseId:string;warehouseCode:string;warehouseName:string;isDefault?:boolean};
@@ -126,17 +127,7 @@ export default function PurchaseReceiptClient({id}:{id:string}){
       </div>
     </div>
     <section className="document-sheet">
-      <header className="document-header">
-        <div className="document-header-main">
-          <div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div>
-          <h1>Purchase Receipt / GRN</h1>
-          <div className="document-header-subline"><span className="document-number">{receipt.receiptNumber}</span><span className="document-type-note">Finance document</span></div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          {receipt.journalId&&<Link className="button-link secondary-link no-print" href={"/journals/"+encodeURIComponent(receipt.journalId)}>Journal Entry · {receipt.journalId}</Link>}
-          <div className={"status-pill status-"+(submitted?"submitted":status.toLowerCase())}>{submitted?"SUBMITTED":status}</div>
-        </div>
-      </header>
+      <DocumentIdentityHeader title="Purchase Receipt / GRN" number={String(receipt.receiptNumber || "")} status={submitted ? "SUBMITTED" : status} journalId={receipt.journalId ? String(receipt.journalId) : null} />
 
       <section className="document-flow-tabs no-print">
         <div className="document-flow-tabs-head"><div><span className="document-section-kicker">Workflow</span><strong>Document Flow</strong></div><Link className="document-flow-explorer-link" href={"/document-explorer?documentId="+encodeURIComponent(receipt.receiptNumber)}>View Full Relationship</Link></div>
