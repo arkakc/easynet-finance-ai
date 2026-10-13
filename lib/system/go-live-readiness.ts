@@ -87,6 +87,15 @@ export async function buildGoLiveReadiness() {
     { key: "payroll", label: "Payroll journals linked to payroll register", blocking: true, passed: orphanPayroll.length === 0, detail: orphanPayroll.length ? `${orphanPayroll.length} orphan payroll journal(s): ${orphanPayroll.map((row) => row.code).join(", ")}` : "All payroll journals are registered" },
     { key: "sources", label: "Active source documents retained", blocking: true, passed: missingSources === 0, detail: missingSources ? `${missingSources} active document(s) have no retained binary` : "All active sources retained" },
     await postgresReadinessCheck(),
+    {
+      key: "multi-instance",
+      label: "Independent PostgreSQL multi-instance contention test verified",
+      blocking: true,
+      passed: databaseRuntimeInfo().provider !== "postgresql"
+        ? !databaseRuntimeInfo().productionLike && process.env.GO_LIVE_REQUIRE_POSTGRES !== "true"
+        : productionEvidenceChecks({ verifiedAt: process.env.POSTGRES_MULTI_INSTANCE_VERIFIED_AT }).backupFresh,
+      detail: "Run db:phase6:verify-postgres against a separate, disposable PostgreSQL QA database using two independent Prisma clients. Record verified execution evidence (POSTGRES_MULTI_INSTANCE_VERIFIED_AT) only after real PASS; timestamps are operator attestations.",
+    },
     { key: "session", label: "Application session secret configured", blocking: true, passed: Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32), detail: process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32 ? "Secret present" : "SESSION_SECRET must be at least 32 characters" },
     { key: "auth", label: "NextAuth secret configured", blocking: true, passed: Boolean(process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32), detail: process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32 ? "Secret present" : "AUTH_SECRET must be at least 32 characters" },
     { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: true, detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
