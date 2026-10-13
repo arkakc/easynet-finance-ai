@@ -5,6 +5,8 @@ import LinkedDocumentReference from "@/app/components/linked-document-reference"
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PrintButton from "@/app/components/print-button";
 import DocumentIdentityHeader from "@/app/components/document-identity-header";
+import DocumentActionBar from "@/app/components/document-action-bar";
+import DocumentSectionTabs from "@/app/components/document-section-tabs";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -414,25 +416,18 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
   const showLegacyPrevious=Boolean(previous)&&documentLinks.length===0;
 
   return <div className="document-page">
-    <div className="document-toolbar no-print">
-      <div className="document-toolbar-back">
+    <DocumentActionBar back={<>
+
         {paymentSourceBack
           ? <Link prefetch={false} href={paymentSourceBack.href}>← Back to {paymentSourceBack.label}</Link>
           : <Link prefetch={false} href={backHref}>← Back to {backLabel}</Link>}
         {paymentSourceBack&&<Link prefetch={false} className="document-toolbar-secondary-back" href={backHref}>Back to {backLabel} list</Link>}
-      </div>
-      <div className="row-actions">
-        {error && (
+      </>} notice={error ? (
           <details className="system-notice-tab">
-            <summary>
-              <span>ℹ️ System Notice</span>
-              <span className="notice-arrow">▾</span>
-            </summary>
-            <div className="system-notice-dropdown">
-              <strong>Document unavailable:</strong> {error}
-            </div>
+            <summary><span>ℹ️ System Notice</span><span className="notice-arrow">▾</span></summary>
+            <div className="system-notice-dropdown"><strong>Document unavailable:</strong> {error}</div>
           </details>
-        )}
+        ) : null}>
         {record && rowStatus === "DRAFT" && (
           <DocumentWorkflowActions
             recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"}
@@ -556,9 +551,14 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
           {deleteBusy ? "Deleting…" : "Delete"}
         </button>
         <PrintButton />
-      </div>
-    </div>
-    <section className="document-sheet">
+    </DocumentActionBar>
+    {record && <DocumentSectionTabs tabs={[
+      { id: "details", label: "Details", href: "#document-details" },
+      ...(type !== "expense" ? [{ id: "workflow", label: "Document Flow", href: "#document-workflow" }] : []),
+      ...(record.journalId ? [{ id: "accounting", label: "Accounting", href: `/journals/${encodeURIComponent(String(record.journalId))}`, external: true }] : []),
+      { id: "actions", label: "Actions", href: "#document-actions" },
+    ]} />}
+    <section className="document-sheet" id="document-details">
       <DocumentIdentityHeader
         title={title}
         number={number}
@@ -567,7 +567,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         journalId={record ? String(record.journalId || "") : ""}
       />
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
-        {type!=="expense"&&<section className="document-flow-tabs no-print">
+        {type!=="expense"&&<section id="document-workflow" className="document-flow-tabs no-print">
           <div className="document-flow-tabs-head">
             <div><span className="document-section-kicker">Workflow</span><strong>Document Flow</strong></div>
             <Link prefetch={false} className="document-flow-explorer-link" href={explorerHref}>View Full Relationship</Link>
@@ -636,6 +636,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </>:null}
     </section>
 
+    <div id="document-actions" />
     {record&&<>
       {isSalesOrder&&salesOrderSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="order" sourceQuoteId={salesOrderSourceQuoteId} customerId={String(record.customerId||"")} quoteTotal={n(record.totalAmount)}/>}
       {realPo&&String(record.supplierId||"")&&<SupplierAdvanceChainSummary context="po" poId={id} supplierId={String(record.supplierId||"")} poTotal={n(record.totalAmount)}/>}
