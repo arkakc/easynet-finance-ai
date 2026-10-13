@@ -1301,344 +1301,45 @@ label:has(textarea[required])::after,
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
-/* =========================================================
-/* =========================================================
-   LOGIN SCREEN (EASYNET FINANCE AI - POWERED BY EASYNET PNG)
-========================================================= */
-.login-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 20px;
-  position: relative;
-  background-color: #f1f5f9;
-  background-image: 
-    radial-gradient(at 15% 15%, rgba(0, 82, 204, 0.08) 0px, transparent 50%),
-    radial-gradient(at 85% 20%, rgba(112, 184, 40, 0.07) 0px, transparent 45%),
-    radial-gradient(at 50% 85%, rgba(0, 101, 255, 0.06) 0px, transparent 55%),
-    linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
-}
-
-.login-card-simple {
-  width: min(460px, 100%);
-  background: #ffffff;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 
-    0 20px 45px -12px rgba(15, 23, 42, 0.1),
-    0 0 0 1px rgba(0, 82, 204, 0.04);
-  padding: 38px 34px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  position: relative;
-  z-index: 2;
-}
-
-.login-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 10px;
-}
-
-.login-logo-link {
-  display: inline-block;
-  transition: transform 0.2s ease;
-}
-
-.login-logo-link:hover {
-  transform: scale(1.02);
-}
-
-.login-logo-img {
-  width: 220px;
-  height: auto;
-  object-fit: contain;
-  margin-bottom: 2px;
-}
-
-.login-title {
-  margin: 0;
-  font-size: 23px;
-  font-weight: 800;
-  color: #0f172a;
-  letter-spacing: -0.025em;
-}
-
-.login-powered {
-  margin: 0;
-  font-size: 13px;
-  color: #64748b;
-}
-
-.login-powered a {
-  color: #0052cc;
-  font-weight: 700;
-  text-decoration: none;
-  transition: color 0.15s;
-}
-
-.login-powered a:hover {
-  color: #0747a6;
-  text-decoration: underline;
-}
-
-/* How to Sign In Guide */
-.login-guide-toggle {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.2s ease;
-}
-
-.login-guide-toggle:hover {
-  border-color: #cbd5e1;
-}
-
-.login-guide-btn {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: none;
-  border: none;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #1e3a5f;
-  cursor: pointer;
-  text-align: left;
-}
-
-.login-guide-btn-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.login-guide-content {
-  padding: 12px 14px 14px;
-  background: #f8fafc;
-  border-top: 1px solid #e2e8f0;
-  font-size: 12px;
-  color: #475569;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.login-guide-steps {
-  margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  line-height: 1.45;
-}
-
-.login-quickfill-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 12px;
-  border-radius: 8px;
-  background: #0052cc;
-  color: #ffffff;
-  font-size: 11.5px;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.login-quickfill-pill:hover {
-  background: #0747a6;
-}
-
-/* Failed Login Error Banner with Shake Animation */
-@keyframes loginShake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-6px); }
-  40%, 80% { transform: translateX(6px); }
-}
-
-.login-error-banner {
-  background: #fff1f2;
-  border: 1px solid #fecdd3;
-  border-left: 4px solid #e11d48;
-  border-radius: 10px;
-  padding: 12px 14px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  animation: loginShake 0.45s ease-in-out;
-}
-
-.login-error-icon {
-  color: #e11d48;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.login-error-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.login-error-title {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: #9f1239;
-}
-
-.login-error-msg {
-  font-size: 12px;
-  color: #be123c;
-  line-height: 1.4;
-}
-
-.login-error-recovery {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #0052cc;
-  text-decoration: underline;
-  cursor: pointer;
-  background: none;
-  border: none;
-  padding: 0;
-  text-align: left;
-  margin-top: 3px;
-}
-
-/* Form Controls */
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.login-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.login-field label {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #334155;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.login-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.login-input-icon {
-  position: absolute;
-  left: 14px;
-  color: #94a3b8;
-  pointer-events: none;
-}
-
-.login-field input {
-  width: 100%;
-  padding: 12px 14px 12px 42px;
-  font-size: 14px;
-  font-family: inherit;
-  color: #0f172a;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  outline: none;
-  transition: all 0.18s ease;
-}
-
-.login-field input:focus {
-  background: #ffffff;
-  border-color: #0052cc;
-  box-shadow: 0 0 0 3px rgba(0, 82, 204, 0.12);
-}
-
-.login-eye-btn {
-  position: absolute;
-  right: 12px;
-  background: none;
-  border: none;
-  color: #94a3b8;
-  cursor: pointer;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: color 0.15s;
-}
-
-.login-eye-btn:hover {
-  color: #334155;
-}
-
-/* Submit Button */
-.login-submit-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  width: 100%;
-  padding: 13px 20px;
-  background: linear-gradient(135deg, #0052cc 0%, #0747a6 100%);
-  color: #ffffff;
-  border: none;
-  border-radius: 11px;
-  font-size: 14.5px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 4px 14px -2px rgba(0, 82, 204, 0.35);
-  transition: all 0.2s ease;
-}
-
-.login-submit-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #0747a6 0%, #003884 100%);
-  box-shadow: 0 6px 18px -2px rgba(0, 82, 204, 0.45);
-  transform: translateY(-1px);
-}
-
-.login-submit-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  transform: none;
-}
-
-/* Footer link requested by user */
-.login-footer-support {
-  font-size: 12.5px;
-  color: #64748b;
-  text-align: center;
-  margin-top: 4px;
-  line-height: 1.5;
-}
-
-.login-footer-support a {
-  color: #0052cc;
-  font-weight: 600;
-  text-decoration: underline;
-  transition: color 0.15s;
-}
-
-.login-footer-support a:hover {
-  color: #0747a6;
-}
+/* Easynet Finance login: standalone enterprise surface (replaces legacy login CSS) */
+.ef-signin{min-height:100dvh;position:relative;display:grid;place-items:center;overflow:hidden;background:#f4f6f9;padding:38px 20px;color:#1c2d43}
+.ef-signin-brand{position:absolute;inset:0;pointer-events:none;overflow:hidden;background:linear-gradient(135deg,#f7f9fc 0%,#f1f5fb 100%)}
+.ef-signin-brand-orbit{position:absolute;display:block;width:min(68vw,980px);height:min(68vw,980px);border-radius:43%;transform:rotate(-28deg)}
+.ef-signin-brand-orbit-one{right:-23%;bottom:-69%;background:linear-gradient(145deg,#0b5ec2,#0b398c);opacity:.98}
+.ef-signin-brand-orbit-two{right:-40%;bottom:-76%;background:linear-gradient(135deg,#1e8ac8,#1264c9);border:85px solid rgba(255,255,255,.09)}
+.ef-signin-content{position:relative;z-index:1;width:min(100%,388px);display:flex;flex-direction:column;align-items:center;gap:18px}
+.ef-signin-logo{display:flex;justify-content:center;align-items:center;width:100%}
+.ef-signin-logo img{width:180px;max-height:88px;object-fit:contain;mix-blend-mode:multiply}
+.ef-signin-panel{width:100%;background:#fff;border:1px solid #dfe5ed;border-radius:10px;box-shadow:0 12px 34px rgba(21,45,80,.09);padding:28px 29px 20px}
+.ef-signin-heading{text-align:center;margin-bottom:24px}
+.ef-signin-eyebrow{font-size:10px;font-weight:800;letter-spacing:.16em;color:#135ab0}
+.ef-signin-heading h1{font-size:20px;margin:8px 0 7px;line-height:1.3;letter-spacing:-.035em;color:#1c2d43}
+.ef-signin-heading p{font-size:12px;color:#697b92;margin:0}
+.ef-signin-form{display:flex;flex-direction:column;gap:8px}
+.ef-signin-form label{font-size:12px;font-weight:650;color:#35455c;margin-top:5px}
+.ef-signin-input{display:flex;align-items:center;gap:9px;height:41px;padding:0 11px;background:#fff;border:1px solid #cbd4df;border-radius:5px;color:#8291a7;transition:border-color .15s,box-shadow .15s}
+.ef-signin-input:focus-within{border-color:#1764bb;box-shadow:0 0 0 3px rgba(23,100,187,.13)}
+.ef-signin-input input{border:0;background:transparent;outline:0;min-width:0;flex:1;color:#172b48;font:inherit;font-size:13px;height:100%}
+.ef-signin-input input::placeholder{color:#9aa7b8}
+.ef-signin-reveal{display:grid;place-items:center;border:0;background:transparent;color:#60738d;cursor:pointer;padding:5px}
+.ef-signin-submit{display:flex;align-items:center;justify-content:center;gap:9px;background:#0858b9;color:white;border:0;border-radius:5px;min-height:43px;font-size:13px;font-weight:700;cursor:pointer;margin-top:13px;transition:background .15s}
+.ef-signin-submit:hover:not(:disabled){background:#084795}
+.ef-signin-submit:disabled{opacity:.7;cursor:wait}
+.ef-signin-assistance{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:16px 0 0;font-size:11px}
+.ef-signin-assistance button{display:flex;align-items:center;gap:5px;border:0;background:transparent;color:#47627f;cursor:pointer;padding:3px 0;font:inherit}
+.ef-signin-assistance a,.ef-signin-panel-footer a{color:#0757b3;text-decoration:none;font-weight:600}
+.ef-signin-assistance a:hover,.ef-signin-panel-footer a:hover{text-decoration:underline}
+.ef-signin-flip{transform:rotate(180deg)}
+.ef-signin-guide{margin-top:10px;background:#f1f6fc;border:1px solid #dfebfa;border-radius:5px;padding:10px;font-size:11px;line-height:1.55;color:#405975}
+.ef-signin-panel-footer{border-top:1px solid #e8edf3;text-align:center;margin-top:19px;padding-top:16px;color:#718198;font-size:11px}
+.ef-signin-copyright{text-align:center;font-size:11px;color:#667790;margin:0}
+.ef-signin-copyright a{color:#1258a9;font-weight:700}
+.ef-signin-alert{display:flex;align-items:flex-start;gap:9px;padding:10px;margin-bottom:14px;color:#a42338;background:#fff3f5;border:1px solid #f2c8d0;border-radius:5px;font-size:12px;line-height:1.5}
+.ef-signin-alert svg{flex-shrink:0}
+.ef-signin-spin{animation:ef-signin-rotate 1s linear infinite}
+@keyframes ef-signin-rotate{to{transform:rotate(360deg)}}
+@media(max-width:600px){.ef-signin{padding:26px 15px}.ef-signin-brand-orbit-one{width:750px;height:750px;right:-590px;bottom:-620px}.ef-signin-brand-orbit-two{display:none}.ef-signin-panel{padding:25px 22px 20px}.ef-signin-content{gap:14px}}
+@media(prefers-reduced-motion:reduce){.ef-signin *{animation:none!important;transition:none!important}}
 
 /* =========================================================
    DOCUMENT VIEWS (INVOICES, BILLS, RECEIPTS, JOURNALS)
