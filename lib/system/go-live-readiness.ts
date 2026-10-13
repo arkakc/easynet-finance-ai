@@ -1,3 +1,4 @@
+import { conversionClaimsReadiness } from "@/lib/system/conversion-release-check";
 import { buildFinancialReconciliationSnapshot } from "@/lib/system/financial-reconciliation";
 import { listDatabaseBackups } from "@/lib/system/database-backup";
 import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
@@ -63,12 +64,14 @@ async function backupReadinessCheck(): Promise<GoLiveCheck> {
 }
 
 export async function buildGoLiveReadiness() {
-  const [snapshot, backupCheck, payrollJournals, payrollRuns, missingSources] = await Promise.all([
+  const [snapshot, backupCheck, payrollJournals, payrollRuns, missingSources, openConversionClaims, totalConversionClaims] = await Promise.all([
     buildFinancialReconciliationSnapshot({ generatedBy: "go-live-readiness" }),
     backupReadinessCheck(),
     prisma.journalHeader.findMany({ where: { status: "POSTED", sourceDocType: "PAYROLL" }, select: { id: true, code: true } }),
     prisma.payrollRun.findMany({ where: { status: { not: "CANCELLED" } }, select: { journalId: true } }),
     prisma.document.count({ where: { status: { not: "ARCHIVED" }, OR: [{ fileUrl: null }, { fileUrl: "" }] } }),
+    prisma.approvalRequest.count({ where: { type: "ERP_CONVERSION_IDEMPOTENCY", status: { in: ["PENDING", "IN_REVIEW"] } } }),
+    prisma.approvalRequest.count({ where: { type: "ERP_CONVERSION_IDEMPOTENCY" } }),
   ]);
 
   const linkedPayrollJournals = new Set(payrollRuns.map((run) => run.journalId).filter(Boolean));
@@ -76,6 +79,7 @@ export async function buildGoLiveReadiness() {
 
   const checks: GoLiveCheck[] = [
     backupCheck,
+    conversionClaimsReadiness(openConversionClaims, totalConversionClaims),
     { key: "ledger", label: "Posted ledger balanced", blocking: true, passed: snapshot.controls.ledgerBalanced, detail: snapshot.controls.ledgerBalanced ? `Debit and credit both K${snapshot.ledger.totalDebit.toFixed(2)}` : `Ledger difference K${Math.abs(snapshot.ledger.difference).toFixed(2)}` },
     { key: "ar", label: "Accounts receivable reconciled", blocking: true, passed: snapshot.receivables.matched, detail: `GL K${snapshot.receivables.glBalance.toFixed(2)} · subledger K${snapshot.receivables.outstanding.toFixed(2)} · difference K${Math.abs(snapshot.receivables.difference).toFixed(2)}` },
     { key: "ap", label: "Accounts payable reconciled", blocking: true, passed: snapshot.payables.matched, detail: `GL K${snapshot.payables.glBalance.toFixed(2)} · subledger K${snapshot.payables.outstanding.toFixed(2)} · difference K${Math.abs(snapshot.payables.difference).toFixed(2)}` },
