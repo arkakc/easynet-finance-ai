@@ -5398,3 +5398,37 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .dashboard-gst-breakdown { margin: 18px 0; }
 .dashboard-gst-breakdown-row { display: flex; justify-content: space-between; align-items: baseline; gap: 18px; padding: 11px 0; border-bottom: 1px solid #e4eaf2; font-variant-numeric: tabular-nums; }
 .dashboard-gst-breakdown-total { font-weight: 700; font-size: 17px; border-bottom: none; }
+
+
+/* Easynet Finance 2.0 Phase 2: shared module workspaces */
+.unified-module-workspace{max-width:1460px;margin:0 auto;padding-bottom:32px}
+.unified-workspace-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:0 0 19px}
+.unified-workspace-header h1{font-size:clamp(22px,2.6vw,31px);line-height:1.2;letter-spacing:-.03em;margin:4px 0 8px;color:var(--text,#1f3148)}
+.unified-workspace-header p{margin:0;line-height:1.6;color:var(--muted,#65768c)}
+.unified-workspace-eyebrow{font-size:11px!important;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#416eae!important}
+.unified-workspace-header-actions{display:flex;gap:9px;flex-wrap:wrap;justify-content:flex-end;max-width:48%}
+.unified-workspace-header-actions .link-button{white-space:normal;text-align:center}
+.unified-workspace-switcher{display:flex;gap:7px;overflow-x:auto;padding:5px 0 14px;scrollbar-width:thin}
+.unified-workspace-module{flex-shrink:0;display:inline-block;border:1px solid #d8e1ee;border-radius:999px;padding:8px 13px;font-size:12px;text-decoration:none;font-weight:600;color:#4a5b73;background:#fff}
+.unified-workspace-module:hover,.unified-workspace-module:focus-visible{border-color:#83aad9;color:#1d4f92}
+.unified-workspace-module.active{background:#eaf3ff;color:#164f99;border-color:#7db0ed}
+.unified-workspace-content{padding:22px!important}
+.unified-workspace-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}
+.unified-workspace-section-head h2{font-size:18px;margin:0 0 5px}
+.unified-workspace-section-head .small{margin:0}
+.unified-workspace-search{width:min(320px,100%);flex-shrink:0}
+.unified-workspace-search input{width:100%;min-height:39px;border-radius:8px}
+.unified-workspace-tabs{display:flex;gap:6px;overflow-x:auto;margin:19px 0 17px;border-bottom:1px solid #e0e8f2;padding-bottom:11px}
+.unified-workspace-tab{white-space:nowrap;background:#f7f9fc;color:#4a5b73;border:1px solid #e0e7f0;border-radius:7px;padding:7px 11px;font-size:12px;font-weight:600}
+.unified-workspace-tab.selected{background:#e6f1ff;color:#144b89;border-color:#8db8e7}
+.unified-workspace-action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.unified-workspace-action{display:flex;flex-direction:column;gap:7px;min-width:0;padding:17px 16px;border-radius:11px;border:1px solid #dfe7f0;text-decoration:none;background:#fff;color:inherit}
+.unified-workspace-action:hover,.unified-workspace-action:focus-visible{background:#f8fbff;border-color:#82b1eb;box-shadow:0 4px 14px rgba(40,80,135,.08);outline-offset:2px}
+.unified-workspace-action-category{font-size:10px;letter-spacing:.06em;font-weight:750;text-transform:uppercase;color:#6a7d95}
+.unified-workspace-action-title{font-size:14px;font-weight:700;color:#1556a0;line-height:1.35}
+.unified-workspace-action-title span{font-size:12px}
+.unified-workspace-action-description{font-size:12px;color:#617188;line-height:1.5}
+.unified-workspace-empty{grid-column:1/-1;padding:18px;text-align:center;color:#64748b}
+.unified-workspace-footnote{margin:12px 0 0;color:#63758a}
+@media(max-width:1150px){.unified-workspace-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:740px){.unified-workspace-header,.unified-workspace-section-head{flex-direction:column}.unified-workspace-header-actions{max-width:none;justify-content:flex-start}.unified-workspace-search{width:100%}.unified-workspace-action-grid{grid-template-columns:1fr}.unified-workspace-content{padding:16px!important}}
