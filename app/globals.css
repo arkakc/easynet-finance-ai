@@ -5202,3 +5202,46 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
   .phase3-financial-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 }
 @media (max-width: 360px) { .phase3-financial-grid { grid-template-columns: 1fr; } }
+
+/* Easynet Finance Home */
+.ef-home{max-width:1260px;margin:0 auto;display:grid;gap:27px;padding-bottom:28px}
+.ef-home-hero{display:flex;justify-content:space-between;align-items:center;gap:30px;background:linear-gradient(115deg,#0a2c55,#1255a3);border-radius:16px;color:white;padding:39px 42px;overflow:hidden;position:relative}
+.ef-home-hero-copy{max-width:665px;position:relative;z-index:1}
+.ef-home-kicker{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.12em;font-weight:750;color:#bfddff}
+.ef-home-hero h1{font-size:clamp(27px,3.3vw,40px);color:white;margin:13px 0;line-height:1.2}
+.ef-home-hero p{font-size:14px;color:#d9e9ff;max-width:590px;line-height:1.75;margin:0}
+.ef-home-hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:25px}
+.ef-home-primary,.ef-home-secondary{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:40px;padding:0 18px;border-radius:7px;font-size:12px;font-weight:750}
+.ef-home-primary{background:white;color:#114984}
+.ef-home-secondary{border:1px solid #82b5e8;color:white}
+.ef-home-hero-mark{flex-shrink:0;width:210px;height:184px;border:1px solid #6799c8;background:rgba(255,255,255,.09);border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#d5eaff;transform:rotate(-8deg)}
+.ef-home-hero-mark span{font-size:13px;letter-spacing:.24em}
+.ef-home-hero-mark strong{font-size:22px;color:#fff}
+.ef-home-section{display:grid;gap:13px}
+.ef-home-section-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ef-home-overline{font-size:10px;font-weight:800;color:#2865a6;letter-spacing:.12em}
+.ef-home-section h2{font-size:19px;margin:5px 0 0;color:#172e4c}
+.ef-home-section-header p{font-size:12px;color:#63788e;margin:7px 0 0}
+.ef-home-session-pill{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;background:#ecfdf5;border:1px solid #bbf7d0;border-radius:999px;font-size:11px;font-weight:650;color:#047857}
+.ef-home-account-card{display:flex;align-items:center;gap:17px;flex-wrap:wrap;background:white;border:1px solid #dfe7f1;padding:21px 24px;border-radius:12px}
+.ef-home-avatar{height:52px;width:52px;border-radius:14px;background:#e9f3ff;color:#1759a2;display:grid;place-items:center}
+.ef-home-account-info{display:grid;gap:5px;flex:1;min-width:170px}
+.ef-home-account-info strong{font-size:15px}
+.ef-home-account-info span,.ef-home-account-roles span{font-size:12px;color:#63788e;overflow-wrap:anywhere}
+.ef-home-account-roles{display:grid;gap:5px;max-width:360px}
+.ef-home-account-roles strong{font-size:12px;color:#20466f}
+.ef-home-modules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}
+.ef-home-module{display:flex;align-items:center;gap:12px;padding:21px 17px;background:white;border:1px solid #dfe7f1;border-radius:11px;transition:border-color .15s,box-shadow .15s}
+.ef-home-module:hover{border-color:#7eafe2;box-shadow:0 7px 22px rgba(18,66,120,.08)}
+.ef-home-module-icon{display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;border-radius:10px;background:#ecf4ff;color:#1662b3}
+.ef-home-module-copy{display:grid;gap:5px;min-width:0;flex:1}
+.ef-home-module-copy strong{font-size:13px;color:#1b3553}
+.ef-home-module-copy small{font-size:11px;color:#64778b;line-height:1.4}
+.ef-home-module-arrow{color:#8da2b6;flex-shrink:0}
+.ef-home-note{display:flex;align-items:flex-start;gap:14px;background:#f0f6fd;border:1px solid #d9e9f8;border-radius:11px;padding:20px;color:#275c94}
+.ef-home-note>svg{flex-shrink:0}
+.ef-home-note strong{font-size:13px}
+.ef-home-note p{font-size:12px;color:#4b6683;line-height:1.6;margin:6px 0 0}
+.ef-home-footer{text-align:center;color:#7e8fa2;font-size:11px}
+@media(max-width:950px){.ef-home-modules{grid-template-columns:repeat(2,minmax(0,1fr))}.ef-home-hero-mark{width:150px;height:155px}}
+@media(max-width:640px){.ef-home-hero{padding:28px 23px}.ef-home-hero-mark{display:none}.ef-home-modules{grid-template-columns:1fr}.ef-home-account-roles{width:100%;max-width:none;border-top:1px solid #e5edf4;padding-top:12px}}

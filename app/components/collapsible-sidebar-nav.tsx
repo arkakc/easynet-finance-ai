@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, ShoppingCart, ShoppingBag, Package, Landmark, FolderKanban, BarChart3, Sparkles, Settings, Wrench, ChevronRight } from "lucide-react";
+import { Home, LayoutDashboard, ShoppingCart, ShoppingBag, Package, Landmark, FolderKanban, BarChart3, Sparkles, Settings, Wrench, ChevronRight } from "lucide-react";
 
-const menuIcons: Record<string, typeof LayoutDashboard> = { Dashboard:LayoutDashboard, Sales:ShoppingCart, Purchase:ShoppingBag, "Stock & Assets":Package, Accounts:Landmark, Projects:FolderKanban, Reports:BarChart3, "Documents & AI":Sparkles, Administration:Settings, "System Setup":Wrench };
+const menuIcons: Record<string, typeof LayoutDashboard> = { Home:Home, Dashboard:LayoutDashboard, Sales:ShoppingCart, Purchase:ShoppingBag, "Stock & Assets":Package, Accounts:Landmark, Projects:FolderKanban, Reports:BarChart3, "Documents & AI":Sparkles, Administration:Settings, "System Setup":Wrench };
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
