@@ -20,6 +20,7 @@ type NavItem = readonly [label: string, href: string, permission: Permission];
 type NavGroup = { label: string; icon: string; links: readonly NavItem[] };
 
 const groups: readonly NavGroup[] = [
+  { label: "Home", icon: "🏠", links: [["Home", "/home", "dashboard.read"]] },
   {
     label: "Dashboard",
     icon: "📊",
@@ -154,7 +155,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="shell">
             <SidebarShell
               groups={navGroups}
-              homeHref={setupActive ? "/dashboard" : "/setup/finance"}
+              homeHref={setupActive ? "/home" : "/setup/finance"}
             />
             <ProfileMenu userName={user.name} userRoles={user.roles} />
             <main className="main">
