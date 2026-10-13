@@ -80,6 +80,7 @@ export default function ReportsPage() {
           <Link prefetch={false} className="button-link secondary-link" href="/reports/general-ledger">General Ledger</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/trial-balance">Trial Balance</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/cashflow">Cash Flow</Link>
+          <Link prefetch={false} className="button-link secondary-link" href="/reports/forward-finance">Ageing & Cash Outlook</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/reports/gst">IRC GST</Link>
           <Link prefetch={false} className="button-link secondary-link" href="/controls">Integrity Controls</Link>
         </div>
