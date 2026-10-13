@@ -3,6 +3,7 @@
 import Link from "next/link";
 import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import DocumentIdentityHeader from "@/app/components/document-identity-header";
+import DocumentCrossModuleLinks from "@/app/components/document-cross-module-links";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -113,6 +114,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
         )}
       </div>
     </div>
+    <DocumentCrossModuleLinks type="quote" documentId={String(note.deliveryNumber || id)} record={{ journalId: note.journalId, sourceDocumentId: note.salesOrderId }} links={[]} />
     <section className="document-sheet">
       <DocumentIdentityHeader title="Delivery Note / Stock Out" number={String(note.deliveryNumber || "")} status={status} journalId={note.journalId ? String(note.journalId) : null} />
 
