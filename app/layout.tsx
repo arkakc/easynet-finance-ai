@@ -8,6 +8,7 @@ import ProfileMenu from "@/app/components/profile-menu";
 import { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
 import GlobalDataTableEnhancer from "@/app/components/global-data-table-enhancer";
 import GlobalFormDraftCache from "@/app/components/global-form-draft-cache";
+import GlobalNavigationBar from "@/app/components/global-navigation-bar";
 import { getSetupGateState } from "@/lib/setup-gate";
 
 export const metadata = {
@@ -20,102 +21,68 @@ type NavItem = readonly [label: string, href: string, permission: Permission];
 type NavGroup = { label: string; icon: string; links: readonly NavItem[] };
 
 const groups: readonly NavGroup[] = [
-  {
-    label: "Dashboard",
-    icon: "📊",
-    links: [
-      ["Management Dashboard", "/dashboard", "dashboard.read"],
-      ["Control Centre", "/controls", "dashboard.read"],
-      ["Approvals", "/approvals", "post.approve"],
-    ],
-  },
-  {
-    label: "Sales",
-    icon: "💼",
-    links: [
-      ["Sales Transactions", "/transactions?module=sales", "sales.read"],
-      ["Customers", "/customers", "sales.read"],
-      ["Projects", "/projects/master", "sales.read"],
-      ["Retail POS Terminal", "/pos", "sales.read"],
-      ["Payment Schedules", "/payment-schedules", "sales.read"],
-    ],
-  },
-  {
-    label: "Purchase",
-    icon: "🛒",
-    links: [
-      ["Purchase Transactions", "/transactions?module=purchase", "purchase.read"],
-      ["Suppliers", "/suppliers", "purchase.read"],
-      ["Projects", "/projects/master", "purchase.read"],
-      ["Expenses", "/transactions?module=expense", "purchase.write"],
-    ],
-  },
-  {
-    label: "Stock & Assets",
-    icon: "📦",
-    links: [
-      ["Items & Stock", "/stock", "stock.read"],
-      ["Warehouse Stock", "/stock/warehouses", "stock.read"],
-      ["Fixed Assets", "/assets", "stock.read"],
-    ],
-  },
-  {
-    label: "Accounting",
-    icon: "📑",
-    links: [
-      ["Chart of Accounts", "/accounts", "accounts.read"],
-      ["Document Relationship Explorer", "/document-explorer", "dashboard.read"],
-      ["Manual Journal Entry", "/manual-journal-entry", "accounts.write"],
-      ["Posted Journals", "/journals", "accounts.read"],
-      ["Bank / Cash Pay Entry", "/bank-cash-pay", "accounts.write"],
-      ["Payroll Control Centre", "/payroll", "accounts.read"],
-      ["Journal Reversal", "/journals/reverse", "accounts.write"],
-      ["Statements", "/statements", "accounts.read"],
-      ["Bank Reconciliation", "/banking", "accounts.read"],
-      ["GST Settlement & Payment", "/gst-settlement", "accounts.read"],
-      ["Deferred Revenue", "/deferred-revenue", "post.approve"],
-      ["Month-End Close", "/period-close", "post.approve"],
-      ["Budgets", "/budgets", "accounts.read"],
-      ["Loan Register", "/loans", "accounts.read"],
-      ["Loan Actions", "/loans/actions", "accounts.write"],
-    ],
-  },
-  {
-    label: "Projects",
-    icon: "🏗️",
-    links: [["Projects", "/projects", "dashboard.read"]],
-  },
-  {
-    label: "Reports",
-    icon: "📈",
-    links: [
-      ["Financial Reports", "/reports", "reports.read"],
-      ["General Ledger", "/reports/general-ledger", "reports.read"],
-      ["Trial Balance", "/reports/trial-balance", "reports.read"],
-      ["Cash Flow", "/reports/cashflow", "reports.read"],
-      ["GST Report", "/reports/gst", "reports.read"],
-    ],
-  },
-  {
-    label: "Documents & AI",
-    icon: "✨",
-    links: [
-      ["Source Documents", "/documents", "accounts.read"],
-      ["AI Document Upload", "/ai-finance/upload", "accounts.write"],
-    ],
-  },
-  {
-    label: "Administration",
-    icon: "⚙️",
-    links: [
-      ["Finance Settings", "/settings", "settings.manage"],
-      ["Subledger Recovery", "/migration/subledger", "settings.manage"],
-      ["Opening AR/AP Import", "/migration/opening-subledger", "settings.manage"],
-      ["Go-Live Readiness", "/go-live", "settings.manage"],
-      ["Backup & Recovery", "/system/backups", "settings.manage"],
-      ["Users & Permissions", "/users", "users.manage"],
-    ],
-  },
+  {label:"Home", icon:"🏠", links:[
+    ["Dashboard","/dashboard","dashboard.read"],
+    ["My Tasks & Controls","/controls","dashboard.read"],
+    ["Pending Approvals","/approvals","post.approve"]
+  ]},
+  {label:"Sales",icon:"🛒",links:[
+    ["Sales Workspace","/transactions?module=sales","sales.read"],
+    ["Customers","/customers","sales.read"],
+    ["Retail POS","/pos","sales.read"],
+    ["Payment Schedules","/payment-schedules","sales.read"]
+  ]},
+  {label:"Purchases",icon:"🧾",links:[
+    ["Purchases Workspace","/transactions?module=purchase","purchase.read"],
+    ["Suppliers","/suppliers","purchase.read"],
+    ["Expenses","/transactions?module=expense","purchase.write"]
+  ]},
+  {label:"Banking",icon:"🏦",links:[
+    ["Bank Reconciliation","/banking","accounts.read"],
+    ["Bank / Cash Pay Entry","/bank-cash-pay","accounts.write"],
+    ["Statements","/statements","accounts.read"]
+  ]},
+  {label:"Inventory",icon:"📦",links:[
+    ["Items & Stock","/stock","stock.read"],
+    ["Warehouse Stock","/stock/warehouses","stock.read"],
+    ["Fixed Assets","/assets","stock.read"]
+  ]},
+  {label:"Accounting",icon:"📑",links:[
+    ["Chart of Accounts","/accounts","accounts.read"],
+    ["Manual Journal Entry","/manual-journal-entry","accounts.write"],
+    ["Posted Journals","/journals","accounts.read"],
+    ["Journal Reversal","/journals/reverse","accounts.write"],
+    ["GST Settlement","/gst-settlement","accounts.read"],
+    ["Deferred Revenue","/deferred-revenue","post.approve"],
+    ["Month-End Close","/period-close","post.approve"],
+    ["Payroll","/payroll","accounts.read"],
+    ["Budgets","/budgets","accounts.read"],
+    ["Loan Register","/loans","accounts.read"],
+    ["Loan Actions","/loans/actions","accounts.write"]
+  ]},
+  {label:"Projects",icon:"🏗️",links:[
+    ["Projects","/projects","dashboard.read"]
+  ]},
+  {label:"Reports",icon:"📊",links:[
+    ["Financial Reports","/reports","reports.read"],
+    ["General Ledger","/reports/general-ledger","reports.read"],
+    ["Trial Balance","/reports/trial-balance","reports.read"],
+    ["Cash Flow","/reports/cashflow","reports.read"],
+    ["GST Report","/reports/gst","reports.read"]
+  ]},
+  {label:"Documents",icon:"📁",links:[
+    ["Document Register","/documents","accounts.read"],
+    ["Document Relationship Explorer","/document-explorer","dashboard.read"],
+    ["AI Document Upload","/ai-finance/upload","accounts.write"]
+  ]},
+  {label:"Settings",icon:"⚙️",links:[
+    ["Finance Settings","/settings","settings.manage"],
+    ["Opening AR/AP Import","/migration/opening-subledger","settings.manage"],
+    ["Subledger Recovery","/migration/subledger","settings.manage"],
+    ["Go-Live Readiness","/go-live","settings.manage"],
+    ["Backup & Recovery","/system/backups","settings.manage"],
+    ["Users & Permissions","/users","users.manage"]
+  ]}
 ] as const;
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -152,6 +119,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             />
             <ProfileMenu userName={user.name} userRoles={user.roles} />
             <main className="main">
+              <GlobalNavigationBar groups={navGroups} />
               <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
               <GlobalDataTableEnhancer />
