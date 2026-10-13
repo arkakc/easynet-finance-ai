@@ -22,6 +22,7 @@
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
     "db:uat:deep-audit": "tsx scripts/database/finance-uat-deep-audit.ts",
     "db:uat:close-controls": "tsx scripts/database/finance-close-controls.ts",
+    "test:phase7": "tsx --test tests/reporting/management-insights.test.ts tests/reporting/project-profitability.test.ts",
     "test:phase6": "tsx --test tests/accounting/phase6-flow-invariants.test.ts tests/erp/conversion-guard-concurrency.test.ts tests/erp/conversion-response.test.ts tests/erp/phase6-partial-write-workflow.test.ts tests/erp/transaction-automation-preview.test.ts tests/erp/intelligent-next-actions.test.ts tests/documents/safe-document-links.test.ts",
     "db:phase6:release-readiness": "tsx scripts/database/phase6-release-readiness.ts",
     "db:phase6:verify-postgres": "tsx scripts/database/verify-phase6-postgres-claims.ts",
