@@ -10,7 +10,7 @@ import DocumentSectionTabs from "@/app/components/document-section-tabs";
 import DocumentEvidencePanels from "@/app/components/document-evidence-panels";
 import DocumentFinancialPanels from "@/app/components/document-financial-panels";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
-import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
+import DocumentReviewActions from "@/app/components/document-review-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
 import SupplierQuoteItemReadiness from "@/app/components/supplier-quote-item-readiness";
 import SupplierAdvanceFromPo from "@/app/components/supplier-advance-from-po";
@@ -430,15 +430,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <div className="system-notice-dropdown"><strong>Document unavailable:</strong> {error}</div>
           </details>
         ) : null}>
-        {record && rowStatus === "DRAFT" && (
-          <DocumentWorkflowActions
-            recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"}
-            recordId={id}
-            status={rowStatus}
-            onApproved={() => loadDocument(undefined, true)}
-            placement="toolbar"
-          />
-        )}
         {canEdit && (
           <Link prefetch={false} className="button-link" href={type === "invoice" ? `/transactions/invoice/${encodeURIComponent(id)}/edit` : `/transactions/${encodeURIComponent(type)}/${encodeURIComponent(id)}/edit`}>
             Edit Draft
@@ -562,6 +553,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       ...(documentLinks.length || previous ? [{ id: "related", label: "Related Documents", href: "#document-related" }] : []),
       { id: "settlement", label: "Settlement", href: "#document-settlement" },
       { id: "accounting", label: "Accounting & GST", href: "#document-accounting" },
+      { id: "review", label: "Submit / Review", href: "#document-review" },
       { id: "attachments", label: "Attachments", href: "#document-attachments" },
       { id: "activity", label: "Activity & Audit", href: "#document-activity" },
       { id: "actions", label: "Actions", href: "#document-actions" },
@@ -662,6 +654,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         {record.updatedAt && <p>Last updated: <time>{String(record.updatedAt)}</time></p>}
       </section>
     )}
+    {record && <DocumentReviewActions type={type} id={id} onChanged={() => loadDocument(undefined, true)} />}
     {record && <DocumentEvidencePanels type={type} id={id} />}
     <div id="document-actions" />
     {record&&<>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import LinkedDocumentReference from "@/app/components/linked-document-reference";
+import DocumentIdentityHeader from "@/app/components/document-identity-header";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -113,17 +114,7 @@ export default function DeliveryNoteClient({id}:{id:string}){
       </div>
     </div>
     <section className="document-sheet">
-      <header className="document-header">
-        <div className="document-header-main">
-          <div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div>
-          <h1>Delivery Note / Stock Out</h1>
-          <div className="document-header-subline"><span className="document-number">{note.deliveryNumber}</span><span className="document-type-note">Finance document</span></div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          {note.journalId&&<Link className="button-link secondary-link no-print" href={"/journals/"+encodeURIComponent(note.journalId)}>Journal Entry · {note.journalId}</Link>}
-          <div className={"status-pill status-"+status.toLowerCase()}>{status}</div>
-        </div>
-      </header>
+      <DocumentIdentityHeader title="Delivery Note / Stock Out" number={String(note.deliveryNumber || "")} status={status} journalId={note.journalId ? String(note.journalId) : null} />
 
       <section className="document-flow-tabs no-print">
         <div className="document-flow-tabs-head">
