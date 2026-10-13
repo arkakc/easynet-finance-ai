@@ -12,7 +12,7 @@ export default function SidebarShell({ groups, homeHref }: Props) {
   return (
     <>
       <div className="sidebar-hover-zone" aria-hidden="true" />
-      <aside className="sidebar sidebar-auto-hide">
+      <aside className="sidebar sidebar-auto-hide sidebar-navigation-refresh">
         <Link prefetch={false} className="brand" href={homeHref}>
           <div className="brand-icon">EN</div>
           <div className="brand-copy">
