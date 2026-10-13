@@ -120,7 +120,8 @@ export async function POST(request: Request) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: body.action, payload, secret: env.APP_SECRET }),
     }));
-    if (!conversionResponse.ok) throw new Error("Controlled conversion failed; review existing linked documents before retrying.");
+    const resultBody = await conversionResponse.clone().json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    if (!conversionResponse.ok || resultBody?.ok !== true) throw new Error(resultBody?.error || "Controlled conversion outcome uncertain; reconcile linked documents before retrying.");
     return conversionResponse;
     });
   } catch (error) {
