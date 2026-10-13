@@ -4,6 +4,7 @@ import Link from "next/link";
 import LinkedDocumentReference from "@/app/components/linked-document-reference";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PrintButton from "@/app/components/print-button";
+import DocumentIdentityHeader from "@/app/components/document-identity-header";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -558,29 +559,13 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </div>
     </div>
     <section className="document-sheet">
-      <header className="document-header">
-        <div className="document-header-main">
-          <div className="eyebrow">EASYNET IT SOLUTIONS LIMITED</div>
-          <h1>{title}</h1>
-          <div className="document-header-subline">
-            <span className="document-number">{number}</span>
-            <span className="document-type-note">Finance document</span>
-          </div>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          {record&&String(record.journalId||"").trim()&&(
-            <Link
-              prefetch={false}
-              className="button-link secondary-link no-print"
-              href={`/journals/${encodeURIComponent(String(record.journalId))}`}
-              title="Open corresponding Journal Entry"
-            >
-              Journal Entry · {String(record.journalId)}
-            </Link>
-          )}
-          <div className={`status-pill status-${String(loading?"loading":publicStatus).toLowerCase()}`}>{loading?"LOADING":publicStatus}</div>
-        </div>
-      </header>
+      <DocumentIdentityHeader
+        title={title}
+        number={number}
+        status={String(publicStatus)}
+        loading={loading}
+        journalId={record ? String(record.journalId || "") : ""}
+      />
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
         {type!=="expense"&&<section className="document-flow-tabs no-print">
           <div className="document-flow-tabs-head">
