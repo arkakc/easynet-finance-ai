@@ -36,3 +36,6 @@ backups/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Private locally stored document evidence; never commit uploaded files
+storage/document-evidence/
