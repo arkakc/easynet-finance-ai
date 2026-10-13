@@ -6,10 +6,10 @@ import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
 
 export type GoLiveCheck = { key: string; label: string; blocking: boolean; passed: boolean; detail: string };
 
-function postgresReadinessCheck(): GoLiveCheck {
+async function postgresReadinessCheck(): Promise<GoLiveCheck> {
   const runtime = databaseRuntimeInfo();
   const productionRequiresTarget = process.env.GO_LIVE_REQUIRE_POSTGRES === "true" || runtime.productionLike;
-  const passed = productionRequiresTarget
+  const configured = productionRequiresTarget
     ? runtime.provider === "postgresql" && runtime.postgresConfigured
     : runtime.provider === "sqlite" || (runtime.provider === "postgresql" && runtime.postgresConfigured);
 
@@ -19,9 +19,9 @@ function postgresReadinessCheck(): GoLiveCheck {
       ? "Application runtime is using PostgreSQL"
       : "Database runtime configured for current environment",
     blocking: true,
-    passed,
+    passed: configured && (runtime.provider !== "postgresql" || await prisma.$queryRawUnsafe<Array<{result:number}>>("SELECT 1 AS result").then(rows => Number(rows[0]?.result)===1).catch(()=>false)),
     detail: productionRequiresTarget
-      ? passed
+      ? configured
         ? "Runtime provider is PostgreSQL and target connection is configured"
         : `Production requires DATABASE_PROVIDER=postgresql with DATABASE_URL_POSTGRES configured; active provider is ${runtime.provider}`
       : `Active database provider: ${runtime.provider}`,
@@ -86,7 +86,7 @@ export async function buildGoLiveReadiness() {
     { key: "bank-reconciliation", label: "Bank reconciliation balances and mappings verified", blocking: true, passed: snapshot.banking.reconciliationsMatched && snapshot.banking.mappedAccounts === snapshot.banking.activeAccounts, detail: `${snapshot.banking.mappedAccounts}/${snapshot.banking.activeAccounts} active banks mapped · drift K${Math.abs(snapshot.banking.reconciliationDrift).toFixed(2)} · unreconciled transactions ${snapshot.banking.unreconciledTransactions}` },
     { key: "payroll", label: "Payroll journals linked to payroll register", blocking: true, passed: orphanPayroll.length === 0, detail: orphanPayroll.length ? `${orphanPayroll.length} orphan payroll journal(s): ${orphanPayroll.map((row) => row.code).join(", ")}` : "All payroll journals are registered" },
     { key: "sources", label: "Active source documents retained", blocking: true, passed: missingSources === 0, detail: missingSources ? `${missingSources} active document(s) have no retained binary` : "All active sources retained" },
-    postgresReadinessCheck(),
+    await postgresReadinessCheck(),
     { key: "session", label: "Application session secret configured", blocking: true, passed: Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32), detail: process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32 ? "Secret present" : "SESSION_SECRET must be at least 32 characters" },
     { key: "auth", label: "NextAuth secret configured", blocking: true, passed: Boolean(process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32), detail: process.env.AUTH_SECRET && process.env.AUTH_SECRET.length >= 32 ? "Secret present" : "AUTH_SECRET must be at least 32 characters" },
     { key: "backend", label: "Core accounting source is authoritative Prisma", blocking: true, passed: true, detail: "Core documents, journals, ledgers and financial controls use Prisma as the single source of truth" },
