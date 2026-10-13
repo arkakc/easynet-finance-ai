@@ -20,6 +20,7 @@ import SalesQuoteCycle from "@/app/components/sales-quote-cycle";
 import SalesOrderCycle from "@/app/components/sales-order-cycle";
 import SalesInvoiceCycle from "@/app/components/sales-invoice-cycle";
 import LazyDocumentSection from "@/app/components/lazy-document-section";
+import SupplierBillWorkspace from "@/app/components/supplier-bill-workspace";
 
 const CONFIG:Record<string,{numberField:string;title:string}>={
   quote:{numberField:"quoteNumber",title:"Sales Quotation"},
@@ -534,8 +535,8 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         {type === "supplierBill" && (
           <button
             type="button"
-            onClick={() => setSupplierBillSettlementOpen(true)}
-            title="Open Supplier Invoice settlement actions"
+            onClick={() => document.getElementById("supplier-bill-workspace")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            title="Jump to Supplier Invoice workspace and advance settlement"
           >
             Invoice Settlement
           </button>
@@ -582,6 +583,19 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         </div>
       </header>
       {loading?<section className="panel"><strong>Loading live document values…</strong></section>:record?<>
+        {type==="supplierBill"&&<SupplierBillWorkspace
+          billId={id}
+          billNumber={number}
+          status={rowStatus}
+          supplierId={String(record.supplierId||"")}
+          poId={supplierBillPoId}
+          total={n(record.totalAmount)}
+          paid={n(record.paidAmount)}
+          outstanding={n(record.outstandingAmount??record.totalAmount)}
+          journalId={String(record.journalId||"")}
+          links={orderedDocumentLinks}
+          onPlanChange={setSupplierBillPlanSummary}
+        />}
         {type!=="expense"&&<section className="document-flow-tabs no-print">
           <div className="document-flow-tabs-head">
             <div><span className="document-section-kicker">Workflow</span><strong>Document Flow</strong></div>
