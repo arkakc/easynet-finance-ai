@@ -1,0 +1,28 @@
+name: Easynet 2.0 UI Navigation Checks
+on:
+  pull_request:
+    paths:
+      - "app/layout.tsx"
+      - "app/globals.css"
+      - "app/components/collapsible-sidebar-nav.tsx"
+      - "app/components/sidebar-shell.tsx"
+      - "app/components/global-navigation-bar.tsx"
+      - "app/components/transaction-document-client.tsx"
+      - "app/components/supplier-bill-workspace.tsx"
+      - ".github/workflows/easynet-phase1-ui.yml"
+  workflow_dispatch:
+jobs:
+  navigation-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: "file:./ci-navigation.db"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run typecheck
