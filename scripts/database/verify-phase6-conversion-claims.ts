@@ -25,11 +25,12 @@ async function main() {
   let client: PrismaClient | undefined;
   try {
     const originalSchema = await readFile(path.resolve(process.cwd(), "prisma/schema.prisma"), "utf8");
-    const patchedSchema = originalSchema.replace(/(datasource\\s+db\\s*\\{[\\s\\S]*?url\\s*=\\s*)("[^"]*"|env\\("[^"]+"\\))/m,
+    const patchedSchema = originalSchema.replace(/(datasource\s+db\s*\{[\s\S]*?url\s*=\s*)("[^"]*"|env\("[^"]+"\))/m,
       (_match, prefix: string) => prefix + JSON.stringify(datasourceUrl));
     if (patchedSchema === originalSchema) throw new Error("Cannot locate Prisma datasource; refusing to touch a non-isolated database");
+    if (!patchedSchema.includes(JSON.stringify(datasourceUrl))) throw new Error("Disposable datasource was not applied");
     await writeFile(disposableSchema, patchedSchema, "utf8");
-    const setup = spawnSync(process.execPath, [prismaCommand, "db", "push", "--schema", "prisma/schema.prisma", "--skip-generate"], {
+    const setup = spawnSync(process.execPath, [prismaCommand, "db", "push", "--schema", disposableSchema, "--skip-generate"], {
       cwd: process.cwd(),
       env: { ...process.env, DATABASE_PROVIDER: "sqlite", DATABASE_URL: datasourceUrl, EASYNET_PRISMA_DATASOURCE_URL: datasourceUrl },
       encoding: "utf8",
