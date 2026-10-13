@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { prisma } from "@/src/lib/prisma";
 import { requireRequestPermission, type Permission } from "@/lib/auth";
 import { POST as approvalsPost } from "@/app/api/approvals/route";
 import { POST as assetsPost } from "@/app/api/assets/route";
@@ -73,6 +74,22 @@ export async function POST(request: Request) {
 
     const body = incoming.body || {};
     requireRequestPermission(request, permissionFor(incoming.target, body));
+    if (incoming.target === "approvals") {
+      const payload = (body.payload || {}) as Record<string, unknown>;
+      const type = String(payload.recordType || "");
+      const id = String(payload.recordId || "");
+      const decision = String(payload.decision || "");
+      if (id && type && ["APPROVE", "CANCEL"].includes(decision)) {
+        const review = await prisma.approvalRequest.findFirst({
+          where: { type: "PHASE3_" + type.toUpperCase() + "_REVIEW", documentCode: id },
+          orderBy: { createdAt: "desc" }, select: { status: true },
+        });
+        if (review && ["PENDING", "IN_REVIEW"].includes(review.status)) {
+          return NextResponse.json({ ok: false, error: "Document has a submitted review. Use the maker-checker review workflow." }, { status: 409 });
+        }
+      }
+    }
+
 
     const internalRequest = new Request(request.url, {
       method: "POST",
