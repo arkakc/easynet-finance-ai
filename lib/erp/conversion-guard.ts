@@ -46,5 +46,8 @@ export async function executeWithConversionClaim<T>(
 }
 
 export async function withConversionGuard<T>(kind: string, sourceId: string, execute: () => Promise<T>): Promise<T> {
-  return executeWithConversionClaim(prisma.approvalRequest, kind, sourceId, execute);
+  return executeWithConversionClaim({
+    create: args => prisma.approvalRequest.create(args),
+    update: args => prisma.approvalRequest.update(args),
+  }, kind, sourceId, execute);
 }
