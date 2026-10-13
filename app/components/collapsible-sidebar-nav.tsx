@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 export type SidebarNavGroup = {
   label: string;
@@ -15,7 +15,6 @@ type Props = {
   compact?: boolean;
 };
 
-const AUTO_COLLAPSE_MS = 30_000;
 
 function hrefIsActive(href: string, pathname: string, searchParams: URLSearchParams) {
   const [hrefPath, hrefQuery] = href.split("?");
@@ -31,56 +30,19 @@ function hrefIsActive(href: string, pathname: string, searchParams: URLSearchPar
 export default function CollapsibleSidebarNav({ groups, compact = false }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const autoCollapseTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
+  const [activeGroup, setActiveGroup] = useState<string>("");
   useEffect(() => {
-    for (const [label, timer] of autoCollapseTimers.current.entries()) {
-      if (!expanded.has(label)) {
-        clearTimeout(timer);
-        autoCollapseTimers.current.delete(label);
-      }
-    }
-    for (const label of expanded) {
-      if (autoCollapseTimers.current.has(label)) continue;
-      const timer = setTimeout(() => {
-        setExpanded((current) => {
-          const next = new Set(current);
-          next.delete(label);
-          return next;
-        });
-        autoCollapseTimers.current.delete(label);
-      }, AUTO_COLLAPSE_MS);
-      autoCollapseTimers.current.set(label, timer);
-    }
-  }, [expanded]);
-
-  useEffect(() => () => {
-    for (const timer of autoCollapseTimers.current.values()) clearTimeout(timer);
-    autoCollapseTimers.current.clear();
-  }, []);
+    const current = groups.find(group => group.links.some(link => hrefIsActive(link.href, pathname, searchParams)));
+    if (current) setActiveGroup(current.label);
+  }, [groups, pathname, searchParams]);
 
   const toggle = (label: string) => {
-    if (compact) return;
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(label)) {
-        next.delete(label);
-      } else {
-        const existingTimer = autoCollapseTimers.current.get(label);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          autoCollapseTimers.current.delete(label);
-        }
-        next.add(label);
-      }
-      return next;
-    });
+    if (!compact) setActiveGroup(current => current === label ? "" : label);
   };
 
   return <nav>
     {groups.map((group) => {
-      const isCollapsed = compact || !expanded.has(group.label);
+      const isCollapsed = compact || activeGroup !== group.label;
       return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"} ${compact ? "nav-section-compact" : ""}`} key={group.label} title={compact ? group.label : undefined}>
         <button type="button" className="nav-label" onClick={() => toggle(group.label)} aria-expanded={!isCollapsed} aria-controls={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`} aria-label={compact ? group.label : undefined}>
           <span className="nav-label-main">

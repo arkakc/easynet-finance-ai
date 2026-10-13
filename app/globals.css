@@ -5403,3 +5403,87 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .nav-tax-group { margin: 0.4rem 0 0.65rem 0.65rem; padding-left: 0.75rem; border-left: 1px solid var(--border, #d6dde7); }
 .nav-tax-group-heading { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; opacity: 0.75; margin: 0.4rem 0 0.25rem; }
 .nav-tax-group > a { display: block; }
+
+
+/* Easynet Finance 2.0 Phase 1: shared, permission-aware navigation framework */
+@media (min-width: 901px) {
+  .shell:has(.en-navigation-topbar) .main { margin-left: 276px; width: calc(100% - 276px); }
+  .shell:has(.en-navigation-topbar) .sidebar-auto-hide { transform: translateX(0); opacity: 1; }
+  .shell:has(.en-navigation-topbar) .sidebar-hover-zone { display: none; }
+}
+.en-navigation-topbar {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  gap: 12px; padding: 10px 16px; margin: 0 0 22px;
+  background: var(--bg-card, #fff); border: 1px solid var(--border-subtle, #dce4ee);
+  border-radius: 12px; min-height: 52px;
+}
+.en-nav-breadcrumb { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; min-width: 0; }
+.en-nav-breadcrumb a { color: #2563eb; }
+.en-nav-breadcrumb strong { font-weight: 650; overflow-wrap: anywhere; }
+.en-nav-controls { display: flex; align-items: center; gap: 8px; }
+.en-nav-controls button { font-size: 12px; padding: 8px 12px; }
+.en-nav-controls kbd { font-size: 10px; opacity: .65; padding-left: 8px; }
+.en-global-search-overlay {
+  position: fixed; inset: 0; z-index: 3000; display: flex; align-items: flex-start; justify-content: center;
+  padding: min(12vh, 90px) 16px 16px; background: rgba(15, 23, 42, .60);
+}
+.en-global-search-dialog {
+  width: min(580px, 100%); max-height: 80vh; overflow: auto; padding: 20px;
+  border-radius: 14px; border: 1px solid var(--border-subtle, #dce4ee);
+  background: var(--bg-card, #fff); box-shadow: 0 20px 75px rgba(15, 23, 42, .25);
+}
+.en-global-search-dialog label { display: block; font-weight: 700; margin: 0 0 12px; }
+.en-global-search-dialog input { width: 100%; margin-bottom: 12px; }
+.en-global-search-results { display: grid; gap: 4px; margin-bottom: 12px; }
+.en-global-search-results button {
+  display: flex; align-items: center; justify-content: space-between; text-align: left;
+  background: transparent; color: inherit; border: 1px solid transparent;
+  border-radius: 8px; padding: 10px 12px; cursor: pointer;
+}
+.en-global-search-results button:hover, .en-global-search-results button:focus-visible {
+  background: rgba(100, 116, 139, .10); border-color: rgba(100,116,139,.2);
+}
+.en-global-search-results small { color: #64748b; }
+.en-navigation-topbar :focus-visible, .sidebar :focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+@media (max-width: 900px) {
+  .shell:has(.en-navigation-topbar) .sidebar { position: relative; transform: none; width: 100%; height: auto; }
+  .shell:has(.en-navigation-topbar) .sidebar-hover-zone { display: none; }
+  .en-navigation-topbar { margin-top: 10px; }
+}
+@media (max-width: 560px) {
+  .en-navigation-topbar { padding: 10px; }
+  .en-nav-breadcrumb { font-size: 12px; }
+  .en-nav-controls { width: 100%; justify-content: flex-end; }
+}
+@media print { .en-navigation-topbar { display: none !important; } }
+
+.en-quick-create { position: relative; }
+.en-quick-create-menu {
+  position: absolute; right: 0; top: calc(100% + 5px); width: 230px;
+  display: grid; gap: 3px; padding: 8px; border-radius: 10px;
+  background: var(--bg-card, #fff); color: var(--text, #1f2937);
+  border: 1px solid var(--border-subtle, #dce4ee);
+  box-shadow: 0 16px 40px rgba(15,23,42,.17); z-index: 80;
+}
+.en-quick-create-menu button { display: block; width: 100%; text-align: left; color: inherit; background: transparent; border: 0; border-radius: 7px; padding: 9px; }
+.en-quick-create-menu button:hover,.en-quick-create-menu button:focus-visible { background: rgba(100,116,139,.12); }
+@media (max-width: 560px) { .en-quick-create-menu { right: -100px; } }
+
+
+/* Hybrid responsive sidebar controls */
+.en-mobile-nav-toggle { display: none; }
+@media (min-width: 901px) {
+ .en-phase1-sidebar { transform: translateX(0) !important; opacity: 1; }
+}
+@media (max-width: 900px) {
+ .en-mobile-nav-toggle {
+   display: block; position: relative; z-index: 60; margin: 10px 16px;
+   width: calc(100% - 32px); text-align: left; padding: 10px 14px;
+   background: #263241; color: #fff; border: 0; border-radius: 10px;
+ }
+ .shell .en-phase1-sidebar {
+   display: none; position: relative; width: 100%; height: auto;
+   transform: none; box-shadow: none; border-radius: 0;
+ }
+ .shell .en-phase1-sidebar.en-mobile-open { display: flex; }
+}
