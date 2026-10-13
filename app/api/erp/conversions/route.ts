@@ -1,3 +1,4 @@
+import { withConversionGuard } from "@/lib/erp/conversion-guard";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { requirePermission } from "@/lib/auth";
@@ -96,6 +97,9 @@ export async function POST(request: Request) {
     await requirePermission(body.action === "quoteToInvoice" ? "sales.write" : "purchase.write");
     if (!env.APP_SECRET) throw new Error("Server compatibility credential is not configured");
 
+    const sourceId = String(body.action === "quoteToInvoice" ? body.payload?.quoteId || "" : body.payload?.poId || "").trim();
+    if (!sourceId) throw new Error("Conversion source document ID is required");
+    return withConversionGuard(body.action === "quoteToInvoice" ? "quoteToInvoice" : "purchaseOrderToBill", sourceId, async () => {
     let payload = body.payload || {};
     if (body.action === "quoteToInvoice") {
       const quoteId = String(payload.quoteId || "").trim();
@@ -111,11 +115,14 @@ export async function POST(request: Request) {
       payload = { ...payload, billNumber: await nextNumber("SupplierBills", "billNumber", "PB") };
     }
 
-    return legacyPost(new Request(request.url, {
+    const conversionResponse = await legacyPost(new Request(request.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: body.action, payload, secret: env.APP_SECRET }),
     }));
+    if (!conversionResponse.ok) throw new Error("Controlled conversion failed; review existing linked documents before retrying.");
+    return conversionResponse;
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Conversion failed";
     return NextResponse.json(

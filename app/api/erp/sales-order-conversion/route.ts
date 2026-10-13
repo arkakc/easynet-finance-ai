@@ -1,3 +1,4 @@
+import { withConversionGuard } from "@/lib/erp/conversion-guard";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
@@ -17,6 +18,7 @@ export async function POST(request: Request) {
   try {
     await requirePermission("sales.write");
     const input = schema.parse(await request.json());
+    return withConversionGuard("salesQuoteToOrder", input.quoteId, async () => {
     const [quoteResult, quoteLinesResult, existingOrders, allQuotes] = await Promise.all([
       findRecords<any>("Quotes", { quoteId: input.quoteId }, 1),
       findRecords<any>("QuoteLines", { quoteId: input.quoteId }, 500),
@@ -91,6 +93,7 @@ export async function POST(request: Request) {
 
     console.info("sales-order-conversion.created", { quoteId: input.quoteId, salesOrderId: orderId, lineCount: lines.length });
     return NextResponse.json({ ok: true, createdId: orderId, documentNumber: orderNumber, status: "sales-order-created" });
+    });
   } catch (error) {
     const message = error instanceof z.ZodError
       ? error.errors.map((entry) => `${entry.path.join(".")}: ${entry.message}`).join("; ")
