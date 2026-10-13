@@ -27,7 +27,7 @@ const money = (amount: number) => `K${Number(amount || 0).toFixed(2)}`;
 export default function SupplierBillWorkspace(props: Props) {
   const [tab, setTab] = useState<Tab>("settlement");
   const status = String(props.status || "").toUpperCase();
-  const posted = !["DRAFT", "PENDING", "PENDING_APPROVAL", "CANCELLED", "VOID"].includes(status);
+  const posted = ["POSTED", "PARTLY_PAID", "PARTIAL", "PAID", "SETTLED"].includes(status);
   const canSettle = posted && props.outstanding > 0.001;
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: "settlement", label: "Settlement & Advances" },
@@ -58,7 +58,7 @@ export default function SupplierBillWorkspace(props: Props) {
     {tab === "settlement" && <div role="tabpanel">
       {!posted && <p className="small">Invoice settlement starts after approval and posting. DRAFT invoices can plan PO-linked advances for automatic allocation during approval.</p>}
       {!props.poId && <div className="status-banner">No source Purchase Order linked. PO-specific advance matching cannot be suggested automatically.</div>}
-      {props.poId && <SupplierAdvanceChainSummary context="invoice" poId={props.poId}
+      {props.poId && posted && <SupplierAdvanceChainSummary context="invoice" poId={props.poId}
         supplierId={props.supplierId} billId={props.billId} billNumber={props.billNumber}
         billTotal={props.total} billOutstanding={props.outstanding} />}
       {props.poId && <SupplierInvoiceAdvanceAdjustment billId={props.billId}
