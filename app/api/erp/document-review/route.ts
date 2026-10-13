@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   if (!record) return bad("Document not found", 404);
   const review = await prisma.approvalRequest.findFirst({ where: { type: tag(kind), documentCode: id }, orderBy: { createdAt: "desc" },
     select: { id: true, status: true, requestedBy: true, requestedAt: true, approverComment: true, rejectionReason: true } });
-  return NextResponse.json({ ok: true, status: String(record.status || "DRAFT"), review, canSubmit: hasPermission(user, supported[kind].write), canReview: hasPermission(user, "post.approve") });
+  return NextResponse.json({ ok: true, status: String(record.status || "DRAFT"), review, canSubmit: hasPermission(user, supported[kind].write), canReview: hasPermission(user, "post.approve") && review?.requestedBy !== user.userId });
 }
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
