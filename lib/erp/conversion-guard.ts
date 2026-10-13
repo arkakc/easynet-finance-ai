@@ -7,28 +7,47 @@ import { prisma } from "@/src/lib/prisma";
  * The downstream legacy Apps Script write is not transactionally coupled
  * to SQLite; call sites must recheck existing records after acquisition.
  */
-export async function withConversionGuard<T>(kind: string, sourceId: string, execute: () => Promise<T>): Promise<T> {
-  const code = "CONVERSION:" + createHash("sha256").update(kind + ":" + sourceId).digest("hex");
-  let lock: { id: string };
+export function conversionClaimCode(kind: string, sourceId: string): string {
+  return "CONVERSION:" + createHash("sha256").update(kind + ":" + sourceId).digest("hex");
+}
+
+type ClaimStore = {
+  create(args: { data: { code: string; type: string; documentType: string; documentCode: string; requestedBy: string; status: "PENDING" }; select: { id: true } }): Promise<{ id: string }>;
+  update(args: { where: { id: string }; data: { status: "APPROVED" | "IN_REVIEW"; approvedAt?: Date; approverComment?: string } }): Promise<unknown>;
+};
+
+export async function executeWithConversionClaim<T>(
+  store: ClaimStore, kind: string, sourceId: string, execute: () => Promise<T>,
+): Promise<T> {
+  if (!kind.trim() || !sourceId.trim()) throw new Error("A source and conversion type are required");
+  let claim: { id: string };
   try {
-    lock = await prisma.approvalRequest.create({
-      data: { code, type: "ERP_CONVERSION_IDEMPOTENCY", documentType: kind, documentCode: sourceId, requestedBy: "system", status: "PENDING" },
+    claim = await store.create({
+      data: { code: conversionClaimCode(kind, sourceId), type: "ERP_CONVERSION_IDEMPOTENCY", documentType: kind,
+        documentCode: sourceId, requestedBy: "system", status: "PENDING" },
       select: { id: true },
     });
   } catch (error) {
-    const isDuplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
-    if (isDuplicate) throw new Error("Conversion already in progress or completed for this source. Refresh linked documents before retrying.");
+    const duplicate = typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
+    if (duplicate) throw new Error("Conversion already in progress or completed for this source. Refresh linked documents before retrying.");
     throw error;
   }
   try {
     const result = await execute();
-    await prisma.approvalRequest.update({ where: { id: lock.id }, data: { status: "APPROVED", approvedAt: new Date() } });
+    await store.update({ where: { id: claim.id }, data: { status: "APPROVED", approvedAt: new Date() } });
     return result;
   } catch (error) {
-    // A downstream write may have partially succeeded. Keep the unique claim
-    // until an operator reconciles the source/target pair. Never automatically
-    // release it and risk creating another financially significant document.
-    await prisma.approvalRequest.update({ where: { id: lock.id }, data: { status: "IN_REVIEW", approverComment: "Conversion failed or downstream outcome uncertain; reconcile before retrying." } }).catch(() => undefined);
+    // Downstream writes may have succeeded; never release this claim automatically.
+    await store.update({ where: { id: claim.id }, data: {
+      status: "IN_REVIEW", approverComment: "Conversion failed or downstream outcome uncertain; reconcile before retrying.",
+    } }).catch(() => undefined);
     throw error;
   }
+}
+
+export async function withConversionGuard<T>(kind: string, sourceId: string, execute: () => Promise<T>): Promise<T> {
+  return executeWithConversionClaim({
+    create: args => prisma.approvalRequest.create(args),
+    update: args => prisma.approvalRequest.update(args),
+  }, kind, sourceId, execute);
 }
