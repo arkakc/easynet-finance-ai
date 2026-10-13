@@ -11,7 +11,6 @@ import {
   AlertCircle,
   HelpCircle,
   ChevronDown,
-  ChevronUp,
   RefreshCw,
 } from "lucide-react";
 
@@ -62,157 +61,50 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="login-wrap">
-      <main className="login-card-simple">
-        {/* Header with official Easynet Logo & Title */}
-        <div className="login-header">
-          <a
-            href="https://www.easynetpng.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/easynet-logo.png"
-              alt="Easynet IT Solutions"
-              className="login-logo-img"
-            />
-          </a>
-
-          <h1 className="login-title">Easynet Finance AI System</h1>
-          <p className="login-powered">
-            Powered by{" "}
-            <a
-              href="https://www.easynetpng.com/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Easynet IT Solutions
-            </a>
-          </p>
-        </div>
-
-        {/* User Navigation: How to Log In */}
-        <div className="login-guide-toggle">
-          <button
-            type="button"
-            className="login-guide-btn"
-            onClick={() => setShowGuide(!showGuide)}
-            aria-expanded={showGuide}
-            aria-controls="login-instructions"
-          >
-            <span className="login-guide-btn-left">
-              <HelpCircle size={15} color="#0052cc" />
-              <span>How to Sign In (First-time user or Demo?)</span>
-            </span>
-            {showGuide ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
-
-          {showGuide && (
-            <div id="login-instructions" className="login-guide-content">
-              <ol className="login-guide-steps">
-                <li>Sign in using your assigned corporate email address.</li>
-                <li>Enter your role-assigned secure password.</li>
-                <li>Access is strictly governed by ERP security policies and audit trails.</li>
-              </ol>
+    <div className="ef-signin">
+      <div className="ef-signin-brand" aria-hidden="true">
+        <span className="ef-signin-brand-orbit ef-signin-brand-orbit-one" />
+        <span className="ef-signin-brand-orbit ef-signin-brand-orbit-two" />
+      </div>
+      <main className="ef-signin-content">
+        <a className="ef-signin-logo" href="https://www.easynetpng.com/" target="_blank" rel="noopener noreferrer" aria-label="Easynet IT Solutions website">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/easynet-logo.png" alt="Easynet IT Solutions" />
+        </a>
+        <section className="ef-signin-panel" aria-labelledby="signin-heading">
+          <header className="ef-signin-heading">
+            <span className="ef-signin-eyebrow">EASYNET FINANCE</span>
+            <h1 id="signin-heading">Sign in to your workspace</h1>
+            <p>Secure access to Easynet Finance AI System</p>
+          </header>
+          {error && <div key={shakeKey} className="ef-signin-alert" role="alert"><AlertCircle size={17} aria-hidden="true" /><span>{error}</span></div>}
+          <form className="ef-signin-form" onSubmit={submit} noValidate>
+            <label htmlFor="login-email">Corporate email</label>
+            <div className="ef-signin-input">
+              <Mail size={17} aria-hidden="true" />
+              <input id="login-email" name="email" type="email" autoComplete="username" placeholder="name@company.com" autoFocus required value={email} onChange={e => setEmail(e.target.value)} disabled={busy}/>
             </div>
-          )}
-        </div>
-
-        {/* Failed Login Error Banner */}
-        {error && (
-          <div key={shakeKey} className="login-error-banner" role="alert">
-            <AlertCircle size={18} className="login-error-icon" />
-            <div className="login-error-body">
-              <div className="login-error-title">Login Failed</div>
-              <div className="login-error-msg">{error}</div>
-            </div>
-          </div>
-        )}
-
-        {/* Login Form */}
-        <form className="login-form" onSubmit={submit} noValidate>
-          <div className="login-field">
-            <label htmlFor="login-email">
-              <span>Corporate Email</span>
-            </label>
-            <div className="login-input-wrapper">
-              <Mail size={16} className="login-input-icon" />
-              <input
-                id="login-email"
-                name="email"
-                type="email"
-                autoComplete="username"
-                placeholder="you@easynet.local"
-                required
-                autoFocus
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                disabled={busy}
-              />
-            </div>
-          </div>
-
-          <div className="login-field">
-            <label htmlFor="login-password">
-              <span>Password</span>
-            </label>
-            <div className="login-input-wrapper">
-              <Lock size={16} className="login-input-icon" />
-              <input
-                id="login-password"
-                name="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                placeholder="••••••••••••"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={busy}
-              />
-              <button
-                type="button"
-                className="login-eye-btn"
-                onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                tabIndex={-1}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            <label htmlFor="login-password">Password</label>
+            <div className="ef-signin-input">
+              <Lock size={17} aria-hidden="true" />
+              <input id="login-password" name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Enter your password" required value={password} onChange={e => setPassword(e.target.value)} disabled={busy}/>
+              <button className="ef-signin-reveal" type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword(!showPassword)}>
+                {showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}
               </button>
             </div>
+            <button id="login-submit-button" className="ef-signin-submit" type="submit" disabled={busy}>
+              {busy ? <RefreshCw size={17} className="ef-signin-spin"/> : <ShieldCheck size={17}/>}
+              {busy ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+          <div className="ef-signin-assistance">
+            <button type="button" onClick={() => setShowGuide(!showGuide)} aria-expanded={showGuide} aria-controls="signin-guide"><HelpCircle size={15}/> Sign-in help <ChevronDown size={14} className={showGuide ? "ef-signin-flip" : ""}/></button>
+            <a href="https://www.easynetpng.com/" target="_blank" rel="noopener noreferrer">Forgot your password?</a>
           </div>
-
-          <button
-            disabled={busy}
-            type="submit"
-            className="login-submit-btn"
-            id="login-submit-button"
-          >
-            {busy ? (
-              <>
-                <RefreshCw size={17} style={{ animation: "spin 1s linear infinite" }} />
-                <span>Signing in…</span>
-              </>
-            ) : (
-              <>
-                <ShieldCheck size={17} />
-                <span>Sign in</span>
-              </>
-            )}
-          </button>
-        </form>
-
-        {/* Footer Support Link requested by user */}
-        <div className="login-footer-support">
-          Need access or forgot your password?{" "}
-          <a
-            href="https://www.easynetpng.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Contact Easynet PNG IT Support
-          </a>
-        </div>
+          {showGuide && <div className="ef-signin-guide" id="signin-guide">Use your assigned corporate email and password. For first-time access or a password reset, contact Easynet IT Support. Your access is controlled by ERP roles and permissions.</div>}
+          <footer className="ef-signin-panel-footer">Need access? <a href="https://www.easynetpng.com/" target="_blank" rel="noopener noreferrer">Contact Easynet IT Support</a></footer>
+        </section>
+        <p className="ef-signin-copyright">Powered by <a href="https://www.easynetpng.com/" target="_blank" rel="noopener noreferrer">Easynet IT Solutions</a> · Secure finance workspace</p>
       </main>
     </div>
   );
