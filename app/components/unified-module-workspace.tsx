@@ -14,6 +14,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   const [registerKind, setRegisterKind] = useState("All");
   const [registerStatus, setRegisterStatus] = useState("All");
   const [registerPage, setRegisterPage] = useState(1);
+  const [registerSort, setRegisterSort] = useState<"newest" | "oldest" | "amount-high" | "amount-low">("newest");
   const pageSize = 10;
   const sections = useMemo(() => ["All", ...new Set(actions.map(action => action.section))], [actions]);
   const visible = useMemo(() => actions.filter(action => {
@@ -30,9 +31,19 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
     const search = registerQuery.trim().toLowerCase();
     return !search || [row.number, row.kind, row.party, row.status, row.currency].join(" ").toLowerCase().includes(search);
   }), [recentDocuments, registerKind, registerQuery, registerStatus]);
-  const pageCount = Math.max(1, Math.ceil(visibleDocuments.length / pageSize));
+  const sortedDocuments = useMemo(() => [...visibleDocuments].sort((a, b) => {
+    if (registerSort === "amount-high") return b.amount - a.amount || b.date.localeCompare(a.date);
+    if (registerSort === "amount-low") return a.amount - b.amount || b.date.localeCompare(a.date);
+    if (registerSort === "oldest") return a.date.localeCompare(b.date) || a.number.localeCompare(b.number);
+    return b.date.localeCompare(a.date) || b.number.localeCompare(a.number);
+  }), [visibleDocuments, registerSort]);
+  const pageCount = Math.max(1, Math.ceil(sortedDocuments.length / pageSize));
   const currentPage = Math.min(registerPage, pageCount);
-  const pageDocuments = visibleDocuments.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pageDocuments = sortedDocuments.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const workflow = useMemo(() => actions.reduce<Array<{ section: string; href: string }>>((items, action) => {
+    if (!items.some(item => item.section === action.section)) items.push({ section: action.section, href: action.href });
+    return items;
+  }, []), [actions]);
   const create = actions.find(action => action.kind === "action");
 
   return <div className="unified-module-workspace">
@@ -58,6 +69,12 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       >{module.title.replace(" Workspace", "")}</Link>)}
     </nav>
 
+    <section className="panel unified-workspace-content" aria-label={workspace.title + " workflow"}>
+      <div className="unified-workspace-section-head"><div><h2>Workflow at a glance</h2><p className="small">Choose a step to open its existing secured register. Steps shown depend on your permissions.</p></div></div>
+      <nav className="unified-workspace-tabs" aria-label="Workflow steps">
+        {workflow.map((step, index) => <Link prefetch={false} key={step.section} className="unified-workspace-tab" href={step.href}>{index + 1}. {step.section} <span aria-hidden="true">↗</span></Link>)}
+      </nav>
+    </section>
     <section className="panel unified-workspace-content" aria-label={workspace.title + " register shortcuts"}>
       <div className="unified-workspace-section-head">
         <div>
@@ -72,6 +89,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       <div className="unified-workspace-tabs" role="group" aria-label="Filter by work category">
         {sections.map(name => <button type="button" key={name} aria-pressed={section === name} className={section === name ? "unified-workspace-tab selected" : "unified-workspace-tab"} onClick={() => setSection(name)}>{name}</button>)}
       </div>
+      <div className="unified-workspace-register-controls"><span>{visible.length} of {actions.length} available actions</span><button type="button" disabled={section === "All" && !query} onClick={() => { setSection("All"); setQuery(""); }}>Clear action filters</button></div>
       <div className="unified-workspace-action-grid">
         {visible.map(action => <Link key={action.href + action.title} prefetch={false} href={action.href} className="unified-workspace-action">
           <span className="unified-workspace-action-category">{action.section}</span>
@@ -94,7 +112,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       <div className="unified-workspace-tabs" role="group" aria-label="Filter recent document type">
         {registerKinds.map(kind => <button type="button" key={kind} className={registerKind === kind ? "unified-workspace-tab selected" : "unified-workspace-tab"} aria-pressed={registerKind === kind} onClick={() => { setRegisterKind(kind); setRegisterPage(1); }}>{kind}</button>)}
       </div>
-      <div className="unified-workspace-register-controls"><label>Status <select value={registerStatus} onChange={event => { setRegisterStatus(event.target.value); setRegisterPage(1); }}>{registerStatuses.map(status => <option key={status} value={status}>{status}</option>)}</select></label><span>{visibleDocuments.length} of {recentDocuments.length} recent documents</span></div>
+      <div className="unified-workspace-register-controls"><label>Status <select value={registerStatus} onChange={event => { setRegisterStatus(event.target.value); setRegisterPage(1); }}>{registerStatuses.map(status => <option key={status} value={status}>{status}</option>)}</select></label><label>Sort <select value={registerSort} onChange={event => { setRegisterSort(event.target.value as typeof registerSort); setRegisterPage(1); }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="amount-high">Amount: high to low</option><option value="amount-low">Amount: low to high</option></select></label><button type="button" disabled={!registerQuery && registerKind === "All" && registerStatus === "All" && registerSort === "newest"} onClick={() => { setRegisterQuery(""); setRegisterKind("All"); setRegisterStatus("All"); setRegisterSort("newest"); setRegisterPage(1); }}>Clear register filters</button><span>{visibleDocuments.length} of {recentDocuments.length} recent documents</span></div>
       <div className="table-wrap">
         <table className="data-table unified-workspace-register">
           <thead><tr><th>Document No</th><th>Type</th><th>Party</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
