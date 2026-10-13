@@ -1,7 +1,7 @@
 export type BackupEvidence = { verifiedAt?:string; restoreVerifiedAt?:string };
 export function productionEvidenceChecks(evidence:BackupEvidence, now=new Date()) {
  const valid=(value?:string)=>{
-  if(!value||!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/.test(value))return false;
+  if(!value||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value))return false;
   const timestamp=new Date(value).getTime(),age=now.getTime()-timestamp;
   return Number.isFinite(timestamp)&&age>=0&&age<=24*60*60*1000;
  };
