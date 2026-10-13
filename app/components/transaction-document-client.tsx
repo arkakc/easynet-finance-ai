@@ -7,6 +7,7 @@ import PrintButton from "@/app/components/print-button";
 import DocumentIdentityHeader from "@/app/components/document-identity-header";
 import DocumentActionBar from "@/app/components/document-action-bar";
 import DocumentSectionTabs from "@/app/components/document-section-tabs";
+import DocumentEvidencePanels from "@/app/components/document-evidence-panels";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -559,7 +560,8 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       ...(type !== "expense" ? [{ id: "workflow", label: "Document Flow", href: "#document-workflow" }] : []),
       ...(documentLinks.length || previous ? [{ id: "related", label: "Related Documents", href: "#document-related" }] : []),
       ...(record.journalId ? [{ id: "accounting", label: "Accounting", href: `/journals/${encodeURIComponent(String(record.journalId))}`, external: true }] : []),
-      ...(record.createdAt || record.updatedAt ? [{ id: "history", label: "History", href: "#document-history" }] : []),
+      { id: "attachments", label: "Attachments", href: "#document-attachments" },
+      { id: "activity", label: "Activity & Audit", href: "#document-activity" },
       { id: "actions", label: "Actions", href: "#document-actions" },
     ]} />}
     <section className="document-sheet" id="document-details">
@@ -656,6 +658,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
         {record.updatedAt && <p>Last updated: <time>{String(record.updatedAt)}</time></p>}
       </section>
     )}
+    {record && <DocumentEvidencePanels type={type} id={id} />}
     <div id="document-actions" />
     {record&&<>
       {isSalesOrder&&salesOrderSourceQuoteId&&String(record.customerId||"")&&<CustomerAdvanceChainSummary context="order" sourceQuoteId={salesOrderSourceQuoteId} customerId={String(record.customerId||"")} quoteTotal={n(record.totalAmount)}/>}
