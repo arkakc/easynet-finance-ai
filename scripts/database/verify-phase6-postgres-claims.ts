@@ -15,7 +15,9 @@ async function main() {
   const url = new URL(raw);
   const databaseName = decodeURIComponent(url.pathname.replace(/^\//, ""));
   if (!/^easynet_phase6_test_[a-z0-9_]+$/i.test(databaseName)) throw new Error("Test DB name must start easynet_phase6_test_");
-  if (/^(public|prod|production)$/i.test(url.searchParams.get("schema") || "")) throw new Error("Production/public schema refused");
+  const schema = url.searchParams.get("schema") || "";
+  if (!/^phase6qa[a-z0-9_]*$/i.test(schema)) throw new Error("Explicit dedicated phase6qa* schema required; public/default schemas refused");
+  if (!["postgresql:", "postgres:"].includes(url.protocol)) throw new Error("PostgreSQL protocol required");
   const require = createRequire(import.meta.url);
   const generated = require(path.resolve(process.cwd(), "prisma/generated/postgresql-client/index.js"));
   const Client = generated.PrismaClient;
