@@ -1,3 +1,4 @@
+import { productionEvidenceChecks, sqliteBackupReady } from "@/lib/system/release-evidence";
 import { conversionClaimsReadiness } from "@/lib/system/conversion-release-check";
 import { buildFinancialReconciliationSnapshot } from "@/lib/system/financial-reconciliation";
 import { listDatabaseBackups } from "@/lib/system/database-backup";
@@ -31,26 +32,24 @@ async function backupReadinessCheck(): Promise<GoLiveCheck> {
   const runtime = databaseRuntimeInfo();
 
   if (runtime.provider === "postgresql") {
-    const raw = process.env.POSTGRES_BACKUP_VERIFIED_AT?.trim() || "";
-    const verifiedAt = raw ? new Date(raw) : null;
-    const valid = Boolean(verifiedAt && !Number.isNaN(verifiedAt.getTime()));
-    const ageMs = valid ? Date.now() - verifiedAt!.getTime() : Number.POSITIVE_INFINITY;
-    const fresh = valid && ageMs >= -5 * 60 * 1000 && ageMs <= 24 * 60 * 60 * 1000;
-
+    const evidence = productionEvidenceChecks({
+      verifiedAt: process.env.POSTGRES_BACKUP_VERIFIED_AT,
+      restoreVerifiedAt: process.env.POSTGRES_RESTORE_VERIFIED_AT,
+    });
     return {
       key: "backup",
-      label: "Managed PostgreSQL backup/PITR verified within 24 hours",
+      label: "Managed PostgreSQL backup and restore verification within 24 hours",
       blocking: true,
-      passed: fresh,
-      detail: fresh
-        ? `Backup verification recorded at ${verifiedAt!.toISOString()}`
-        : "Set POSTGRES_BACKUP_VERIFIED_AT to the ISO timestamp of a verified managed backup/PITR check performed within the last 24 hours",
+      passed: evidence.backupFresh && evidence.restoreFresh,
+      detail: evidence.backupFresh && evidence.restoreFresh
+        ? "Operator recorded backup and isolated restore verification within the last 24 hours (self-attested; independent audit required)"
+        : "Both POSTGRES_BACKUP_VERIFIED_AT and POSTGRES_RESTORE_VERIFIED_AT must record actual independently verified checks within 24 hours; environment timestamps alone do not prove a restore.",
     };
   }
 
   const backups = await listDatabaseBackups();
   const latest = backups[0];
-  const fresh = Boolean(latest && Date.now() - new Date(latest.createdAt).getTime() <= 24 * 60 * 60 * 1000);
+  const fresh = Boolean(latest && sqliteBackupReady({ createdAt: latest.createdAt, manifestPresent: latest.manifestPresent, checksum: latest.sha256 }));
 
   return {
     key: "backup",
