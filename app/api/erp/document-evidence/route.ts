@@ -8,7 +8,7 @@ const types: Record<string, { permission: Permission; entity: string; documentTy
   purchaseOrder: { permission: "purchase.read", entity: "PurchaseOrder", documentTypes: ["PO", "PURCHASE_ORDER"] },
   supplierBill: { permission: "purchase.read", entity: "SupplierBill", documentTypes: ["BILL", "SUPPLIER_INVOICE"] },
   payment: { permission: "dashboard.read", entity: "Payment", documentTypes: ["PAYMENT", "RECEIPT"] },
-  expense: { permission: "purchase.read", entity: "Expense", documentTypes: ["EXPENSE"] },
+  expense: { permission: "purchase.read", entity: "Expense", documentTypes: ["EXPENSE", "OTHER"] },
 };
 
 /** Read-only evidence and audit activities, always scoped by document type and ID. */
