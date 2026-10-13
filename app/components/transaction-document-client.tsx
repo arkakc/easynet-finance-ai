@@ -8,6 +8,7 @@ import DocumentIdentityHeader from "@/app/components/document-identity-header";
 import DocumentActionBar from "@/app/components/document-action-bar";
 import DocumentSectionTabs from "@/app/components/document-section-tabs";
 import DocumentEvidencePanels from "@/app/components/document-evidence-panels";
+import DocumentFinancialPanels from "@/app/components/document-financial-panels";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentWorkflowActions from "@/app/components/document-workflow-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -559,7 +560,8 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       { id: "details", label: "Details", href: "#document-details" },
       ...(type !== "expense" ? [{ id: "workflow", label: "Document Flow", href: "#document-workflow" }] : []),
       ...(documentLinks.length || previous ? [{ id: "related", label: "Related Documents", href: "#document-related" }] : []),
-      ...(record.journalId ? [{ id: "accounting", label: "Accounting", href: `/journals/${encodeURIComponent(String(record.journalId))}`, external: true }] : []),
+      { id: "settlement", label: "Settlement", href: "#document-settlement" },
+      { id: "accounting", label: "Accounting & GST", href: "#document-accounting" },
       { id: "attachments", label: "Attachments", href: "#document-attachments" },
       { id: "activity", label: "Activity & Audit", href: "#document-activity" },
       { id: "actions", label: "Actions", href: "#document-actions" },
@@ -642,11 +644,13 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </>:null}
     </section>
 
+    {record && <DocumentFinancialPanels record={record} />}
     {record && (documentLinks.length > 0 || previous) && (
       <section className="panel" id="document-related" aria-label="Related documents">
         <h2>Related Documents</h2>
         <p className="small">Linked source documents from the current record. Full relationship explorer shows the complete chain.</p>
         {previous && <p><strong>{previous.label}:</strong> <Link prefetch={false} href={href(previous.type, previous.id)}>{previous.number}</Link></p>}
+        {documentLinks.length > 0 && <ul>{documentLinks.map((linked: any, index: number) => <li key={`${linked.type}-${linked.id}-${index}`}><span>{linked.label}: </span><Link prefetch={false} href={String(linked.href)}>{String(linked.number || linked.id)}</Link></li>)}</ul>}
         <p><Link prefetch={false} href={explorerHref}>Open Document Relationship Explorer</Link></p>
       </section>
     )}

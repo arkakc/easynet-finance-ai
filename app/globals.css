@@ -5452,3 +5452,21 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .unified-workspace-pagination>div{display:flex;gap:8px}
 .unified-workspace-pagination button{padding:7px 12px;border-radius:7px;font-size:12px}
 @media(max-width:600px){.unified-workspace-summary{grid-template-columns:1fr}.unified-workspace-register{min-width:680px}}
+
+/* Phase 3: consistent compact financial sections on saved DocTypes */
+.phase3-document-panel { margin-top: 16px; min-width: 0; }
+.phase3-financial-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; margin: 12px 0; }
+.phase3-financial-grid > div { min-width: 0; padding: 12px; background: var(--bg-canvas, #f8fafc); border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 10px; }
+.phase3-financial-grid dt { font-size: 12px; color: var(--text-secondary, #475569); }
+.phase3-financial-grid dd { margin: 5px 0 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+#document-related, #document-attachments, #document-activity, #document-history { margin-top: 16px; overflow-wrap: anywhere; }
+#document-related ul, #document-attachments ul, #document-activity ol { padding-left: 22px; }
+#document-related li, #document-attachments li, #document-activity li { margin: 8px 0; }
+#document-details, #document-workflow, #document-related, #document-settlement, #document-accounting, #document-attachments, #document-activity, #document-actions { scroll-margin-top: 90px; }
+@media (max-width: 640px) {
+  .document-toolbar { flex-wrap: wrap; }
+  .document-toolbar .row-actions { flex-wrap: wrap; max-width: 100%; }
+  .document-flow-tab-row { flex-wrap: wrap; }
+  .phase3-financial-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+@media (max-width: 360px) { .phase3-financial-grid { grid-template-columns: 1fr; } }
