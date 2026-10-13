@@ -29,7 +29,7 @@ export async function POST(request: Request) {
           journalId: input.journalId,
           checkerEmail: checker.email,
           note: input.note,
-          allowSelfApproval: isSystemManager,
+          allowSelfApproval: false,
         });
 
     return NextResponse.json({ ok: true, result });
