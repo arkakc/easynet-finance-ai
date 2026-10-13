@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
+import { findRecords } from "@/lib/backend/apps-script";
 import { readEvidenceFile, saveEvidenceFile } from "@/lib/documents/evidence-storage";
 
-const config: Record<string, { read: Permission; write: Permission; docType: "QUOTE" | "INVOICE" | "PURCHASE_ORDER" | "BILL" | "RECEIPT" | "OTHER"; documentTypes: string[] }> = {
-  quote: { read: "sales.read", write: "sales.write", docType: "QUOTE", documentTypes: ["QUOTE", "SALES_ORDER"] },
-  invoice: { read: "sales.read", write: "sales.write", docType: "INVOICE", documentTypes: ["INVOICE", "SALES_INVOICE"] },
-  purchaseOrder: { read: "purchase.read", write: "purchase.write", docType: "PURCHASE_ORDER", documentTypes: ["PO", "PURCHASE_ORDER"] },
-  supplierBill: { read: "purchase.read", write: "purchase.write", docType: "BILL", documentTypes: ["BILL", "SUPPLIER_INVOICE"] },
-  payment: { read: "dashboard.read", write: "accounts.write", docType: "RECEIPT", documentTypes: ["PAYMENT", "RECEIPT"] },
-  expense: { read: "purchase.read", write: "purchase.write", docType: "OTHER", documentTypes: ["EXPENSE"] },
+const config: Record<string, { read: Permission; write: Permission; docType: "QUOTE" | "INVOICE" | "PURCHASE_ORDER" | "BILL" | "RECEIPT" | "OTHER"; documentTypes: string[]; table: string; idField: string }> = {
+  quote: { read: "sales.read", write: "sales.write", docType: "QUOTE", documentTypes: ["QUOTE", "SALES_ORDER"], table: "Quotes", idField: "quoteId" },
+  invoice: { read: "sales.read", write: "sales.write", docType: "INVOICE", documentTypes: ["INVOICE", "SALES_INVOICE"], table: "Invoices", idField: "invoiceId" },
+  purchaseOrder: { read: "purchase.read", write: "purchase.write", docType: "PURCHASE_ORDER", documentTypes: ["PO", "PURCHASE_ORDER"], table: "PurchaseOrders", idField: "poId" },
+  supplierBill: { read: "purchase.read", write: "purchase.write", docType: "BILL", documentTypes: ["BILL", "SUPPLIER_INVOICE"], table: "SupplierBills", idField: "billId" },
+  payment: { read: "dashboard.read", write: "accounts.write", docType: "RECEIPT", documentTypes: ["PAYMENT", "RECEIPT"], table: "Payments", idField: "paymentId" },
+  expense: { read: "purchase.read", write: "purchase.write", docType: "OTHER", documentTypes: ["EXPENSE"], table: "Expenses", idField: "expenseId" },
 };
 async function access(type: string, write = false) {
   const user = await getCurrentUser();
@@ -27,6 +28,8 @@ export async function POST(req: NextRequest) {
   const auth = await access(type, true);
   if (!auth) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   if (!validId(id) || !auth.user.userId) return NextResponse.json({ ok: false, error: "Invalid document" }, { status: 400 });
+  const parent = await findRecords<Record<string, unknown>>(auth.selected.table, { [auth.selected.idField]: id }, 1);
+  if (!parent.rows.length) return NextResponse.json({ ok: false, error: "Source transaction not found" }, { status: 404 });
   const file = form.get("file");
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "File is required" }, { status: 400 });
   try {
