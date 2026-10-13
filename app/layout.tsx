@@ -1,5 +1,6 @@
 import "./globals.css";
 import "./busy-controls.css";
+import { Suspense } from "react";
 import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
 import FlowReturnBridge from "@/app/components/flow-return-bridge";
 import SetupAccessGuard from "@/app/components/setup-access-guard";
@@ -119,7 +120,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             />
             <ProfileMenu userName={user.name} userRoles={user.roles} />
             <main className="main">
-              <GlobalNavigationBar groups={navGroups} />
+              <Suspense fallback={null}><GlobalNavigationBar groups={navGroups} /></Suspense>
               <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
               <GlobalDataTableEnhancer />
