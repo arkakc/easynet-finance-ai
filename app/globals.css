@@ -5456,3 +5456,15 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
   .en-nav-controls { width: 100%; justify-content: flex-end; }
 }
 @media print { .en-navigation-topbar { display: none !important; } }
+
+.en-quick-create { position: relative; }
+.en-quick-create-menu {
+  position: absolute; right: 0; top: calc(100% + 5px); width: 230px;
+  display: grid; gap: 3px; padding: 8px; border-radius: 10px;
+  background: var(--bg-card, #fff); color: var(--text, #1f2937);
+  border: 1px solid var(--border-subtle, #dce4ee);
+  box-shadow: 0 16px 40px rgba(15,23,42,.17); z-index: 80;
+}
+.en-quick-create-menu button { display: block; width: 100%; text-align: left; color: inherit; background: transparent; border: 0; border-radius: 7px; padding: 9px; }
+.en-quick-create-menu button:hover,.en-quick-create-menu button:focus-visible { background: rgba(100,116,139,.12); }
+@media (max-width: 560px) { .en-quick-create-menu { right: -100px; } }
