@@ -71,7 +71,12 @@ export default async function ProjectsPage() {
     error = err instanceof Error ? err.message : "Project report load failed";
   }
 
-  const posting = projectFinancialBreakdown(lines, accounts);
+  const posting = projectFinancialBreakdown(lines.map((line) => ({
+    projectId: line.projectId,
+    accountId: line.accountId,
+    debit: Number(line.debit),
+    credit: Number(line.credit),
+  })), accounts);
   const rows = projects.map((project) => {
     const summary = posting.get(project.projectId);
     const revenue = summary?.revenue ?? 0;
