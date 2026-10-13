@@ -12,6 +12,9 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   const [section, setSection] = useState("All");
   const [registerQuery, setRegisterQuery] = useState("");
   const [registerKind, setRegisterKind] = useState("All");
+  const [registerStatus, setRegisterStatus] = useState("All");
+  const [registerPage, setRegisterPage] = useState(1);
+  const pageSize = 10;
   const sections = useMemo(() => ["All", ...new Set(actions.map(action => action.section))], [actions]);
   const visible = useMemo(() => actions.filter(action => {
     if (section !== "All" && action.section !== section) return false;
@@ -20,11 +23,16 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   }), [actions, query, section]);
   const primary = actions.find(action => action.kind === "primary") || actions[0];
   const registerKinds = useMemo(() => ["All", ...new Set(recentDocuments.map(row => row.kind))], [recentDocuments]);
+  const registerStatuses = useMemo(() => ["All", ...new Set(recentDocuments.map(row => row.status))], [recentDocuments]);
   const visibleDocuments = useMemo(() => recentDocuments.filter(row => {
+    if (registerStatus !== "All" && row.status !== registerStatus) return false;
     if (registerKind !== "All" && row.kind !== registerKind) return false;
     const search = registerQuery.trim().toLowerCase();
     return !search || [row.number, row.kind, row.party, row.status, row.currency].join(" ").toLowerCase().includes(search);
-  }), [recentDocuments, registerKind, registerQuery]);
+  }), [recentDocuments, registerKind, registerQuery, registerStatus]);
+  const pageCount = Math.max(1, Math.ceil(visibleDocuments.length / pageSize));
+  const currentPage = Math.min(registerPage, pageCount);
+  const pageDocuments = visibleDocuments.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const create = actions.find(action => action.kind === "action");
 
   return <div className="unified-module-workspace">
@@ -73,18 +81,24 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         {!visible.length && <p className="unified-workspace-empty">No matching registers. Try another search or category.</p>}
       </div>
     </section>
+    {(workspace.id === "sales" || workspace.id === "purchases") && <div className="unified-workspace-summary" aria-label="Recent transaction summary">
+      <div><span>Recent Documents</span><strong>{recentDocuments.length}</strong></div>
+      <div><span>Document Types</span><strong>{registerKinds.length - 1}</strong></div>
+      <div><span>Statuses Found</span><strong>{registerStatuses.length - 1}</strong></div>
+    </div>}
     {(workspace.id === "sales" || workspace.id === "purchases") && <section className="panel unified-workspace-content unified-workspace-recent" aria-label="Recent business documents">
       <div className="unified-workspace-section-head">
         <div><h2>Recent Documents</h2><p className="small">Read-only preview of up to 40 recent records. Use the register above for full history, approval and posting.</p></div>
-        <label className="unified-workspace-search"><span className="sr-only">Search recent documents</span><input type="search" value={registerQuery} onChange={event => setRegisterQuery(event.target.value)} placeholder="Search number, party or status…" /></label>
+        <label className="unified-workspace-search"><span className="sr-only">Search recent documents</span><input type="search" value={registerQuery} onChange={event => { setRegisterQuery(event.target.value); setRegisterPage(1); }} placeholder="Search number, party or status…" /></label>
       </div>
       <div className="unified-workspace-tabs" role="group" aria-label="Filter recent document type">
-        {registerKinds.map(kind => <button type="button" key={kind} className={registerKind === kind ? "unified-workspace-tab selected" : "unified-workspace-tab"} aria-pressed={registerKind === kind} onClick={() => setRegisterKind(kind)}>{kind}</button>)}
+        {registerKinds.map(kind => <button type="button" key={kind} className={registerKind === kind ? "unified-workspace-tab selected" : "unified-workspace-tab"} aria-pressed={registerKind === kind} onClick={() => { setRegisterKind(kind); setRegisterPage(1); }}>{kind}</button>)}
       </div>
+      <div className="unified-workspace-register-controls"><label>Status <select value={registerStatus} onChange={event => { setRegisterStatus(event.target.value); setRegisterPage(1); }}>{registerStatuses.map(status => <option key={status} value={status}>{status}</option>)}</select></label><span>{visibleDocuments.length} of {recentDocuments.length} recent documents</span></div>
       <div className="table-wrap">
         <table className="data-table unified-workspace-register">
           <thead><tr><th>Document No</th><th>Type</th><th>Party</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
-          <tbody>{visibleDocuments.map(doc => <tr key={doc.kind + doc.id}>
+          <tbody>{pageDocuments.map(doc => <tr key={doc.kind + doc.id}>
             <td><Link prefetch={false} href={doc.href} className="linked-document-id">{doc.number}</Link></td>
             <td>{doc.kind}</td><td>{doc.party}</td><td>{doc.date}</td><td className="unified-workspace-amount">{new Intl.NumberFormat("en-PG", {style:"currency",currency:doc.currency || "PGK"}).format(doc.amount)}</td><td><span className="auto-badge">{doc.status}</span></td>
           </tr>)}
@@ -92,6 +106,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
           </tbody>
         </table>
       </div>
+      <div className="unified-workspace-pagination"><span>Page {currentPage} of {pageCount} · Showing {pageDocuments.length} records</span><div><button type="button" disabled={currentPage <= 1} onClick={() => setRegisterPage(page => Math.max(1, page - 1))}>Previous</button><button type="button" disabled={currentPage >= pageCount} onClick={() => setRegisterPage(page => Math.min(pageCount, page + 1))}>Next</button></div></div>
     </section>}
     <p className="small unified-workspace-footnote">Workspace shortcuts do not create financial entries. Approvals, validation, posting, and ledger changes stay in existing secured transaction workflows.</p>
   </div>;

@@ -5439,3 +5439,16 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .unified-workspace-register td{font-size:12px;vertical-align:middle}
 .unified-workspace-register td:first-child{min-width:150px}
 .unified-workspace-register .unified-workspace-amount{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+
+
+/* Phase 2 unified workspace register controls and visible document summaries */
+.unified-workspace-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0 18px}
+.unified-workspace-summary>div{padding:15px 18px;background:#fff;border:1px solid #e0e8f2;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.unified-workspace-summary span{font-size:12px;color:#60758c}
+.unified-workspace-summary strong{font-size:23px;color:#23466f;font-variant-numeric:tabular-nums}
+.unified-workspace-register-controls,.unified-workspace-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0;font-size:12px;color:#60758c}
+.unified-workspace-register-controls label{display:flex;gap:8px;align-items:center;font-weight:600}
+.unified-workspace-register-controls select{min-width:145px;padding:7px 10px;font-size:12px}
+.unified-workspace-pagination>div{display:flex;gap:8px}
+.unified-workspace-pagination button{padding:7px 12px;border-radius:7px;font-size:12px}
+@media(max-width:600px){.unified-workspace-summary{grid-template-columns:1fr}.unified-workspace-register{min-width:680px}}
