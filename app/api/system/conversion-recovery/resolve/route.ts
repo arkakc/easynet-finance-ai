@@ -24,6 +24,7 @@ export async function POST(request:Request){
   const reviewer=await prisma.user.findUnique({where:{email:actor.email},select:{id:true}});
   if(!reviewer)return NextResponse.json({ok:false,error:"Reviewer not found"},{status:403});
   const targetRows=await findRecords<Record<string,unknown>>(config.table,{sourceDocumentId:claim.documentCode},50);
+  if(targetRows.rows.length===50)return NextResponse.json({ok:false,error:"Target search truncated; reconciliation refused"},{status:409});
   const candidates=targetRows.rows.map(row=>({id:row[config.id],sourceDocumentId:row.sourceDocumentId,status:row.status,journalId:row.journalId}));
   validateRecoveryTarget(claim.documentCode,candidates,input.targetId);
   const target=targetRows.rows.find(row=>String(row[config.id])===input.targetId);
