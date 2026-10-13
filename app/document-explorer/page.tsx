@@ -157,7 +157,7 @@ export default function DocumentExplorerPage(){
         href:`/transactions/${resolvedType}/${encodeURIComponent(resolvedId)}`,
         date:currentDate,
         chainId:"document-chain",
-      },...mapped]);
+      },...mapped.filter((item, index, all) => all.findIndex(other => other.href === item.href) === index)]);
       setRelationshipSide(side);
       setContextLabel(searchedDocument?`${searchedDocument.kind} · ${searchedDocument.number}`:`${kind} · ${currentNumber}`);
       setDocumentId(searchedDocument?.number||currentNumber);
@@ -272,7 +272,7 @@ export default function DocumentExplorerPage(){
 
         <form onSubmit={submitDocument} className="relationship-search-card relationship-search-card-single">
           <strong>Document Relationship</strong>
-          <input value={documentId} onChange={e=>setDocumentId(e.target.value)} placeholder="Enter any document number / ID" />
+          <input value={documentId} onChange={e=>setDocumentId(e.target.value)} placeholder="Document number, transaction ID or reference" />
           <p className="small">Quotation, Sales Order, Delivery, Invoice, Advance, Receipt, Purchase Order, GRN, Supplier Invoice or Payment. The system detects the document type automatically.</p>
           <button type="submit" disabled={loading||!documentId.trim()}>{loading?"Searching…":"Open Document Chain"}</button>
         </form>
