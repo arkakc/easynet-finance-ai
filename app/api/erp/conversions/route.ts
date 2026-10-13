@@ -115,11 +115,13 @@ export async function POST(request: Request) {
       payload = { ...payload, billNumber: await nextNumber("SupplierBills", "billNumber", "PB") };
     }
 
-    return legacyPost(new Request(request.url, {
+    const conversionResponse = await legacyPost(new Request(request.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: body.action, payload, secret: env.APP_SECRET }),
     }));
+    if (!conversionResponse.ok) throw new Error("Controlled conversion failed; review existing linked documents before retrying.");
+    return conversionResponse;
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Conversion failed";
