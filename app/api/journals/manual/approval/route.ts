@@ -15,7 +15,7 @@ const schema = z.object({
 export async function POST(request: Request) {
   try {
     const checker = await requireValidatedRequestPermission(request, "post.approve");
-    const isSystemManager = checker.roles.includes("System Manager");
+    // Privileged users are not exempt from maker-checker separation.
     const input = schema.parse(await request.json());
 
     const result = input.decision === "APPROVE"
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
           journalId: input.journalId,
           checkerEmail: checker.email,
           note: input.note,
-          allowSelfApproval: isSystemManager,
+          allowSelfApproval: false,
         })
       : await rejectPendingManualJournal({
           journalId: input.journalId,
