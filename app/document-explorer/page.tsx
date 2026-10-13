@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import SearchableSelect, { type SearchableSelectOption } from "@/app/components/searchable-select";
+import { safeDocumentHref } from "@/lib/documents/safe-document-links";
 
 type ExplorerRow={
   kind:string;
@@ -138,7 +139,7 @@ export default function DocumentExplorerPage(){
       const side:Side=resolvedType==="purchaseOrder"||resolvedType==="supplierBill"||String(current.partyType||"")==="Supplier"?"purchase":"sales";
       const kind=currentKind(resolvedType,current,currentNumber);
       const currentDate=String(current.quoteDate||current.invoiceDate||current.poDate||current.billDate||current.paymentDate||current.createdAt||"");
-      const mapped:ExplorerRow[]=(body.documentLinks||[]).map((row:any)=>({
+      const mapped:ExplorerRow[]=(body.documentLinks||[]).filter((row:any)=>safeDocumentHref(row.href)).map((row:any)=>({
         kind:String(row.label||"Linked Document"),
         number:String(row.number||row.id||""),
         status:"",
@@ -225,11 +226,11 @@ export default function DocumentExplorerPage(){
   function cellDocuments(documents:ExplorerRow[],stage:string){
     const matches=documents.filter(row=>stageFor(row.kind,relationshipSide)===stage);
     if(!matches.length)return <span className="relationship-empty">—</span>;
-    return <div className="relationship-cell-stack">{matches.map((row,index)=><Link className="relationship-doc-chip" href={row.href} key={`${row.href}-${row.number}-${index}`}>
+    return <div className="relationship-cell-stack">{matches.map((row,index)=>safeDocumentHref(row.href) ? <Link className="relationship-doc-chip" href={row.href} key={`${row.href}-${row.number}-${index}`}>
       <strong>{row.number}</strong>
       {row.status&&<span>{row.status}</span>}
       {row.amount!==null&&row.amount!==undefined&&<small>{money(row.amount)}</small>}
-    </Link>)}</div>;
+    </Link> : <span key={`${row.number}-${index}`} className="relationship-empty">{row.number} (link unavailable)</span>)}</div>;
   }
 
   const sales=relationshipSide==="sales";
@@ -288,7 +289,7 @@ export default function DocumentExplorerPage(){
       </div>
 
       <div className="party-document-toolbar relationship-filter-bar">
-        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search document no., status, amount or date…" />
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search document number, reference, status, amount or date…" />
         <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
           <option value="ALL">All document types</option>
           {types.map(v=><option key={v} value={v}>{v}</option>)}

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { dedupeDocumentLinks } from "@/lib/documents/safe-document-links";
 
 type LinkRow = { direction?: string; label?: string; stage?: number; id?: string; number?: string; href?: string; type?: string };
 export default function DocumentChainNavigator({ links, explorerHref, currentNumber }: { links: LinkRow[]; explorerHref: string; currentNumber: string }) {
   const [copied, setCopied] = useState(false);
-  const valid = links.filter(link => link.href?.startsWith("/") && !link.href.startsWith("//") && link.id && link.number);
+  const valid = dedupeDocumentLinks(links);
   const ordered = [...valid].sort((a, b) => Number(a.stage || 0) - Number(b.stage || 0));
   const previous = [...ordered].reverse().find(link => link.direction === "previous");
   const next = ordered.find(link => link.direction === "next");
