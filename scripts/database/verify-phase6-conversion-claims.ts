@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -21,8 +21,14 @@ async function main() {
   const databasePath = path.join(directory, "test.sqlite").replace(/\\/g, "/");
   const datasourceUrl = "file:" + databasePath;
   const prismaCommand = path.resolve(process.cwd(), "node_modules/prisma/build/index.js");
+  const disposableSchema = path.join(directory, "schema.prisma");
   let client: PrismaClient | undefined;
   try {
+    const originalSchema = await readFile(path.resolve(process.cwd(), "prisma/schema.prisma"), "utf8");
+    const patchedSchema = originalSchema.replace(/(datasource\\s+db\\s*\\{[\\s\\S]*?url\\s*=\\s*)("[^"]*"|env\\("[^"]+"\\))/m,
+      (_match, prefix: string) => prefix + JSON.stringify(datasourceUrl));
+    if (patchedSchema === originalSchema) throw new Error("Cannot locate Prisma datasource; refusing to touch a non-isolated database");
+    await writeFile(disposableSchema, patchedSchema, "utf8");
     const setup = spawnSync(process.execPath, [prismaCommand, "db", "push", "--schema", "prisma/schema.prisma", "--skip-generate"], {
       cwd: process.cwd(),
       env: { ...process.env, DATABASE_PROVIDER: "sqlite", DATABASE_URL: datasourceUrl, EASYNET_PRISMA_DATASOURCE_URL: datasourceUrl },
@@ -44,7 +50,8 @@ async function main() {
       return "created";
     });
     const results = await Promise.allSettled([run(), run()]);
-    assert.equal(results.filter(row => row.status === "fulfilled").length, 1);
+    const failures = results.filter(row => row.status === "rejected").map(row => row.reason instanceof Error ? row.reason.message : String(row.reason));
+    assert.equal(results.filter(row => row.status === "fulfilled").length, 1, `Expected exactly one successful real database claim: ${failures.join(" | ")}`);
     assert.equal(results.filter(row => row.status === "rejected").length, 1);
     assert.equal(writes, 1);
     assert.equal((await db.approvalRequest.findUniqueOrThrow({ where: { code: conversionClaimCode("purchaseOrderToBill", sourceId) } })).status, "APPROVED");
