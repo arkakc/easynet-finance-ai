@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { LayoutDashboard, ShoppingCart, ShoppingBag, Package, Landmark, FolderKanban, BarChart3, Sparkles, Settings, Wrench, ChevronRight } from "lucide-react";
+
+const menuIcons: Record<string, typeof LayoutDashboard> = { Dashboard:LayoutDashboard, Sales:ShoppingCart, Purchase:ShoppingBag, "Stock & Assets":Package, Accounts:Landmark, Projects:FolderKanban, Reports:BarChart3, "Documents & AI":Sparkles, Administration:Settings, "System Setup":Wrench };
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -31,7 +34,7 @@ function hrefIsActive(href: string, pathname: string, searchParams: URLSearchPar
 export default function CollapsibleSidebarNav({ groups, compact = false }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(groups.filter(group=>group.links.some(link=>hrefIsActive(link.href,pathname,searchParams))).map(group=>group.label)));
   const autoCollapseTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
@@ -80,13 +83,16 @@ export default function CollapsibleSidebarNav({ groups, compact = false }: Props
 
   return <nav>
     {groups.map((group) => {
+      const isCurrent = group.links.some(link => hrefIsActive(link.href, pathname, searchParams));
       const isCollapsed = compact || !expanded.has(group.label);
-      return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"} ${compact ? "nav-section-compact" : ""}`} key={group.label} title={compact ? group.label : undefined}>
+      const Icon = menuIcons[group.label] || Package;
+      return <div className={`nav-section ${isCollapsed ? "collapsed" : "expanded"} ${isCurrent ? "current" : ""} ${compact ? "nav-section-compact" : ""}`} key={group.label} title={compact ? group.label : undefined}>
         <button type="button" className="nav-label" onClick={() => toggle(group.label)} aria-expanded={!isCollapsed} aria-controls={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`} aria-label={compact ? group.label : undefined}>
           <span className="nav-label-main">
-            <span className="nav-section-icon">{group.icon}</span>
+            <span className="nav-section-icon"><Icon size={19} strokeWidth={2} aria-hidden="true"/></span>
             <span className="nav-label-text">{group.label}</span>
           </span>
+          <ChevronRight size={15} className="nav-section-chevron" aria-hidden="true"/>
         </button>
         <div className="nav-links" id={`nav-section-${group.label.replace(/\W+/g, "-").toLowerCase()}`}>
           {group.links.map((link) => link.disabled ? (
