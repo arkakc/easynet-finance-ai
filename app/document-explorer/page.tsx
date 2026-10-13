@@ -112,6 +112,11 @@ export default function DocumentExplorerPage(){
       setRelationshipSide(nextPartyType==="customer"?"sales":"purchase");
       const selected=partyOptions.find(option=>option.value===cleanId);
       setContextLabel(selected?.label||`${nextPartyType==="customer"?"Customer":"Supplier"} · ${cleanId}`);
+      const url=new URL(window.location.href);
+      url.searchParams.delete("documentId");
+      url.searchParams.set("partyType",nextPartyType);
+      url.searchParams.set("partyId",cleanId);
+      window.history.replaceState(null,"",url.pathname+url.search);
       setQuery("");setTypeFilter("ALL");setStatusFilter("ALL");setPage(1);
     }catch(reason){setError(reason instanceof Error?reason.message:"Party document history load failed");}
     finally{setLoading(false);}
@@ -155,6 +160,10 @@ export default function DocumentExplorerPage(){
       setRelationshipSide(side);
       setContextLabel(searchedDocument?`${searchedDocument.kind} · ${searchedDocument.number}`:`${kind} · ${currentNumber}`);
       setDocumentId(searchedDocument?.number||currentNumber);
+      const url=new URL(window.location.href);
+      url.searchParams.delete("partyType");url.searchParams.delete("partyId");
+      url.searchParams.set("documentId",currentNumber);
+      window.history.replaceState(null,"",url.pathname+url.search);
       setQuery("");setTypeFilter("ALL");setStatusFilter("ALL");setPage(1);
     }catch(reason){setError(reason instanceof Error?reason.message:"Document relationship load failed");}
     finally{setLoading(false);}

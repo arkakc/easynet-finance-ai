@@ -9,6 +9,7 @@ import DocumentActionBar from "@/app/components/document-action-bar";
 import DocumentSectionTabs from "@/app/components/document-section-tabs";
 import DocumentEvidencePanels from "@/app/components/document-evidence-panels";
 import DocumentFinancialPanels from "@/app/components/document-financial-panels";
+import DocumentChainNavigator from "@/app/components/document-chain-navigator";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentReviewActions from "@/app/components/document-review-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -636,6 +637,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
       </>:null}
     </section>
 
+    {record && <DocumentChainNavigator links={documentLinks} explorerHref={explorerHref} currentNumber={String(number)} />}
     {record && <DocumentFinancialPanels record={record} />}
     {record && (documentLinks.length > 0 || previous) && (
       <section className="panel" id="document-related" aria-label="Related documents">
