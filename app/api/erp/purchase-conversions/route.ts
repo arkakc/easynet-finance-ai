@@ -1,3 +1,4 @@
+import { withConversionGuard } from "@/lib/erp/conversion-guard";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
 import { appendRecord, batchAppend, findRecords, listTable, updateRecord } from "@/lib/backend/apps-script";
@@ -168,9 +169,9 @@ export async function POST(request: Request) {
     const supplierQuoteId = String(body.supplierQuoteId || "").trim();
     const purchaseOrderId = String(body.purchaseOrderId || "").trim();
     if (Boolean(supplierQuoteId) === Boolean(purchaseOrderId)) throw new Error("Provide either Supplier Quotation or Purchase Order for conversion");
-    const result = supplierQuoteId
+    const result = await withConversionGuard(supplierQuoteId ? "supplierQuoteToPo" : "purchaseOrderToBill", supplierQuoteId || purchaseOrderId, async () => supplierQuoteId
       ? await supplierQuoteToPurchaseOrder(supplierQuoteId)
-      : await purchaseOrderToSupplierInvoice(purchaseOrderId);
+      : await purchaseOrderToSupplierInvoice(purchaseOrderId));
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Purchase conversion failed";
