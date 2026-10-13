@@ -5432,3 +5432,10 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .unified-workspace-footnote{margin:12px 0 0;color:#63758a}
 @media(max-width:1150px){.unified-workspace-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:740px){.unified-workspace-header,.unified-workspace-section-head{flex-direction:column}.unified-workspace-header-actions{max-width:none;justify-content:flex-start}.unified-workspace-search{width:100%}.unified-workspace-action-grid{grid-template-columns:1fr}.unified-workspace-content{padding:16px!important}}
+
+
+.unified-workspace-recent{margin-top:20px}
+.unified-workspace-register th{white-space:nowrap;font-size:11px;letter-spacing:.03em}
+.unified-workspace-register td{font-size:12px;vertical-align:middle}
+.unified-workspace-register td:first-child{min-width:150px}
+.unified-workspace-register .unified-workspace-amount{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
