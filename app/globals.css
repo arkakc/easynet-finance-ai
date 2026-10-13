@@ -1304,9 +1304,7 @@ label:has(textarea[required])::after,
 /* Easynet Finance login: standalone enterprise surface (replaces legacy login CSS) */
 .ef-signin{min-height:100dvh;position:relative;display:grid;place-items:center;overflow:hidden;background:#f4f6f9;padding:38px 20px;color:#1c2d43}
 .ef-signin-brand{position:absolute;inset:0;pointer-events:none;overflow:hidden;background:linear-gradient(135deg,#f7f9fc 0%,#f1f5fb 100%)}
-.ef-signin-brand-orbit{position:absolute;display:block;width:min(68vw,980px);height:min(68vw,980px);border-radius:43%;transform:rotate(-28deg)}
-.ef-signin-brand-orbit-one{right:-23%;bottom:-69%;background:linear-gradient(145deg,#0b5ec2,#0b398c);opacity:.98}
-.ef-signin-brand-orbit-two{right:-40%;bottom:-76%;background:linear-gradient(135deg,#1e8ac8,#1264c9);border:85px solid rgba(255,255,255,.09)}
+.ef-signin-erp-art{position:absolute;bottom:-1px;right:-1px;width:min(58vw,790px);height:auto;max-height:92%;opacity:.94;display:block}
 .ef-signin-content{position:relative;z-index:1;width:min(100%,388px);display:flex;flex-direction:column;align-items:center;gap:18px}
 .ef-signin-logo{display:flex;justify-content:center;align-items:center;width:100%}
 .ef-signin-logo img{width:180px;max-height:88px;object-fit:contain;mix-blend-mode:multiply}
@@ -1343,7 +1341,7 @@ label:has(textarea[required])::after,
 .ef-signin-alert svg{flex-shrink:0}
 .ef-signin-spin{animation:ef-signin-rotate 1s linear infinite}
 @keyframes ef-signin-rotate{to{transform:rotate(360deg)}}
-@media(max-width:600px){.ef-signin{padding:26px 15px}.ef-signin-brand-orbit-one{width:750px;height:750px;right:-590px;bottom:-620px}.ef-signin-brand-orbit-two{display:none}.ef-signin-panel{padding:25px 22px 20px}.ef-signin-content{gap:14px}}
+@media(max-width:600px){.ef-signin{padding:26px 15px}.ef-signin-erp-art{width:420px;right:-285px;opacity:.34}.ef-signin-panel{padding:25px 22px 20px}.ef-signin-content{gap:14px}}
 @media(prefers-reduced-motion:reduce){.ef-signin *{animation:none!important;transition:none!important}}
 
 /* =========================================================
