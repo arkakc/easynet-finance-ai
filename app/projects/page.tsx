@@ -1,11 +1,13 @@
 import { listTable } from "@/lib/backend/apps-script";
 import { prisma } from "@/src/lib/prisma";
 import ProjectLifecycleTable from "@/app/components/project-lifecycle-table";
+import Link from "next/link";
+import { projectFinancialBreakdown } from "@/lib/reporting/project-profitability";
 
 export const dynamic = "force-dynamic";
 
 type Project = { projectId: string; projectName: string; customerId: string; status: string; contractTotal: number | string; expectedCost: number | string; usageCount?: number };
-type Account = { accountId: string; accountType: string };
+type Account = { accountId: string; accountType: string; accountName?: string };
 type JournalLine = { accountId: string; projectId: string; debit: number | string; credit: number | string };
 type PurchaseOrder = { poId: string; projectId: string; totalAmount: number | string; status: string };
 type Bill = { billId: string; projectId: string; totalAmount: number | string; status: string };
@@ -51,7 +53,7 @@ export default async function ProjectsPage() {
         prisma.supplierBill.findMany(),
       ]);
       projects = p.map((row) => ({ projectId: row.id, projectName: row.name, customerId: row.customerId || "", status: row.status, contractTotal: Number(row.budget || 0), expectedCost: 0, usageCount: Object.values(row._count || {}).reduce((sum, value) => sum + Number(value || 0), 0) }));
-      accounts = a.map((row) => ({ accountId: row.id, accountType: row.type }));
+      accounts = a.map((row) => ({ accountId: row.id, accountType: row.type, accountName: row.name }));
       lines = j.filter((row) => row.journal.status === "POSTED").map((row) => ({ accountId: row.accountId, projectId: row.projectId || "", debit: Number(row.debit), credit: Number(row.credit) }));
       pos = po.map((row) => ({ poId: row.id, projectId: row.projectId || "", totalAmount: Number(row.total), status: row.status }));
       bills = b.map((row) => ({ billId: row.id, projectId: row.projectId || "", totalAmount: Number(row.total), status: row.status }));
@@ -69,15 +71,11 @@ export default async function ProjectsPage() {
     error = err instanceof Error ? err.message : "Project report load failed";
   }
 
-  const accountType = new Map(accounts.map((a) => [a.accountId, a.accountType]));
+  const posting = projectFinancialBreakdown(lines, accounts);
   const rows = projects.map((project) => {
-    let revenue = 0;
-    let cost = 0;
-    for (const line of lines.filter((line) => line.projectId === project.projectId)) {
-      const type = accountType.get(line.accountId);
-      if (type === "Income") revenue += n(line.credit) - n(line.debit);
-      if (type === "Expense") cost += n(line.debit) - n(line.credit);
-    }
+    const summary = posting.get(project.projectId);
+    const revenue = summary?.revenue ?? 0;
+    const cost = summary?.cost ?? 0;
     const postedBillIds = new Set(bills.filter((bill) => bill.projectId === project.projectId && bill.status !== "DRAFT").map((bill) => bill.billId));
     const commitments = pos
       .filter((po) => po.projectId === project.projectId && po.status !== "CANCELLED")
@@ -87,9 +85,13 @@ export default async function ProjectsPage() {
       .reduce((sum, bill) => sum + n(bill.totalAmount), 0);
     const openCommitment = Math.max(0, commitments - billTotal);
     const grossProfit = revenue - cost;
-    const margin = revenue ? (grossProfit / revenue) * 100 : 0;
+    const margin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
     return { ...project, revenue, cost, grossProfit, margin, commitments, billTotal, openCommitment };
   });
+
+  const projectCosts = rows.flatMap(project => (posting.get(project.projectId)?.expenses || []).map(expense => ({
+    ...expense, projectId: project.projectId, projectName: project.projectName,
+  })));
 
   const activeProjects = rows.filter((row) => String(row.status || "").toUpperCase() === "ACTIVE").length;
   const totalContract = rows.reduce((sum, r) => sum + n(r.contractTotal), 0);
@@ -138,6 +140,25 @@ export default async function ProjectsPage() {
           <div className="value">{money(totalGrossProfit)}</div>
         </div>
       </div>
+
+      <section className="panel">
+        <h3>Posted Cost Breakdown by Project and Expense Account</h3>
+        <p className="small">Only posted GL expense-account lines assigned to a project are included. Draft bills and open purchase commitments are excluded to avoid double counting.</p>
+        {error ? <p role="alert">Unable to load project cost breakdown: {error}</p> : projectCosts.length === 0 ? <p>No project-assigned posted expense entries found.</p> : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead><tr><th>Project</th><th>Expense account</th><th style={{ textAlign: "right" }}>Posted cost (PGK)</th></tr></thead>
+              <tbody>{projectCosts.map(row => (
+                <tr key={row.projectId + ":" + row.accountId}>
+                  <td><Link href={`/projects/master/${encodeURIComponent(row.projectId)}`}>{row.projectName}</Link></td>
+                  <td>{row.accountName}</td>
+                  <td style={{ textAlign: "right" }}>{money(row.amount)}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <ProjectLifecycleTable rows={rows.map((row)=>({
         projectId:row.projectId,
