@@ -9,14 +9,40 @@ type Readiness = { ok: boolean; ready?: boolean; generatedAt?: string; error?: s
 export default function GoLivePage() {
   const [data, setData] = useState<Readiness | null>(null);
   const [recovery, setRecovery] = useState<{total:number;claims:Array<{id:string;documentType:string|null;documentCode:string|null;status:string}>}|null>(null);
+  const [reviewId, setReviewId] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [reviewResult, setReviewResult] = useState("");
   const load = useCallback(async () => { const response = await fetch("/api/system/go-live-readiness", { cache: "no-store" }); const body = await response.json(); setData(body); }, []);
   useEffect(() => { void load(); fetch("/api/system/conversion-recovery", {cache:"no-store"}).then(r=>r.json()).then(x=>{if(x.ok)setRecovery(x)}).catch(()=>undefined); }, [load]);
   const checks = data?.checks || [];
+  const refreshRecovery = useCallback(async () => {
+    const response=await fetch("/api/system/conversion-recovery",{cache:"no-store"});
+    const body=await response.json();
+    if(!response.ok||!body.ok)throw new Error(body.error||"Recovery queue unavailable");
+    setRecovery(body);
+  },[]);
+  const submitRecovery = async (endpoint:string) => {
+    setReviewResult("");
+    try {
+      const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({claimId:reviewId,evidence,...(endpoint.endsWith("/resolve")?{targetId}:{})})});
+      const result=await response.json();
+      if(!response.ok||!result.ok)throw new Error(result.error||"Recovery request failed");
+      setReviewResult(endpoint.endsWith("/resolve")?"Existing-target resolution recorded. No retry performed.":"Review evidence recorded. Claim remains blocked.");
+      await refreshRecovery();
+      await load();
+    }catch(error){setReviewResult(error instanceof Error?error.message:"Recovery request failed");}
+  };
   return <div className="page-stack">
     <section className="page-header"><div><span className="badge">Release control</span><h1>Go-Live Readiness Centre</h1><p>One release gate for finance controls, data integrity, backups and migration readiness.</p></div><span className={`coa-status-pill ${data?.ready ? "valid" : "invalid"}`}>{data ? (data.ready ? "READY" : "BLOCKED") : "CHECKING"}</span></section>
     {data?.error && <section className="warning-panel"><strong>Readiness check unavailable</strong><p className="small">{data.error}</p></section>}
     <section className="panel"><div className="form-title-row"><div><h2>Release decision</h2><p className="small">A blocking check must pass before production cutover. Warnings remain visible for review.</p></div><span className="auto-badge">{checks.filter((check) => check.passed).length}/{checks.length} passed</span></div><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><thead><tr><th>Control</th><th>Type</th><th>Status</th><th>Evidence</th></tr></thead><tbody>{!checks.length && <tr><td colSpan={4}>Loading readiness controls…</td></tr>}{checks.map((check) => <tr key={check.key}><td><strong>{check.label}</strong></td><td>{check.blocking ? "BLOCKING" : "WARNING"}</td><td><span className={`coa-status-pill ${check.passed ? "valid" : "invalid"}`}>{check.passed ? "PASS" : "REVIEW"}</span></td><td>{check.detail}</td></tr>)}</tbody></table></div></section>
-    {recovery && <section className="panel"><h2>Unresolved Conversion Recovery Queue</h2><p className="small">Read-only investigation queue. Entries remain blocked until downstream targets and GL postings are reconciled. No automatic retry.</p><p><strong>{recovery.total}</strong> unresolved conversions</p><div className="table-wrap"><table className="data-table"><thead><tr><th>Conversion</th><th>Source</th><th>Status</th></tr></thead><tbody>{recovery.claims.map(x=><tr key={x.id}><td>{x.documentType||"Unknown"}</td><td>{x.documentCode||"Unknown"}</td><td>{x.status}</td></tr>)}{!recovery.claims.length&&<tr><td colSpan={3}>No unresolved conversion claims</td></tr>}</tbody></table></div></section>}
+    {recovery && <section className="panel"><h2>Unresolved Conversion Recovery Queue</h2><p className="small">Read-only investigation queue. Entries remain blocked until downstream targets and GL postings are reconciled. No automatic retry.</p><p><strong>{recovery.total}</strong> unresolved conversions</p>
+    <div className="form-grid" style={{marginBottom:16}}>
+      <label>Claim ID<select value={reviewId} onChange={e=>setReviewId(e.target.value)}><option value="">Select an unresolved claim</option>{recovery.claims.map(x=><option key={x.id} value={x.id}>{x.documentType||"Conversion"} / {x.documentCode||x.id} / {x.status}</option>)}</select></label>
+      <label>Existing target ID (resolution only)<input value={targetId} onChange={e=>setTargetId(e.target.value)} placeholder="Exact linked target ID"/></label>
+      <label>Reconciliation evidence<textarea value={evidence} onChange={e=>setEvidence(e.target.value)} placeholder="Record verified source, target and GL findings; at least 40 characters for resolution" rows={3}/></label>
+    </div><div className="button-row"><button className="secondary-btn" disabled={!reviewId||evidence.trim().length<20} onClick={()=>void submitRecovery("/api/system/conversion-recovery")}>Record review (keeps blocked)</button><button className="secondary-btn" disabled={!reviewId||!targetId.trim()||evidence.trim().length<40} onClick={()=>void submitRecovery("/api/system/conversion-recovery/resolve")}>Resolve verified draft target</button></div>{reviewResult&&<p role="status" className="small">{reviewResult}</p>}<div className="table-wrap"><table className="data-table"><thead><tr><th>Conversion</th><th>Source</th><th>Status</th></tr></thead><tbody>{recovery.claims.map(x=><tr key={x.id}><td>{x.documentType||"Unknown"}</td><td>{x.documentCode||"Unknown"}</td><td>{x.status}</td></tr>)}{!recovery.claims.length&&<tr><td colSpan={3}>No unresolved conversion claims</td></tr>}</tbody></table></div></section>}
     <section className="panel"><h2>Required next actions</h2><p className="small">Use the relevant control centre to resolve any failed gate, then refresh this page.</p><div className="button-row">{data?.openingSubledgerLocked ? <span className="secondary-btn disabled-link" title="Disabled because setup was activated as a new business with zero opening balances.">AR/AP opening import</span> : <Link className="secondary-btn" href="/migration/opening-subledger">AR/AP opening import</Link>}<Link className="secondary-btn" href="/payroll">Payroll reconciliation</Link><Link className="secondary-btn" href="/system/backups">Backups & snapshots</Link><Link className="secondary-btn" href="/controls">Finance controls</Link></div>{data?.snapshot && <p className="small" style={{ marginTop: 16 }}>Snapshot as of {data.snapshot.asOf}; fingerprint {data.snapshot.fingerprint.slice(0, 16)}…</p>}</section>
   </div>;
 }

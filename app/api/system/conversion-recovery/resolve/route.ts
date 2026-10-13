@@ -33,6 +33,12 @@ export async function POST(request:Request){
   }
   const lines=await findRecords<Record<string,unknown>>(config.lineTable,{[config.lineFk]:input.targetId},500);
   if(!lines.rows.length||lines.rows.length===500)return NextResponse.json({ok:false,error:"Target lines missing or truncated; resolution refused"},{status:409});
+  // Reject even a DRAFT-looking legacy target if Prisma already contains posted accounting effects.
+  const postedJournalCount=await prisma.journalHeader.count({where:{
+   status:"POSTED",
+   OR:[{sourceDocId:input.targetId},{sourceDocId:claim.documentCode}],
+  }});
+  if(postedJournalCount>0)return NextResponse.json({ok:false,error:"Posted journal exists for source or target. Independent GL reconciliation required; claim remains blocked."},{status:409});
   const hash=recoveryEvidenceHash(claim.code,input.evidence,actor.email);
   const result=await prisma.$transaction(async tx=>{
    const updated=await tx.approvalRequest.updateMany({where:{id:claim.id,status:"IN_REVIEW",type:"ERP_CONVERSION_IDEMPOTENCY"},data:{status:"APPROVED",approvedAt:new Date(),approverComment:"Verified existing unposted target "+input.targetId+"; evidence SHA-256 "+hash+"; no retry permitted"}});
