@@ -58,6 +58,32 @@ export default function DocumentWorkflowActions({
     }
   }
 
+  async function cancelDraft() {
+    if (busy || !window.confirm("Cancel this draft document? This cannot be undone from this screen.")) return;
+    setBusy(true);
+    setMessage("Cancelling…");
+    try {
+      const response = await fetch("/api/erp/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "approvals", body: { payload: {
+          recordType, recordId, decision: "CANCEL", note: "Cancelled from document workspace",
+        } } }),
+      });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error || "Cancellation failed");
+      setMessage("Draft cancelled.");
+      await onApproved?.();
+      router.refresh();
+    } catch (error) {
+      const failure = error instanceof Error ? error.message : "Cancellation failed";
+      setMessage(failure);
+      if (placement === "toolbar") window.alert(failure);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (recordType === "invoice" && !controlledCreditNote && ["POSTED", "PARTLY_PAID", "PARTIAL"].includes(current)) {
     return (
       <section className="panel no-print" style={{ marginTop: 16 }}>
@@ -98,6 +124,7 @@ export default function DocumentWorkflowActions({
         >
           {busy ? "Approving…" : controlledCreditNote ? "Approve Credit Note / Return" : "Approve"}
         </button>
+        <button type="button" className="secondary" onClick={cancelDraft} disabled={busy}>Cancel Draft</button>
         {message && busy ? <span className="small">{message}</span> : null}
       </div>
     );
@@ -111,6 +138,7 @@ export default function DocumentWorkflowActions({
         <button type="button" onClick={approve} disabled={busy}>
           {busy ? "Approving…" : controlledCreditNote ? "Approve Credit Note / Return" : "Approve"}
         </button>
+        <button type="button" className="secondary" onClick={cancelDraft} disabled={busy}>Cancel Draft</button>
       </div>
       {message && <div className="small" style={{ marginTop: 8 }}>{message}</div>}
     </div>
