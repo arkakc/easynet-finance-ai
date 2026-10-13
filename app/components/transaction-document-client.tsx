@@ -12,6 +12,7 @@ import DocumentFinancialPanels from "@/app/components/document-financial-panels"
 import DocumentChainNavigator from "@/app/components/document-chain-navigator";
 import DocumentCrossModuleLinks from "@/app/components/document-cross-module-links";
 import IntelligentNextActions from "@/app/components/intelligent-next-actions";
+import TransactionAutomationPreview from "@/app/components/transaction-automation-preview";
 import DocumentConversionActions from "@/app/components/document-conversion-actions";
 import DocumentReviewActions from "@/app/components/document-review-actions";
 import PaymentFinalSave from "@/app/components/payment-final-save";
@@ -642,6 +643,7 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
     {record && <DocumentChainNavigator links={documentLinks} explorerHref={explorerHref} currentNumber={String(number)} />}
     {record && <DocumentCrossModuleLinks type={type} documentId={String(number)} record={record} links={documentLinks} />}
     {record && <IntelligentNextActions type={type} id={id} status={rowStatus} number={String(number)} partyType={String(record.partyType || "")} links={documentLinks} />}
+    {record && <TransactionAutomationPreview type={type} id={id} />}
     {record && <DocumentFinancialPanels record={record} />}
     {record && (documentLinks.length > 0 || previous) && (
       <section className="panel" id="document-related" aria-label="Related documents">
