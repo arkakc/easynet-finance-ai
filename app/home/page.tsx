@@ -1,24 +1,34 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowUpRight, BarChart3, BookOpen, FolderKanban, Home, Landmark, Package, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, UserRound } from "lucide-react";
-import { getCurrentUser, hasPermission, type Permission } from "@/lib/auth";
+import { ArrowUpRight, BarChart3, BookOpen, FolderKanban, Home, Landmark, Package, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, UserRound, LayoutDashboard, Settings } from "lucide-react";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
+import { groups } from "@/lib/navigation/sidebar-groups";
 
 export const dynamic = "force-dynamic";
 
-const modules: { name:string; description:string; href:string; permission:Permission; icon: typeof Home }[] = [
- {name:"Sales",description:"Customers, quotations and invoices",href:"/workspace/sales",permission:"sales.read",icon:ShoppingCart},
- {name:"Purchases",description:"Suppliers, orders and bills",href:"/workspace/purchases",permission:"purchase.read",icon:ShoppingBag},
- {name:"Inventory",description:"Items, warehouses and stock",href:"/workspace/inventory",permission:"stock.read",icon:Package},
- {name:"Accounting",description:"Journals, chart of accounts and banking",href:"/workspace/accounting",permission:"accounts.read",icon:Landmark},
- {name:"Reports",description:"Financial and management reporting",href:"/workspace/reports",permission:"reports.read",icon:BarChart3},
- {name:"Projects",description:"Project costs and profitability",href:"/workspace/projects",permission:"dashboard.read",icon:FolderKanban},
-];
+const descriptions:Record<string,string>={
+ Dashboard:"Management dashboards, controls and approvals",
+ Sales:"Customers, quotations and invoices",
+ Purchase:"Suppliers, purchase orders and bills",
+ "Stock & Assets":"Inventory, warehouses and fixed assets",
+ Accounts:"General ledger, journals, banking and payroll",
+ Projects:"Project costs and profitability",
+ Reports:"Financial statements, GST and management reports",
+ "Documents & AI":"Source documents and AI-assisted document processing",
+ Administration:"Settings, users, permissions and system recovery",
+};
+const moduleIcons:Record<string,typeof Home>={
+ Dashboard:LayoutDashboard,Sales:ShoppingCart,Purchase:ShoppingBag,
+ "Stock & Assets":Package,Accounts:Landmark,Projects:FolderKanban,
+ Reports:BarChart3,"Documents & AI":Sparkles,Administration:Settings,
+};
+const moduleSlug=(name:string)=>name.toLowerCase().replace(/[^a-z0-9]+/g,"-");
 
 export default async function HomePage() {
  const user=await getCurrentUser();
  if(!user)redirect("/login");
  const firstName=user.name.trim().split(/\s+/)[0] || "there";
- const visible=modules.filter(module=>hasPermission(user,module.permission));
+ const visible=groups.filter(group=>group.label!=="Home" && group.links.some(([, ,permission])=>hasPermission(user,permission)));
  return <div className="ef-home">
   <header className="ef-home-hero">
    <div className="ef-home-hero-copy">
@@ -44,7 +54,7 @@ export default async function HomePage() {
 
   <section className="ef-home-section" aria-labelledby="quick-access">
    <div className="ef-home-section-header"><div><span className="ef-home-overline">QUICK ACCESS</span><h2 id="quick-access">Explore your modules</h2><p>Only workspaces available to your assigned role are shown.</p></div></div>
-   <div className="ef-home-modules">{visible.map(module=>{const Icon=module.icon;return <Link key={module.href} className="ef-home-module" href={module.href}><span className="ef-home-module-icon"><Icon size={21}/></span><span className="ef-home-module-copy"><strong>{module.name}</strong><small>{module.description}</small></span><ArrowUpRight size={17} className="ef-home-module-arrow"/></Link>})}</div>
+   <div className="ef-home-modules">{visible.map(module=>{const Icon=moduleIcons[module.label]||Package;const href="/module/"+moduleSlug(module.label);return <Link key={module.label} className="ef-home-module" href={href}><span className="ef-home-module-icon"><Icon size={21}/></span><span className="ef-home-module-copy"><strong>{module.label}</strong><small>{descriptions[module.label]||"Open module menu"}</small></span><ArrowUpRight size={17} className="ef-home-module-arrow"/></Link>})}</div>
   </section>
 
   <section className="ef-home-note"><BookOpen size={20}/><div><strong>Designed for day-to-day finance operations</strong><p>The Home page is your starting point. Use the Dashboard for live financial insights and the module menu for transactions. Figures and balances are intentionally not duplicated here.</p></div></section>
