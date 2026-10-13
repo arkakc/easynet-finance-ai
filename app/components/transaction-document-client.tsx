@@ -428,9 +428,6 @@ export default function TransactionDocumentClient({type,id}:{type:string;id:stri
             <div className="system-notice-dropdown"><strong>Document unavailable:</strong> {error}</div>
           </details>
         ) : null}>
-        {false && (
-          null
-        )}
         {record && rowStatus === "DRAFT" && (
           <DocumentWorkflowActions
             recordType={type as "quote"|"invoice"|"purchaseOrder"|"supplierBill"|"payment"|"expense"}
