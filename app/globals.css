@@ -5384,3 +5384,13 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-receipt-compact-search .ef-receipt-grouped-actions button{flex:0 0 auto;height:39px;margin:0}
 .ef-receipt-compact-search .ef-receipt-grouped-actions .ef-receipt-pending-button{margin:0}
 @media(max-width:650px){.ef-receipt-compact-search .ef-receipt-grouped-actions label{max-width:none;flex-basis:100%}.ef-receipt-compact-search .ef-receipt-grouped-actions button{flex:1 1 130px}}
+
+/* Customer master: match the document-type list/create action toolbar */
+.ef-customer-doctype-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px}
+.ef-customer-doctype-tab{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:43px;padding:9px 18px;border:1px solid #cbd8e8;border-radius:7px;background:#fff;color:#243a57;font-size:13px;font-weight:600;box-shadow:0 3px 9px rgba(21,45,80,.07);cursor:pointer}
+.ef-customer-doctype-tab.active{border-color:#c5d4e5;background:#fff;color:#112b4f}
+.ef-customer-doctype-tab:hover{border-color:#8caed9;background:#f7faff}
+.ef-customer-create-icon{font-size:21px;line-height:1;color:#7055d0;font-weight:750}
+.ef-customer-create-action{color:#233b57}
+.ef-customer-doctype-tab:focus-visible{outline:2px solid #1764bb;outline-offset:2px}
+@media(max-width:560px){.ef-customer-doctype-toolbar{gap:7px}.ef-customer-doctype-tab{padding:8px 12px;min-height:39px;font-size:12px}}
