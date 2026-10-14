@@ -23,7 +23,7 @@ export default function CollapsibleSidebarNav({groups}:Props){
    const Icon=icons[group.label]||Package;
    const active=pathname==="/module/"+encodeURIComponent(group.label.toLowerCase().replace(/[^a-z0-9]+/g,"-"))||group.links.some(link=>selected(link.href,pathname,query));
    const href=group.label==="Home"?"/home":"/module/"+encodeURIComponent(group.label.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
-   return <Link key={group.label} href={href} prefetch={false} className={`nav-label ef-main-menu-link ${active?"ef-main-menu-active":""}`} aria-current={active?"page":undefined}>
+   return <Link key={group.label} href={href} prefetch={false} title={group.label} className={`nav-label ef-main-menu-link ${active?"ef-main-menu-active":""}`} aria-current={active?"page":undefined}>
     <span className="nav-label-main"><span className="nav-section-icon"><Icon size={19} strokeWidth={2} aria-hidden="true"/></span><span className="nav-label-text">{group.label}</span></span>
     {group.label!=="Home"&&<ChevronRight size={15} aria-hidden="true"/>}
    </Link>;
