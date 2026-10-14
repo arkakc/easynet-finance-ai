@@ -2,8 +2,8 @@
 
 ## Positions
 - Main module: only navigation links/cards. Do not place duplicate create shortcuts next to the same doctype link.
-- Doctype list: **View Existing** and **Create New** grouped in the top-right action area; keep the title on the left. Disable direct creation for source-controlled doctypes, with a reason.
-- Full document: status and document number in header; action toolbar in the top-right of the page header, before editable fields. **Save Draft** primary, **Submit for Approval** primary at draft review, **Approve/Reject** checker-only, **Final Save / Post** approval-stage success, and **Reverse/Cancel** in a separately marked danger/warning group. Avoid multiple equally prominent primary actions.
+- Doctype list: **View Existing** and **Create New** grouped at the top-left beneath the doctype heading (main navigation). Disable direct creation for source-controlled doctypes, with a reason.
+- Full document: status and document number in header; subordinate workflow action toolbar (Save, Submit, Approve, Post, Cancel, etc.) top-right before editable fields. **Save Draft** primary, **Submit for Approval** primary at draft review, **Approve/Reject** checker-only, **Final Save / Post** approval-stage success, and **Reverse/Cancel** in a separately marked danger/warning group. Avoid multiple equally prominent primary actions.
 - Table: selection checkbox in first data column, row actions at far right. Bulk actions grouped at the top-right of list view; retain selection count and never show a destructive action as the default.
 - Mobile: wrap groups, retain keyboard focus indicators and >=40px tap targets.
 
