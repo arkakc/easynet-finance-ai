@@ -55,7 +55,7 @@ const SECTION_META:Record<Tab,SectionMeta>={
   salesOrder:{title:"Sales Order",createLabel:"Create New Sales Order",listLabel:"View Existing Sales Orders",existingTitle:"Existing Sales Orders"},
   deliveryNote:{title:"Delivery Note / Stock Out",createLabel:"Create New Delivery Note",listLabel:"View Existing Delivery Notes",existingTitle:"Existing Delivery Notes"},
   salesInvoice:{title:"Sales Invoice",createLabel:"Create New Sales Invoice",listLabel:"View Existing Sales Invoices",existingTitle:"Existing Sales Invoices"},
-  salesPayment:{title:"Sales Payment Entry / Receipt",createLabel:"Create New Sales Payment Entry / Receipt",listLabel:"View Existing Sales Payments / Receipts",existingTitle:"Existing Sales Payments / Receipts"},
+  salesPayment:{title:"Customer Receipt",createLabel:"New Customer Receipt",listLabel:"Customer Receipts",existingTitle:"Existing Customer Receipts"},
   supplierQuote:{title:"Supplier Quotation",createLabel:"Create New Supplier Quotation",listLabel:"View Existing Supplier Quotations",existingTitle:"Existing Supplier Quotations"},
   purchaseOrder:{title:"Purchase Order",createLabel:"Create New Purchase Order",listLabel:"View Existing Purchase Orders",existingTitle:"Existing Purchase Orders"},
   purchaseReceipt:{title:"Purchase Receipt / GRN",createLabel:"Create New Purchase Receipt / GRN",listLabel:"View Existing Purchase Receipts / GRN",existingTitle:"Existing Purchase Receipts / GRN"},
