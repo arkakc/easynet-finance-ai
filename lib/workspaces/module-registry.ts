@@ -21,6 +21,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Deliveries", description: "Stock issues and delivery notes", href: transaction("sales", "deliveryNote"), section: "Deliveries", permission: "sales.read" },
     { title: "Sales Invoices", description: "Posted invoices, outstanding and GST", href: transaction("sales", "salesInvoice"), section: "Invoices", permission: "sales.read" },
     { title: "Customer Receipts", description: "Record receipts and allocate invoice payments", href: transaction("sales", "salesPayment"), section: "Receipts", permission: "sales.read" },
+    { title: "Bulk Processing", description: "Preview and convert approved quotations in controlled batches", href: "/sales/bulk-processing", section: "Registers", permission: "sales.read" },
     { title: "Sales Returns", description: "Invoice-linked partial returns and draft credit notes", href: "/sales/returns", section: "Returns", permission: "sales.read" },
     { title: "Customers", description: "Customer master and contact records", href: "/customers", section: "Masters", permission: "sales.read" },
     { title: "Payment Schedules", description: "Customer payment schedules and deferred revenue", href: "/payment-schedules", section: "Receipts", permission: "sales.read" },
