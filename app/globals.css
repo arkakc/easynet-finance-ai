@@ -5423,3 +5423,9 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-erp-action-feedback[data-tone="warning"]{border-color:#e7ca92;background:#fff9ed;color:#775012}
 .ef-erp-action-feedback[data-tone="success"]{border-color:#a6d6c7;background:#f2fbf7;color:#17684e}
 @media(max-width:560px){.ef-erp-action{min-height:40px}.ef-erp-action-toolbar .ef-erp-action-primary{margin-left:0}}
+
+/* ERP primary action placement: top-right in all shared doctype and action toolbars. */
+.ef-doctype-action-bar,.ef-customer-doctype-toolbar,.ef-erp-action-toolbar{justify-content:flex-end}
+.ef-doctype-action-bar>.ef-doctype-action,.ef-customer-doctype-toolbar>.ef-customer-doctype-tab{flex:0 0 auto}
+.ef-erp-action-toolbar .ef-erp-action-primary{margin-left:0}
+@media(max-width:560px){.ef-doctype-action-bar,.ef-customer-doctype-toolbar,.ef-erp-action-toolbar{justify-content:flex-end}}
