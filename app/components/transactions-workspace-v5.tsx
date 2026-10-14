@@ -60,7 +60,7 @@ const SECTION_META:Record<Tab,SectionMeta>={
   purchaseOrder:{title:"Purchase Order",createLabel:"Create New Purchase Order",listLabel:"View Existing Purchase Orders",existingTitle:"Existing Purchase Orders"},
   purchaseReceipt:{title:"Purchase Receipt / GRN",createLabel:"Create New Purchase Receipt / GRN",listLabel:"View Existing Purchase Receipts / GRN",existingTitle:"Existing Purchase Receipts / GRN"},
   supplierInvoice:{title:"Supplier Invoice",createLabel:"Create New Supplier Invoice",listLabel:"View Existing Supplier Invoices",existingTitle:"Existing Supplier Invoices"},
-  purchasePayment:{title:"Purchase Payment Entry / Receipt",createLabel:"Create New Purchase Payment Entry / Receipt",listLabel:"View Existing Purchase Payments / Receipts",existingTitle:"Existing Purchase Payments / Receipts"},
+  purchasePayment:{title:"Supplier Payment",createLabel:"New Supplier Payment",listLabel:"Supplier Payments",existingTitle:"Existing Supplier Payments"},
   expense:{title:"Expense",createLabel:"Create New Expense",listLabel:"View Existing Expenses",existingTitle:"Existing Expenses"},
 };
 const numberMeta:Partial<Record<Tab,{label:string;action:string;partyType?:string}>>={
