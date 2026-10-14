@@ -46,22 +46,22 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   }, []), [actions]);
   const create = actions.find(action => action.kind === "action");
 
-  const streamlinedSales = streamlined || workspace.id === "sales";
+  const streamlinedLayout = streamlined || workspace.id === "sales";
 
-  return <div className={`unified-module-workspace ${streamlinedSales ? "ef-compact-workspace" : ""}`}>
+  return <div className={`unified-module-workspace ${streamlinedLayout ? "ef-compact-workspace" : ""}`}>
     <header className="unified-workspace-header">
       <div>
         <p className="unified-workspace-eyebrow">{workspace.eyebrow}</p>
         <h1>{workspace.title}</h1>
-        {!streamlinedSales && <p>{workspace.description}</p>}
+        {!streamlinedLayout && <p>{workspace.description}</p>}
       </div>
-      {!streamlinedSales && <div className="unified-workspace-header-actions">
+      {!streamlinedLayout && <div className="unified-workspace-header-actions">
         {create && <Link prefetch={false} className="link-button" href={create.href}>+ {create.title}</Link>}
         {primary && <Link prefetch={false} className="link-button secondary-link" href={primary.href}>Open {primary.title}</Link>}
       </div>}
     </header>
 
-    {!streamlinedSales && <nav className="unified-workspace-switcher" aria-label="Module workspaces">
+    {!streamlinedLayout && <nav className="unified-workspace-switcher" aria-label="Module workspaces">
       {availableModules.map(module => <Link
         prefetch={false}
         key={module.id}
@@ -71,7 +71,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       >{module.title.replace(" Workspace", "")}</Link>)}
     </nav>}
 
-    {!streamlinedSales && <section className="panel unified-workspace-content" aria-label={workspace.title + " workflow"}>
+    {!streamlinedLayout && <section className="panel unified-workspace-content" aria-label={workspace.title + " workflow"}>
       <div className="unified-workspace-section-head"><div><h2>Workflow at a glance</h2><p className="small">Choose a step to open its existing secured register. Steps shown depend on your permissions.</p></div></div>
       <nav className="unified-workspace-tabs" aria-label="Workflow steps">
         {workflow.map((step, index) => <Link prefetch={false} key={step.section} className="unified-workspace-tab" href={step.href}>{index + 1}. {step.section} <span aria-hidden="true">↗</span></Link>)}
@@ -81,7 +81,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       <div className="unified-workspace-section-head">
         <div>
           <h2>Registers & Actions</h2>
-          {!streamlinedSales && <p className="small">Search a document type or choose a workflow. Existing records and posting controls open in their authoritative registers.</p>}
+          {!streamlinedLayout && <p className="small">Search a document type or choose a workflow. Existing records and posting controls open in their authoritative registers.</p>}
         </div>
         <label className="unified-workspace-search">
           <span className="sr-only">Search workspace actions</span>
@@ -107,7 +107,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
     </section>
     {(workspace.id === "sales" || workspace.id === "purchases") && <section className="panel unified-workspace-content unified-workspace-recent" aria-label="Recent business documents">
       <div className="unified-workspace-section-head">
-        <div><h2>Recent Documents</h2><p className="small">Read-only preview of up to 40 recent records. Use the register above for full history, approval and posting.</p></div>
+        <div><h2>Recent Documents</h2>{!streamlinedLayout && <p className="small">Read-only preview of up to 40 recent records. Use the register above for full history, approval and posting.</p>}</div>
         <label className="unified-workspace-search"><span className="sr-only">Search recent documents</span><input type="search" value={registerQuery} onChange={event => { setRegisterQuery(event.target.value); setRegisterPage(1); }} placeholder="Search number, party or status…" /></label>
       </div>
       <div className="unified-workspace-tabs" role="group" aria-label="Filter recent document type">
