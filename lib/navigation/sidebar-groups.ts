@@ -21,6 +21,7 @@ export const groups: readonly NavGroup[] = [
     links: [
       ["Sales Workspace", "/workspace/sales", "sales.read"],
       ["Sales Transactions", "/transactions?module=sales", "sales.read"],
+      ["Sales Returns", "/sales/returns", "sales.read"],
       ["Customers", "/customers", "sales.read"],
       ["Projects", "/projects/master", "sales.read"],
       ["Retail POS Terminal", "/pos", "sales.read"],
