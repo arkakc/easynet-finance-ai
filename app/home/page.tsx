@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowUpRight, BarChart3, BookOpen, FolderKanban, Home, Landmark, Package, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, UserRound, LayoutDashboard, Settings } from "lucide-react";
+import { ArrowUpRight, BarChart3, FolderKanban, Home, Landmark, Package, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, UserRound, LayoutDashboard, Settings } from "lucide-react";
 import { getCurrentUser, hasPermission } from "@/lib/auth";
 import { groups } from "@/lib/navigation/sidebar-groups";
 
@@ -34,7 +34,7 @@ export default async function HomePage() {
    <div className="ef-home-hero-copy">
     <div className="ef-home-kicker"><Home size={16}/> HOME · EASYNET FINANCE</div>
     <h1>Welcome back, {firstName}.</h1>
-    <p>Your Easynet Finance AI workspace. Manage everyday operations, financial records and reporting from one connected Mini ERP.</p>
+    <p>Your Easynet Finance Mini ERP workspace.</p>
    </div>
    <div className="ef-home-hero-mark" aria-hidden="true"><Sparkles size={46}/><span>FINANCE</span><strong>MINI ERP</strong></div>
   </header>
@@ -49,11 +49,10 @@ export default async function HomePage() {
   </section>
 
   <section className="ef-home-section" aria-labelledby="quick-access">
-   <div className="ef-home-section-header"><div><span className="ef-home-overline">QUICK ACCESS</span><h2 id="quick-access">Explore your modules</h2><p>Only workspaces available to your assigned role are shown.</p></div></div>
+   <div className="ef-home-section-header"><div><span className="ef-home-overline">QUICK ACCESS</span><h2 id="quick-access">Explore your modules</h2></div></div>
    <div className="ef-home-modules">{visible.map(module=>{const Icon=moduleIcons[module.label]||Package;const href="/module/"+moduleSlug(module.label);return <Link key={module.label} className="ef-home-module" href={href}><span className="ef-home-module-icon"><Icon size={21}/></span><span className="ef-home-module-copy"><strong>{module.label}</strong><small>{descriptions[module.label]||"Open module menu"}</small></span><ArrowUpRight size={17} className="ef-home-module-arrow"/></Link>})}</div>
   </section>
 
-  <section className="ef-home-note"><BookOpen size={20}/><div><strong>Designed for day-to-day finance operations</strong><p>The Home page is your starting point. Use the Dashboard for live financial insights and the module menu for transactions. Figures and balances are intentionally not duplicated here.</p></div></section>
   <footer className="ef-home-footer">Easynet Finance AI System · Powered by Easynet IT Solutions · Papua New Guinea</footer>
  </div>;
 }
