@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AdjustableDataTable, { type AdjustableColumn } from "@/app/components/adjustable-data-table";
+import ErpActionButton from "@/app/components/erp-action-button";
 import QuickMasterModal, { type CreatedMasterRow, type MasterType } from "@/app/components/quick-master-modal";
 
 type MasterRow = Record<string, unknown>;
@@ -215,9 +216,9 @@ export default function MasterDoctypeClient({ type, title, description, createLa
       defaultWidth:260,
       sortValue:(row)=>masterUsage(row),
       value:(row:MasterRow)=><div className="row-actions" onClick={(event)=>event.stopPropagation()}>
-        {masterCanDelete(row)&&<button type="button" className="danger-button" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("delete",[row])}>Delete</button>}
-        {masterCanDisable(row)&&<button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("disable",[row])}>Disable</button>}
-        {masterCanActivate(row)&&<button type="button" className="secondary" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("activate",[row])}>Activate</button>}
+        {masterCanDelete(row)&&<ErpActionButton action="delete" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("delete",[row])}>Delete</ErpActionButton>}
+        {masterCanDisable(row)&&<ErpActionButton action="disable" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("disable",[row])}/>}
+        {masterCanActivate(row)&&<ErpActionButton action="activate" disabled={Boolean(lifecycleBusy)} onClick={()=>void runLifecycle("activate",[row])}/>}
       </div>,
     },
   ], [config,type,lifecycleBusy,rows]);
@@ -281,9 +282,9 @@ export default function MasterDoctypeClient({ type, title, description, createLa
           selectedKeys={selectedKeys}
           onSelectionChange={setSelectedKeys}
           toolbarActions={<>
-            <button type="button" className="danger-button" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row))} onClick={()=>void runLifecycle("delete",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row)))}>Delete Selected</button>
-            <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row))} onClick={()=>void runLifecycle("disable",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row)))}>Disable Selected</button>
-            <button type="button" className="secondary" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row))} onClick={()=>void runLifecycle("activate",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row)))}>Activate Selected</button>
+            <ErpActionButton action="delete" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row))} onClick={()=>void runLifecycle("delete",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDelete(row)))}>Delete Selected</ErpActionButton>
+            <ErpActionButton action="disable" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row))} onClick={()=>void runLifecycle("disable",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanDisable(row)))}>Disable Selected</ErpActionButton>
+            <ErpActionButton action="activate" disabled={Boolean(lifecycleBusy)||!rows.some((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row))} onClick={()=>void runLifecycle("activate",rows.filter((row,index)=>selectedKeys.includes(rowId(row,config.idKey,index))&&masterCanActivate(row)))}>Activate Selected</ErpActionButton>
           </>}
         />
       </section>
