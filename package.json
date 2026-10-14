@@ -63,7 +63,7 @@
     "clsx": "^2.1.0",
     "date-fns": "^4.0.0",
     "lucide-react": "^1.5.0",
-    "next": "16.3.2",
+    "next": "16.4.0",
     "next-auth": "^5.0.0-beta.25",
     "openai": "^7.13.0",
     "react": "^19.1.0",
@@ -81,7 +81,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "eslint": "^9.0.0",
-    "eslint-config-next": "16.3.2",
+    "eslint-config-next": "16.4.0",
     "prisma": "^6.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0"
