@@ -98,7 +98,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
   const[selectedListKeys,setSelectedListKeys]=useState<string[]>([]);
   const[bulkDeleteBusy,setBulkDeleteBusy]=useState(false);
 
-  function syncUrl(nextModule:Module,nextTab:Tab,nextMode:SectionMode){const params=new URLSearchParams(searchParams.toString());params.set("module",nextModule);params.set("tab",nextTab);params.set("mode",nextMode);router.replace(`${pathname}?${params.toString()}`,{scroll:false});}
+  function syncUrl(nextModule:Module,nextTab:Tab,nextMode:SectionMode){const params=new URLSearchParams(searchParams.toString());params.set("module",nextModule);params.set("tab",nextTab);params.set("mode",nextMode);router.replace(`${directDocumentType ? "/doctype/" + nextTab : pathname}?${params.toString()}`,{scroll:false});}
 
   const loadMasters=useCallback(async(force=false)=>{if(mastersLoaded&&!force)return;try{const response=await fetch("/api/masters",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Master-data load failed");setMasters({customers:body.customers||[],suppliers:body.suppliers||[],projects:body.projects||[]});setMastersLoaded(true);}catch(error){setStatus(error instanceof Error?error.message:"Master-data load failed");}},[mastersLoaded]);
   const loadItems=useCallback(async(force=false)=>{if(itemsLoaded&&!force)return;try{const response=await fetch("/api/stock?scope=items",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Item Master load failed");setItems(body.items||[]);setItemsLoaded(true);}catch(error){setStatus(error instanceof Error?error.message:"Item Master load failed");}},[itemsLoaded]);
