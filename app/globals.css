@@ -5298,3 +5298,14 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
  .shell:has(>.ef-slide-sidebar.ef-slide-pinned)>.main{margin-left:60px;width:calc(100% - 60px)}
 }
 @media(prefers-reduced-motion:reduce){.ef-slide-sidebar,.ef-slide-sidebar *,.shell:has(>.ef-slide-sidebar)>.main{transition:none!important}}
+
+/* Compact main-module workspace: remove wasted vertical space. */
+.ef-compact-workspace .unified-workspace-header{margin-bottom:11px;gap:10px}
+.ef-compact-workspace .unified-workspace-header h1{font-size:clamp(18px,1.7vw,23px);line-height:1.2;margin:2px 0 0;letter-spacing:-.02em}
+.ef-compact-workspace .unified-workspace-eyebrow{font-size:10px!important;letter-spacing:.07em;margin:0}
+.ef-compact-workspace .unified-workspace-content{padding:16px 18px!important}
+.ef-compact-workspace .unified-workspace-section-head h2{font-size:16px;margin:0}
+.ef-compact-workspace .unified-workspace-tabs{margin:13px 0 11px;padding-bottom:9px}
+.ef-compact-workspace .unified-workspace-action-grid{gap:9px}
+.ef-compact-workspace .unified-workspace-recent{margin-top:13px}
+@media(max-width:650px){.ef-compact-workspace .unified-workspace-content{padding:14px!important}}
