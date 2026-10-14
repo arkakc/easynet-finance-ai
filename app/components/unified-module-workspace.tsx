@@ -48,12 +48,12 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
 
   const streamlinedSales = streamlined || workspace.id === "sales";
 
-  return <div className="unified-module-workspace">
+  return <div className={`unified-module-workspace ${streamlinedSales ? "ef-compact-workspace" : ""}`}>
     <header className="unified-workspace-header">
       <div>
         <p className="unified-workspace-eyebrow">{workspace.eyebrow}</p>
         <h1>{workspace.title}</h1>
-        <p>{workspace.description}</p>
+        {!streamlinedSales && <p>{workspace.description}</p>}
       </div>
       {!streamlinedSales && <div className="unified-workspace-header-actions">
         {create && <Link prefetch={false} className="link-button" href={create.href}>+ {create.title}</Link>}
@@ -81,7 +81,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       <div className="unified-workspace-section-head">
         <div>
           <h2>Registers & Actions</h2>
-          <p className="small">Search a document type or choose a workflow. Existing records and posting controls open in their authoritative registers.</p>
+          {!streamlinedSales && <p className="small">Search a document type or choose a workflow. Existing records and posting controls open in their authoritative registers.</p>}
         </div>
         <label className="unified-workspace-search">
           <span className="sr-only">Search workspace actions</span>
@@ -105,11 +105,6 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         {!visible.length && <p className="unified-workspace-empty">No matching registers. Try another search or category.</p>}
       </div>
     </section>
-    {(workspace.id === "sales" || workspace.id === "purchases") && <div className="unified-workspace-summary" aria-label="Recent transaction summary">
-      <div><span>Recent Documents</span><strong>{recentDocuments.length}</strong></div>
-      <div><span>Document Types</span><strong>{registerKinds.length - 1}</strong></div>
-      <div><span>Statuses Found</span><strong>{registerStatuses.length - 1}</strong></div>
-    </div>}
     {(workspace.id === "sales" || workspace.id === "purchases") && <section className="panel unified-workspace-content unified-workspace-recent" aria-label="Recent business documents">
       <div className="unified-workspace-section-head">
         <div><h2>Recent Documents</h2><p className="small">Read-only preview of up to 40 recent records. Use the register above for full history, approval and posting.</p></div>
