@@ -5405,3 +5405,21 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-doctype-action:disabled{opacity:.48;cursor:not-allowed;filter:grayscale(.65);box-shadow:none}
 .ef-doctype-action:focus-visible{outline:2px solid #1764bb;outline-offset:2px}
 @media(max-width:560px){.ef-doctype-action-bar{gap:7px}.ef-doctype-action{min-height:39px;padding:8px 12px;font-size:12px}}
+
+/* ERP CTA standard: semantic colour, consistent sizing, no hidden destructive affordances. */
+.ef-erp-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:7px 12px;border-radius:7px;border:1px solid transparent;font-size:12px;font-weight:650;line-height:1.35;cursor:pointer;white-space:normal}
+.ef-erp-action-primary{background:#1455a4;color:#fff;border-color:#1455a4}
+.ef-erp-action-secondary{background:#fff;color:#244568;border-color:#c6d6e8}
+.ef-erp-action-success{background:#087c68;color:#fff;border-color:#087c68}
+.ef-erp-action-warning{background:#fff9ee;color:#915712;border-color:#e5c38d}
+.ef-erp-action-danger{background:#fff4f3;color:#b32727;border-color:#ebb4b4}
+.ef-erp-action:hover:not(:disabled){filter:brightness(.96)}
+.ef-erp-action:focus-visible{outline:2px solid #1d69bf;outline-offset:2px}
+.ef-erp-action:disabled{opacity:.46;cursor:not-allowed;filter:grayscale(.45)}
+.ef-erp-action-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 12px}
+.ef-erp-action-toolbar .ef-erp-action-primary{margin-left:auto}
+.ef-erp-action-feedback{margin:8px 0;padding:9px 12px;border:1px solid #c6d6e8;border-radius:7px;font-size:12px}
+.ef-erp-action-feedback[data-tone="error"]{border-color:#e8b6b6;background:#fff5f5;color:#9d2222}
+.ef-erp-action-feedback[data-tone="warning"]{border-color:#e7ca92;background:#fff9ed;color:#775012}
+.ef-erp-action-feedback[data-tone="success"]{border-color:#a6d6c7;background:#f2fbf7;color:#17684e}
+@media(max-width:560px){.ef-erp-action{min-height:40px}.ef-erp-action-toolbar .ef-erp-action-primary{margin-left:0}}
