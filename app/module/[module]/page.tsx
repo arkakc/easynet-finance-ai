@@ -91,6 +91,12 @@ export default async function ModuleMenuPage({ params }: { params: Promise<{ mod
       : { ...action, href: directDocumentLink(action.href) }
   );
 
+  // Different legacy links can normalize to the same direct document URL.
+  // Keep the first (canonical workspace) action for each title and destination.
+  const uniqueActions = actions.filter((action, index, all) =>
+    all.findIndex(other => other.href === action.href && other.title === action.title) === index
+  );
+
   const workspace: WorkspaceDefinition = configured
     ? { ...configured, title: module === "dashboard" ? "Dashboard Workspace" : configured.title }
     : {
@@ -99,7 +105,7 @@ export default async function ModuleMenuPage({ params }: { params: Promise<{ mod
         eyebrow: "EASYNET FINANCE / " + group.label.toUpperCase(),
         description: "Search and open your permitted " + group.label.toLowerCase() + " functions and registers.",
         permission: permittedLinks[0][2],
-        actions,
+        actions: uniqueActions,
       };
 
   const recentDocuments = id === "purchases" || id === "sales"
@@ -111,7 +117,7 @@ export default async function ModuleMenuPage({ params }: { params: Promise<{ mod
 
   return <UnifiedModuleWorkspace
     workspace={workspace}
-    actions={actions}
+    actions={uniqueActions}
     availableModules={availableModules}
     recentDocuments={recentDocuments}
     streamlined
