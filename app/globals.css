@@ -5394,3 +5394,14 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-customer-create-action{color:#233b57}
 .ef-customer-doctype-tab:focus-visible{outline:2px solid #1764bb;outline-offset:2px}
 @media(max-width:560px){.ef-customer-doctype-toolbar{gap:7px}.ef-customer-doctype-tab{padding:8px 12px;min-height:39px;font-size:12px}}
+
+/* One shared document/master doctype toolbar for View Existing and Create New. */
+.ef-doctype-action-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 15px}
+.ef-doctype-action{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:43px;padding:9px 18px;border:1px solid #cbd8e8;border-radius:7px;background:#fff;color:#243a57;font-size:13px;font-weight:600;box-shadow:0 3px 9px rgba(21,45,80,.07);cursor:pointer;white-space:normal;text-align:center}
+.ef-doctype-action.active{border-color:#b9cbe0;background:#fff;color:#112b4f}
+.ef-doctype-action:hover:not(:disabled){border-color:#8caed9;background:#f7faff}
+.ef-doctype-create{color:#243a57}
+.ef-doctype-create>span:first-child,.ef-doctype-create-icon{font-size:20px;line-height:1;color:#7055d0;font-weight:750}
+.ef-doctype-action:disabled{opacity:.48;cursor:not-allowed;filter:grayscale(.65);box-shadow:none}
+.ef-doctype-action:focus-visible{outline:2px solid #1764bb;outline-offset:2px}
+@media(max-width:560px){.ef-doctype-action-bar{gap:7px}.ef-doctype-action{min-height:39px;padding:8px 12px;font-size:12px}}
