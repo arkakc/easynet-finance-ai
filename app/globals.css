@@ -5359,3 +5359,13 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-receipt-mode:focus-visible{outline:2px solid #1c65c6;outline-offset:2px}
 .ef-receipt-mode:disabled{opacity:.6;cursor:wait}
 @media(max-width:650px){.ef-receipt-mode-switch{width:100%}.ef-receipt-mode{flex:1;padding:9px 8px}.ef-receipt-entry-header{padding:13px!important}}
+
+.ef-receipt-invoice-search{padding:14px 18px!important;margin-bottom:10px}
+.ef-receipt-invoice-search-heading{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.ef-receipt-invoice-search-heading h3{font-size:15px;margin:0}
+.ef-receipt-invoice-search-heading .small{font-size:11px;margin:0}
+.ef-receipt-invoice-search-row{display:flex;align-items:flex-end;gap:10px}
+.ef-receipt-invoice-search-row label{display:grid;gap:5px;flex:1 1 360px;max-width:570px;min-width:0;font-size:12px}
+.ef-receipt-invoice-search-row input{width:100%;height:39px;min-height:39px}
+.ef-receipt-invoice-search-row button{width:auto;min-width:125px;min-height:39px;height:39px;padding:0 15px;white-space:nowrap}
+@media(max-width:600px){.ef-receipt-invoice-search-row{flex-wrap:wrap}.ef-receipt-invoice-search-row label{flex-basis:100%;max-width:none}.ef-receipt-invoice-search-row button{width:100%}}
