@@ -5347,3 +5347,15 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-compact-workspace .unified-workspace-register th{font-size:10px}
 .ef-compact-workspace .unified-workspace-register td{font-size:11px}
 @media(max-width:740px){.ef-compact-workspace .unified-workspace-section-head{align-items:stretch}.ef-compact-workspace .unified-workspace-content{padding:12px!important}.ef-compact-workspace .unified-workspace-search{width:100%}}
+
+/* Customer Receipt: compact receivables entry shell */
+.ef-receipt-entry-header{padding:15px 18px!important;margin-bottom:10px}
+.ef-receipt-header-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ef-receipt-header-top h3{font-size:16px;margin:0 0 4px;color:#1d3554}
+.ef-receipt-header-top p{margin:0;color:#63768f;font-size:12px}
+.ef-receipt-mode-switch{display:flex;gap:5px;padding:4px;margin-top:12px;width:fit-content;background:#eef3f9;border:1px solid #dbe5f0;border-radius:8px}
+.ef-receipt-mode{background:transparent;color:#48627d;border:1px solid transparent;border-radius:6px;padding:9px 17px;min-height:36px;font-size:12px;font-weight:700;cursor:pointer}
+.ef-receipt-mode.active{background:#fff;border-color:#bbcee4;color:#1156a5;box-shadow:0 1px 4px rgba(20,56,97,.12)}
+.ef-receipt-mode:focus-visible{outline:2px solid #1c65c6;outline-offset:2px}
+.ef-receipt-mode:disabled{opacity:.6;cursor:wait}
+@media(max-width:650px){.ef-receipt-mode-switch{width:100%}.ef-receipt-mode{flex:1;padding:9px 8px}.ef-receipt-entry-header{padding:13px!important}}
