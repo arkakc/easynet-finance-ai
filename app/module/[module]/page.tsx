@@ -4,12 +4,23 @@ import { ArrowUpRight, LayoutGrid } from "lucide-react";
 import { getCurrentUser, hasPermission } from "@/lib/auth";
 import { groups } from "@/lib/navigation/sidebar-groups";
 import { getSetupGateState } from "@/lib/setup-gate";
+import UnifiedModuleWorkspace from "@/app/components/unified-module-workspace";
+import { workspaces, workspaceIds } from "@/lib/workspaces/module-registry";
+import { recentWorkspaceDocuments } from "@/lib/workspaces/recent-documents.server";
 export const dynamic="force-dynamic";
 function slug(label:string){return label.toLowerCase().replace(/[^a-z0-9]+/g,"-");}
 export default async function ModuleMenuPage({params}:{params:Promise<{module:string}>}){
  const {module}=await params;
  const user=await getCurrentUser();
  if(!user)redirect("/login");
+ if(module==="sales"){
+  const workspace=workspaces.sales;
+  if(!hasPermission(user,workspace.permission))notFound();
+  const actions=workspace.actions.filter(action=>hasPermission(user,action.permission));
+  const recentDocuments=await recentWorkspaceDocuments("sales");
+  const availableModules=workspaceIds.filter(id=>hasPermission(user,workspaces[id].permission)).map(id=>({id,title:workspaces[id].title}));
+  return <UnifiedModuleWorkspace workspace={workspace} actions={actions} availableModules={availableModules} recentDocuments={recentDocuments}/>;
+ }
  const group=groups.find(item=>slug(item.label)===module && item.label!=="Home");
  if(!group)notFound();
  const { openingSubledgerLocked }=await getSetupGateState();
