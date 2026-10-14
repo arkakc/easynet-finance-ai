@@ -5430,3 +5430,12 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-doctype-action-bar>.ef-doctype-action,.ef-customer-doctype-toolbar>.ef-customer-doctype-tab{flex:0 0 auto}
 .ef-erp-action-toolbar .ef-erp-action-primary{margin-left:0}
 @media(max-width:560px){.ef-doctype-action-bar,.ef-customer-doctype-toolbar{justify-content:flex-start}.ef-erp-action-toolbar{justify-content:flex-end}}
+
+/* Neutral transition mask: old page must not remain visible during a sidebar route change. */
+.ef-navigation-pending{position:fixed;top:0;right:0;bottom:0;left:72px;z-index:60;background:#f7f9fc;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#365474;font-size:13px;font-weight:600}
+.ef-navigation-spinner{display:block;width:28px;height:28px;border:3px solid #d5e3f3;border-top-color:#1455a4;border-radius:50%;animation:ef-nav-spin .65s linear infinite}
+@keyframes ef-nav-spin{to{transform:rotate(360deg)}}
+@media(max-width:900px){.ef-navigation-pending{left:60px}}
+@media(prefers-reduced-motion:reduce){.ef-navigation-spinner{animation:none;border-top-color:#1455a4}}
+
+.ef-route-loading{min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#365474;font-size:13px;font-weight:600}
