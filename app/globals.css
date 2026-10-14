@@ -5268,3 +5268,33 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 
 /* Full module menus: visible but non-interactive setup-locked actions */
 .ef-workspace-action-disabled{opacity:.52;background:#f3f5f8;cursor:not-allowed;pointer-events:none}
+
+/* Sliding sidebar: icon rail at rest, full module names on hover/focus, optional pin. */
+.ef-slide-sidebar.sidebar-navigation-refresh{width:72px;padding:12px 9px;overflow-x:hidden;transition:width .25s cubic-bezier(.2,.8,.2,1),box-shadow .25s;z-index:70;transform:none;opacity:1}
+.ef-slide-sidebar:hover,.ef-slide-sidebar:focus-within,.ef-slide-sidebar.ef-slide-pinned{width:236px;box-shadow:9px 0 30px rgba(7,28,61,.22)}
+.ef-slide-sidebar .ef-sidebar-head{display:flex;align-items:flex-start;position:relative;min-width:218px;border-bottom:1px solid rgba(185,209,239,.15);margin-bottom:11px}
+.ef-slide-sidebar .brand{border:0;margin:0;min-height:72px;width:194px;flex-shrink:0}
+.ef-slide-sidebar .brand-icon{flex-shrink:0}
+.ef-slide-sidebar .brand-copy{opacity:0;visibility:hidden;transition:opacity .16s}
+.ef-slide-sidebar:hover .brand-copy,.ef-slide-sidebar:focus-within .brand-copy,.ef-slide-sidebar.ef-slide-pinned .brand-copy{opacity:1;visibility:visible}
+.ef-sidebar-pin{position:absolute;top:12px;right:0;width:27px;height:27px;display:grid;place-items:center;border:0;border-radius:6px;background:rgba(255,255,255,.1);color:#d9e9ff;cursor:pointer;opacity:0;pointer-events:none}
+.ef-slide-sidebar:hover .ef-sidebar-pin,.ef-slide-sidebar:focus-within .ef-sidebar-pin,.ef-slide-sidebar.ef-slide-pinned .ef-sidebar-pin{opacity:1;pointer-events:auto}
+.ef-slide-sidebar nav{min-width:218px}
+.ef-slide-sidebar .ef-main-menu-link{width:218px;justify-content:flex-start}
+.ef-slide-sidebar .ef-main-menu-link .nav-label-main{flex-shrink:0}
+.ef-slide-sidebar .ef-main-menu-link .nav-section-icon{flex-shrink:0}
+.ef-slide-sidebar .ef-main-menu-link .nav-label-text{opacity:0;visibility:hidden;transition:opacity .15s}
+.ef-slide-sidebar:hover .ef-main-menu-link .nav-label-text,.ef-slide-sidebar:focus-within .ef-main-menu-link .nav-label-text,.ef-slide-sidebar.ef-slide-pinned .ef-main-menu-link .nav-label-text{opacity:1;visibility:visible}
+.ef-slide-sidebar .ef-main-menu-link>svg{margin-left:auto;opacity:0;transition:opacity .15s}
+.ef-slide-sidebar:hover .ef-main-menu-link>svg,.ef-slide-sidebar:focus-within .ef-main-menu-link>svg,.ef-slide-sidebar.ef-slide-pinned .ef-main-menu-link>svg{opacity:1}
+@media(min-width:901px){
+ .shell:has(>.ef-slide-sidebar)>.main{margin-left:72px;width:calc(100% - 72px);transition:margin-left .25s,width .25s}
+ .shell:has(>.ef-slide-sidebar.ef-slide-pinned)>.main{margin-left:236px;width:calc(100% - 236px)}
+}
+@media(max-width:900px){
+ .ef-slide-sidebar.sidebar-navigation-refresh{width:60px}
+ .ef-slide-sidebar:hover,.ef-slide-sidebar:focus-within,.ef-slide-sidebar.ef-slide-pinned{width:236px}
+ .shell:has(>.ef-slide-sidebar)>.main{margin-left:60px;width:calc(100% - 60px)}
+ .shell:has(>.ef-slide-sidebar.ef-slide-pinned)>.main{margin-left:60px;width:calc(100% - 60px)}
+}
+@media(prefers-reduced-motion:reduce){.ef-slide-sidebar,.ef-slide-sidebar *,.shell:has(>.ef-slide-sidebar)>.main{transition:none!important}}
