@@ -64,6 +64,8 @@ export default function WarehouseStockClient() {
   const [descending, setDescending] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [editing, setEditing] = useState<Warehouse | null>(null);
+  const [showCreateWarehouse, setShowCreateWarehouse] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -182,15 +184,19 @@ export default function WarehouseStockClient() {
     <div className="page-head">
       <div>
         <h2>Warehouse Stock</h2>
-        <p className="small">
-          Item-by-warehouse stock, moving-average valuation, warehouse transfers and perpetual stock audit trail.
-        </p>
+        
       </div>
       <div className="page-head-actions">
         <Link className="button-link secondary-link" href="/stock">← Items & Stock</Link>
         <span className="badge">WAREHOUSE CONTROL</span>
       </div>
     </div>
+
+    <nav className="ef-doctype-action-bar" aria-label="Warehouse actions">
+      <button type="button" className="ef-doctype-action active" onClick={() => document.getElementById("inventory-warehouse-register")?.scrollIntoView({ behavior: "smooth" })}>▤ View Warehouses ({warehouses.length})</button>
+      <button type="button" className={showCreateWarehouse ? "ef-doctype-action ef-doctype-create active" : "ef-doctype-action ef-doctype-create"} aria-expanded={showCreateWarehouse} onClick={() => setShowCreateWarehouse(value => !value)}><span aria-hidden="true">＋</span> Create New Warehouse</button>
+      <button type="button" className={showTransfer ? "ef-doctype-action active" : "ef-doctype-action"} aria-expanded={showTransfer} onClick={() => setShowTransfer(value => !value)}>Warehouse Transfer</button>
+    </nav>
 
     {message && <div className="status-banner" style={{ marginBottom: 16 }}>{message}</div>}
 
@@ -201,7 +207,7 @@ export default function WarehouseStockClient() {
       <div className="card"><div className="label">Inventory Book Value</div><div className="value">{money(totalValue)}</div></div>
     </div>
 
-    <section className="panel table-wrap" style={{ marginTop: 20 }}>
+    <section id="inventory-warehouse-register" className="panel table-wrap" style={{ marginTop: 12 }}>
       <div className="form-title-row">
         <div>
           <h3>Warehouse Master</h3>
@@ -251,16 +257,16 @@ export default function WarehouseStockClient() {
       </form>}
     </section>
 
-    <form className="panel form-grid" onSubmit={createWarehouse} style={{ marginTop: 20 }}>
+    {showCreateWarehouse && <form className="panel form-grid" onSubmit={createWarehouse} style={{ marginTop: 12 }}>
       <h3 className="form-title">Create Warehouse</h3>
       <label>Warehouse Code<input name="code" placeholder="POM" required disabled={Boolean(busy)} /></label>
       <label>Warehouse Name<input name="name" placeholder="Port Moresby Warehouse" required disabled={Boolean(busy)} /></label>
       <label>Location<input name="location" placeholder="Optional physical location" disabled={Boolean(busy)} /></label>
       <label><span>Default Warehouse</span><input name="isDefault" type="checkbox" disabled={Boolean(busy)} /></label>
       <div className="form-wide"><button type="submit" disabled={Boolean(busy)}>{busy === "warehouse" ? "Creating…" : "Create Warehouse"}</button></div>
-    </form>
+    </form>}
 
-    <section className="panel table-wrap" style={{ marginTop: 20 }}>
+    <section className="panel table-wrap" style={{ marginTop: 12 }}>
       <div className="form-title-row">
         <div>
           <h3>Stock by Warehouse</h3>
@@ -284,7 +290,7 @@ export default function WarehouseStockClient() {
       </table>
     </section>
 
-    <form className="panel form-grid" onSubmit={transfer} style={{ marginTop: 20 }}>
+    {showTransfer && <form className="panel form-grid" onSubmit={transfer} style={{ marginTop: 12 }}>
       <h3 className="form-title">Warehouse Transfer</h3>
       <label>Date<input name="movementDate" type="date" defaultValue={localDate()} required disabled={Boolean(busy)} /></label>
       <label>Stock Item<select name="itemId" required defaultValue="" disabled={Boolean(busy)}><option value="">Select stock item</option>{items.map((item) => <option key={item.itemId} value={item.itemId}>{item.itemCode} — {item.itemName}</option>)}</select></label>
@@ -297,6 +303,6 @@ export default function WarehouseStockClient() {
         <p className="small">Internal warehouse transfer moves quantity and book value between locations. Because ownership and the inventory GL account do not change, no General Ledger journal is created.</p>
         <button type="submit" disabled={Boolean(busy) || warehouses.length < 2}>{busy === "transfer" ? "Transferring…" : "Post Warehouse Transfer"}</button>
       </div>
-    </form>
+    </form>}
   </div>;
 }

@@ -19,8 +19,8 @@ export default function QuickItemCreatePage(){
   return <>
     <div className="page-head">
       <div>
-        <h2>Create New Item Master</h2>
-        <p className="small">Quick catalog item registration with AI-suggested Revenue and Cost/COGS chart of accounts.</p>
+        <h2>Create New Item</h2>
+
       </div>
       <div className="page-head-actions">
         {message && (
@@ -38,25 +38,6 @@ export default function QuickItemCreatePage(){
           ← Items & Stock
         </a>
         <span className="badge">Catalog Setup</span>
-      </div>
-    </div>
-
-    <div className="grid">
-      <div className="card">
-        <div className="label">GL Mapping Model</div>
-        <div className="value small-value">AI Account Assist</div>
-      </div>
-      <div className="card">
-        <div className="label">Tax Standard</div>
-        <div className="value small-value">IRC 10% GST Ready</div>
-      </div>
-      <div className="card">
-        <div className="label">Costing Model</div>
-        <div className="value small-value">Moving Average Cost</div>
-      </div>
-      <div className="card">
-        <div className="label">Creation Flow</div>
-        <div className="value small-value">Cross-Tab Linked</div>
       </div>
     </div>
 

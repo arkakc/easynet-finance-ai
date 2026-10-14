@@ -41,6 +41,7 @@ export default function AssetsPage() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [message, setMessage] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   async function load() {
     try {
@@ -92,7 +93,7 @@ export default function AssetsPage() {
       <div className="page-head">
         <div>
           <h2>Fixed Assets Register</h2>
-          <p className="small">Asset tracking, straight-line depreciation estimates, and net book values (NBV).</p>
+
         </div>
         <div className="page-head-actions">
           {message && (
@@ -109,6 +110,8 @@ export default function AssetsPage() {
           <span className="badge">Asset Accounting</span>
         </div>
       </div>
+
+      <nav className="ef-doctype-action-bar" aria-label="Fixed asset actions"><button type="button" className="ef-doctype-action active" onClick={() => document.getElementById("fixed-asset-register")?.scrollIntoView({ behavior: "smooth" })}>▤ View Existing Assets ({assets.length})</button><button type="button" className={showCreate ? "ef-doctype-action ef-doctype-create active" : "ef-doctype-action ef-doctype-create"} aria-expanded={showCreate} onClick={() => setShowCreate(value => !value)}><span aria-hidden="true">＋</span> Register New Asset</button></nav>
 
       <div className="grid">
         <div className="card">
@@ -129,7 +132,7 @@ export default function AssetsPage() {
         </div>
       </div>
 
-      <form className="panel form-grid" onSubmit={submit}>
+      {showCreate && <form className="panel form-grid" onSubmit={submit}>
         <div className="form-wide form-title-row">
           <h3 className="form-title" style={{ margin: 0 }}>Register New Fixed Asset</h3>
           <span className="auto-badge">Capital Expenditure</span>
@@ -188,9 +191,9 @@ export default function AssetsPage() {
         <div className="form-wide button-row">
           <button type="submit">Save Fixed Asset</button>
         </div>
-      </form>
+      </form>}
 
-      <section className="panel table-wrap">
+      <section id="fixed-asset-register" className="panel table-wrap">
         <div className="form-title-row">
           <h3>Asset Ledger</h3>
           <span className="auto-badge">{assets.length} Assets Registered</span>
