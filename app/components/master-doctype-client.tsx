@@ -235,27 +235,16 @@ export default function MasterDoctypeClient({ type, title, description, createLa
   return (
     <>
       <div className="page-head">
-        <div>
-          <h2>{title}</h2>
-          {type !== "customer" && type !== "project" && <p className="small">{description}</p>}
-        </div>
-        {type !== "customer" && type !== "project" && <div className="page-head-actions">
-          <button type="button" className="secondary" onClick={() => void loadRows()} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-          <button type="button" onClick={() => setModalOpen(true)}>
-            {createLabel}
-          </button>
-        </div>}
+        <h2>{title}</h2>
       </div>
-      {(type === "customer" || type === "project") && <nav className="ef-customer-doctype-toolbar" aria-label={`${title} register actions` }>
-        <button type="button" className="ef-customer-doctype-tab active" aria-current="page">
-          <span aria-hidden="true">📋</span> View Existing {title} ({rows.length})
+      <nav className="ef-doctype-action-bar" aria-label={`${title} register actions`}>
+        <button type="button" className="ef-doctype-action active" aria-current="page" onClick={() => document.getElementById("master-doctype-register")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+          <span aria-hidden="true">▤</span> View Existing {title} ({rows.length})
         </button>
-        <button type="button" className="ef-customer-doctype-tab ef-customer-create-action" onClick={() => setModalOpen(true)}>
-          <span className="ef-customer-create-icon" aria-hidden="true">＋</span> Create New {type === "project" ? "Project" : "Customer"}
+        <button type="button" className="ef-doctype-action ef-doctype-create" onClick={() => setModalOpen(true)}>
+          <span className="ef-doctype-create-icon" aria-hidden="true">＋</span> {createLabel.replace(/^\\s*\\+\\s*/, "")}
         </button>
-      </nav>}
+      </nav>
 
       {error && <div className="status-banner error">{error}</div>}
       {lifecycleMessage && <div className="status-banner success">{lifecycleMessage}</div>}
@@ -271,7 +260,7 @@ export default function MasterDoctypeClient({ type, title, description, createLa
         </div>
       </div>
 
-      <section className="panel table-wrap">
+      <section id="master-doctype-register" className="panel table-wrap">
         <div className="form-title-row">
           <div>
             <h3>Existing {title}</h3>
