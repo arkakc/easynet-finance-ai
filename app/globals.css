@@ -5210,10 +5210,6 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-home-kicker{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.12em;font-weight:750;color:#bfddff}
 .ef-home-hero h1{font-size:clamp(27px,3.3vw,40px);color:white;margin:13px 0;line-height:1.2}
 .ef-home-hero p{font-size:14px;color:#d9e9ff;max-width:590px;line-height:1.75;margin:0}
-.ef-home-hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:25px}
-.ef-home-primary,.ef-home-secondary{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:40px;padding:0 18px;border-radius:7px;font-size:12px;font-weight:750}
-.ef-home-primary{background:white;color:#114984}
-.ef-home-secondary{border:1px solid #82b5e8;color:white}
 .ef-home-hero-mark{flex-shrink:0;width:210px;height:184px;border:1px solid #6799c8;background:rgba(255,255,255,.09);border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:#d5eaff;transform:rotate(-8deg)}
 .ef-home-hero-mark span{font-size:13px;letter-spacing:.24em}
 .ef-home-hero-mark strong{font-size:22px;color:#fff}

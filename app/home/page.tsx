@@ -35,10 +35,6 @@ export default async function HomePage() {
     <div className="ef-home-kicker"><Home size={16}/> HOME · EASYNET FINANCE</div>
     <h1>Welcome back, {firstName}.</h1>
     <p>Your Easynet Finance AI workspace. Manage everyday operations, financial records and reporting from one connected Mini ERP.</p>
-    <div className="ef-home-hero-actions">
-     {hasPermission(user,"dashboard.read")&&<Link href="/dashboard" className="ef-home-primary">Open dashboard <ArrowUpRight size={16}/></Link>}
-     {hasPermission(user,"reports.read")&&<Link href="/reports" className="ef-home-secondary">View reports <ArrowUpRight size={15}/></Link>}
-    </div>
    </div>
    <div className="ef-home-hero-mark" aria-hidden="true"><Sparkles size={46}/><span>FINANCE</span><strong>MINI ERP</strong></div>
   </header>
