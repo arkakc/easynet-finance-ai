@@ -8,13 +8,13 @@ const transaction = (module: "sales" | "purchase", tab: string, mode: "list" | "
   `/transactions?module=${module}&tab=${tab}&mode=${mode}`;
 
 export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
-  home: { id: "home", title: "Home Workspace", eyebrow: "YOUR DAILY WORK", description: "Open today's financial overview, approvals and outstanding work from one place.", permission: "dashboard.read", actions: [
+  home: { id: "home", title: "Dashboard", eyebrow: "YOUR DAILY WORK", description: "Open today's financial overview, approvals and outstanding work from one place.", permission: "dashboard.read", actions: [
     { title: "Management Dashboard", description: "Posted balances, GST, receivables and payables", href: "/dashboard", section: "Overview", permission: "dashboard.read", kind: "primary" },
     { title: "Control Centre", description: "Reconciliation exceptions and financial controls", href: "/controls", section: "Overview", permission: "dashboard.read" },
     { title: "Approvals", description: "Review documents awaiting approval", href: "/approvals", section: "Tasks", permission: "post.approve" },
     { title: "Recent Journals", description: "Check posted accounting transactions", href: "/journals", section: "Tasks", permission: "accounts.read" },
   ]},
-  sales: { id: "sales", title: "Sales Workspace", eyebrow: "CUSTOMER JOURNEY", description: "Quotation → Sales Order → Delivery → Invoice → Customer Receipt", permission: "sales.read", actions: [
+  sales: { id: "sales", title: "Sales", eyebrow: "CUSTOMER JOURNEY", description: "Quotation → Sales Order → Delivery → Invoice → Customer Receipt", permission: "sales.read", actions: [
     { title: "Sales Quotations", description: "Create offers and review customer quotations", href: transaction("sales", "salesQuote"), section: "Quotations", permission: "sales.read", kind: "primary" },
     { title: "New Sales Quotation", description: "Start a new customer offer", href: transaction("sales", "salesQuote", "create"), section: "Quotations", permission: "sales.write", kind: "action" },
     { title: "Sales Orders", description: "Manage confirmed customer commitments", href: transaction("sales", "salesOrder"), section: "Orders", permission: "sales.read" },
@@ -24,7 +24,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Customers", description: "Customer master and contact records", href: "/customers", section: "Masters", permission: "sales.read" },
     { title: "Payment Schedules", description: "Customer payment schedules and deferred revenue", href: "/payment-schedules", section: "Receipts", permission: "sales.read" },
   ]},
-  purchases: { id: "purchases", title: "Purchases Workspace", eyebrow: "SUPPLIER JOURNEY", description: "Supplier Quotation → Purchase Order → GRN → Supplier Bill → Payment", permission: "purchase.read", actions: [
+  purchases: { id: "purchases", title: "Purchases", eyebrow: "SUPPLIER JOURNEY", description: "Supplier Quotation → Purchase Order → GRN → Supplier Bill → Payment", permission: "purchase.read", actions: [
     { title: "Supplier Quotations", description: "Compare and convert supplier offers", href: transaction("purchase", "supplierQuote"), section: "Quotations", permission: "purchase.read", kind: "primary" },
     { title: "New Supplier Quotation", description: "Start a new supplier quotation", href: transaction("purchase", "supplierQuote", "create"), section: "Quotations", permission: "purchase.write", kind: "action" },
     { title: "Purchase Orders", description: "Ordered goods and outstanding commitments", href: transaction("purchase", "purchaseOrder"), section: "Orders", permission: "purchase.read" },
@@ -34,14 +34,14 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Suppliers", description: "Supplier master and contacts", href: "/suppliers", section: "Masters", permission: "purchase.read" },
     { title: "Expenses", description: "Other operating purchase costs", href: "/transactions?module=expense&tab=expense&mode=list", section: "Bills", permission: "purchase.write" },
   ]},
-  banking: { id: "banking", title: "Banking Workspace", eyebrow: "CASH MANAGEMENT", description: "Bank ledger, receive/spend money and statement reconciliation.", permission: "accounts.read", actions: [
+  banking: { id: "banking", title: "Banking", eyebrow: "CASH MANAGEMENT", description: "Bank ledger, receive/spend money and statement reconciliation.", permission: "accounts.read", actions: [
     { title: "Bank Register & Reconciliation", description: "Bank accounts, statement import and matching", href: "/banking", section: "Bank Register", permission: "accounts.read", kind: "primary" },
     { title: "Bank / Cash Pay Entry", description: "Transfer, receive or spend cash with controls", href: "/bank-cash-pay", section: "Payments", permission: "accounts.write" },
     { title: "Customer Receipts", description: "Receipts allocated to posted customer invoices", href: transaction("sales", "salesPayment"), section: "Payments", permission: "sales.read" },
     { title: "Supplier Payments", description: "Settlement of approved supplier liabilities", href: transaction("purchase", "purchasePayment"), section: "Payments", permission: "purchase.read" },
     { title: "Cash Flow Report", description: "View cash movements and liquidity", href: "/reports/cashflow", section: "Reports", permission: "reports.read" },
   ]},
-  inventory: { id: "inventory", title: "Inventory Workspace", eyebrow: "STOCK & VALUATION", description: "Item master, warehouse stock, stock movements and valuation.", permission: "stock.read", actions: [
+  inventory: { id: "inventory", title: "Inventory", eyebrow: "STOCK & VALUATION", description: "Item master, warehouse stock, stock movements and valuation.", permission: "stock.read", actions: [
     { title: "Items & Stock", description: "Item master, stock details and movement ledger", href: "/stock", section: "Items", permission: "stock.read", kind: "primary" },
     { title: "New Item", description: "Create a stock item or service", href: "/stock/new-item", section: "Items", permission: "stock.write", kind: "action" },
     { title: "Warehouse Stock", description: "Warehouse-wise stock and availability", href: "/stock/warehouses", section: "Warehouses", permission: "stock.read" },
@@ -49,7 +49,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Delivery Notes", description: "Issue goods against sales orders", href: transaction("sales", "deliveryNote"), section: "Movements", permission: "sales.read" },
     { title: "Fixed Assets", description: "Asset register and tracking", href: "/assets", section: "Assets", permission: "stock.read" },
   ]},
-  accounting: { id: "accounting", title: "Accounting Workspace", eyebrow: "FINANCIAL CONTROLS", description: "General ledger, journals, tax controls and period closing.", permission: "accounts.read", actions: [
+  accounting: { id: "accounting", title: "Accounting", eyebrow: "FINANCIAL CONTROLS", description: "General ledger, journals, tax controls and period closing.", permission: "accounts.read", actions: [
     { title: "Chart of Accounts", description: "Accounts and linked posting codes", href: "/accounts", section: "General Ledger", permission: "accounts.read", kind: "primary" },
     { title: "Posted Journals", description: "Inspect posted journal lines and source documents", href: "/journals", section: "General Ledger", permission: "accounts.read" },
     { title: "New Manual Journal", description: "Create a controlled journal entry", href: "/manual-journal-entry", section: "General Ledger", permission: "accounts.write", kind: "action" },
@@ -59,13 +59,13 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Month-End Close", description: "Period locks and closing readiness", href: "/period-close", section: "Period Close", permission: "post.approve" },
     { title: "Bank Reconciliation", description: "Match bank statement and GL balances", href: "/banking", section: "Period Close", permission: "accounts.read" },
   ]},
-  projects: { id: "projects", title: "Projects Workspace", eyebrow: "PROJECT PERFORMANCE", description: "Project master, expenses and profitability in one starting point.", permission: "dashboard.read", actions: [
+  projects: { id: "projects", title: "Projects", eyebrow: "PROJECT PERFORMANCE", description: "Project master, expenses and profitability in one starting point.", permission: "dashboard.read", actions: [
     { title: "Project Overview", description: "Project costs, revenue and financial position", href: "/projects", section: "Overview", permission: "dashboard.read", kind: "primary" },
     { title: "Project Register", description: "Search, create and manage project master records", href: "/projects/master", section: "Master Data", permission: "sales.read" },
     { title: "Project Purchasing", description: "Purchase orders and bills allocated to projects", href: transaction("purchase", "purchaseOrder"), section: "Transactions", permission: "purchase.read" },
     { title: "Project Sales", description: "Sales orders and invoices with project references", href: transaction("sales", "salesOrder"), section: "Transactions", permission: "sales.read" },
   ]},
-  reports: { id: "reports", title: "Reports Workspace", eyebrow: "FINANCIAL REPORTING", description: "Financial statements, GST, ledger detail and cash-flow reporting.", permission: "reports.read", actions: [
+  reports: { id: "reports", title: "Reports", eyebrow: "FINANCIAL REPORTING", description: "Financial statements, GST, ledger detail and cash-flow reporting.", permission: "reports.read", actions: [
     { title: "Financial Statements", description: "Profit & Loss, Balance Sheet and AR/AP controls", href: "/reports", section: "Financial", permission: "reports.read", kind: "primary" },
     { title: "General Ledger", description: "Trace journal activity and balances", href: "/reports/general-ledger", section: "Financial", permission: "reports.read" },
     { title: "Trial Balance", description: "Debit and credit reconciliation", href: "/reports/trial-balance", section: "Financial", permission: "reports.read" },
