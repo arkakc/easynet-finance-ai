@@ -4,6 +4,7 @@ import { getCurrentUser, hasPermission } from "@/lib/auth";
 import FlowReturnBridge from "@/app/components/flow-return-bridge";
 import SetupAccessGuard from "@/app/components/setup-access-guard";
 import SidebarShell from "@/app/components/sidebar-shell";
+import NavigationTransitionGuard from "@/app/components/navigation-transition-guard";
 import ProfileMenu from "@/app/components/profile-menu";
 import { type SidebarNavGroup } from "@/app/components/collapsible-sidebar-nav";
 import GlobalDataTableEnhancer from "@/app/components/global-data-table-enhancer";
@@ -50,6 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               homeHref={setupActive ? "/home" : "/setup/finance"}
             />
             <ProfileMenu userName={user.name} userRoles={user.roles} />
+            <NavigationTransitionGuard />
             <main className="main">
               <SetupAccessGuard setupActive={setupActive} />
               <FlowReturnBridge />
