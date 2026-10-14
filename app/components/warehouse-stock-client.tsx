@@ -264,9 +264,9 @@ export default function WarehouseStockClient() {
       <label>Location<input name="location" placeholder="Optional physical location" disabled={Boolean(busy)} /></label>
       <label><span>Default Warehouse</span><input name="isDefault" type="checkbox" disabled={Boolean(busy)} /></label>
       <div className="form-wide"><button type="submit" disabled={Boolean(busy)}>{busy === "warehouse" ? "Creating…" : "Create Warehouse"}</button></div>
-    </form>
+    </form>}
 
-    <section className="panel table-wrap" style={{ marginTop: 20 }}>
+    <section className="panel table-wrap" style={{ marginTop: 12 }}>
       <div className="form-title-row">
         <div>
           <h3>Stock by Warehouse</h3>
