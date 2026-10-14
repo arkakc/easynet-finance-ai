@@ -53,7 +53,7 @@ export default async function ModuleMenuPage({ params }: { params: Promise<{ mod
   const configured = id ? workspaces[id] : null;
 
   const mainActions = configured
-    ? configured.actions.filter(action => hasPermission(user, action.permission) && !(module === "sales" && action.title === "New Sales Quotation") && !(module === "purchase" && action.title === "New Supplier Quotation"))
+    ? configured.actions.filter(action => hasPermission(user, action.permission) && !(module === "sales" && action.title === "New Sales Quotation") && !(module === "purchase" && action.title === "New Supplier Quotation") && !(module === "stock-assets" && action.title === "New Item"))
     : [];
 
   // Reuse existing workspace workflows and retain every role-permitted sidebar destination.
