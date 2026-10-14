@@ -242,7 +242,7 @@ export default function MasterDoctypeClient({ type, title, description, createLa
           <span aria-hidden="true">▤</span> View Existing {title} ({rows.length})
         </button>
         <button type="button" className="ef-doctype-action ef-doctype-create" onClick={() => setModalOpen(true)}>
-          <span className="ef-doctype-create-icon" aria-hidden="true">＋</span> {createLabel.replace(/^\\s*\\+\\s*/, "")}
+          <span className="ef-doctype-create-icon" aria-hidden="true">＋</span> {createLabel.replace(/^\+\s*/, "")}
         </button>
       </nav>
 
