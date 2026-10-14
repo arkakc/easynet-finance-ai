@@ -1,7 +1,7 @@
 import type { Permission } from "@/lib/auth";
 
 export type WorkspaceId = "home" | "sales" | "purchases" | "banking" | "inventory" | "accounting" | "projects" | "reports";
-export type WorkspaceAction = { title: string; description: string; href: string; section: string; permission: Permission; kind?: "primary" | "action" };
+export type WorkspaceAction = { title: string; description: string; href: string; section: string; permission: Permission; kind?: "primary" | "action"; disabled?: boolean; disabledReason?: string };
 export type WorkspaceDefinition = { id: WorkspaceId; title: string; eyebrow: string; description: string; permission: Permission; actions: readonly WorkspaceAction[] };
 
 const transaction = (module: "sales" | "purchase", tab: string, mode: "list" | "create" = "list") =>

@@ -5,9 +5,9 @@ import { useMemo, useState } from "react";
 import type { WorkspaceAction, WorkspaceDefinition, WorkspaceId } from "@/lib/workspaces/module-registry";
 import type { WorkspaceRecentDocument } from "@/lib/workspaces/recent-documents.server";
 
-type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; availableModules: Array<{ id: WorkspaceId; title: string }>; recentDocuments: WorkspaceRecentDocument[] };
+type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; availableModules: Array<{ id: WorkspaceId; title: string }>; recentDocuments: WorkspaceRecentDocument[]; streamlined?: boolean };
 
-export default function UnifiedModuleWorkspace({ workspace, actions, availableModules, recentDocuments }: Props) {
+export default function UnifiedModuleWorkspace({ workspace, actions, availableModules, recentDocuments, streamlined = false }: Props) {
   const [query, setQuery] = useState("");
   const [section, setSection] = useState("All");
   const [registerQuery, setRegisterQuery] = useState("");
@@ -46,7 +46,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   }, []), [actions]);
   const create = actions.find(action => action.kind === "action");
 
-  const streamlinedSales = workspace.id === "sales";
+  const streamlinedSales = streamlined || workspace.id === "sales";
 
   return <div className="unified-module-workspace">
     <header className="unified-workspace-header">
@@ -93,7 +93,11 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
       </div>
       <div className="unified-workspace-register-controls"><span>{visible.length} of {actions.length} available actions</span><button type="button" disabled={section === "All" && !query} onClick={() => { setSection("All"); setQuery(""); }}>Clear action filters</button></div>
       <div className="unified-workspace-action-grid">
-        {visible.map(action => <Link key={action.href + action.title} prefetch={false} href={action.href} className="unified-workspace-action">
+        {visible.map(action => action.disabled ? <div key={action.href + action.title} className="unified-workspace-action ef-workspace-action-disabled" aria-disabled="true" title={action.disabledReason || "This action is unavailable"}>
+          <span className="unified-workspace-action-category">{action.section}</span>
+          <span className="unified-workspace-action-title">{action.title}</span>
+          <span className="unified-workspace-action-description">{action.disabledReason || action.description}</span>
+        </div> : <Link key={action.href + action.title} prefetch={false} href={action.href} className="unified-workspace-action">
           <span className="unified-workspace-action-category">{action.section}</span>
           <span className="unified-workspace-action-title">{action.title}<span aria-hidden="true"> ↗</span></span>
           <span className="unified-workspace-action-description">{action.description}</span>
