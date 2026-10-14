@@ -46,6 +46,8 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   }, []), [actions]);
   const create = actions.find(action => action.kind === "action");
 
+  const streamlinedSales = workspace.id === "sales";
+
   return <div className="unified-module-workspace">
     <header className="unified-workspace-header">
       <div>
@@ -53,13 +55,13 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         <h1>{workspace.title}</h1>
         <p>{workspace.description}</p>
       </div>
-      <div className="unified-workspace-header-actions">
+      {!streamlinedSales && <div className="unified-workspace-header-actions">
         {create && <Link prefetch={false} className="link-button" href={create.href}>+ {create.title}</Link>}
         {primary && <Link prefetch={false} className="link-button secondary-link" href={primary.href}>Open {primary.title}</Link>}
-      </div>
+      </div>}
     </header>
 
-    <nav className="unified-workspace-switcher" aria-label="Module workspaces">
+    {!streamlinedSales && <nav className="unified-workspace-switcher" aria-label="Module workspaces">
       {availableModules.map(module => <Link
         prefetch={false}
         key={module.id}
@@ -67,14 +69,14 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         aria-current={module.id === workspace.id ? "page" : undefined}
         className={module.id === workspace.id ? "unified-workspace-module active" : "unified-workspace-module"}
       >{module.title.replace(" Workspace", "")}</Link>)}
-    </nav>
+    </nav>}
 
-    <section className="panel unified-workspace-content" aria-label={workspace.title + " workflow"}>
+    {!streamlinedSales && <section className="panel unified-workspace-content" aria-label={workspace.title + " workflow"}>
       <div className="unified-workspace-section-head"><div><h2>Workflow at a glance</h2><p className="small">Choose a step to open its existing secured register. Steps shown depend on your permissions.</p></div></div>
       <nav className="unified-workspace-tabs" aria-label="Workflow steps">
         {workflow.map((step, index) => <Link prefetch={false} key={step.section} className="unified-workspace-tab" href={step.href}>{index + 1}. {step.section} <span aria-hidden="true">↗</span></Link>)}
       </nav>
-    </section>
+    </section>}
     <section className="panel unified-workspace-content" aria-label={workspace.title + " register shortcuts"}>
       <div className="unified-workspace-section-head">
         <div>
