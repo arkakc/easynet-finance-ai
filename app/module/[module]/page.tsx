@@ -71,10 +71,24 @@ export default async function ModuleMenuPage({ params }: { params: Promise<{ mod
       disabledReason: "Opening AR/AP import is locked for the current company setup.",
     }));
 
+  const directDocumentLink = (href: string) => {
+    if (!href.startsWith("/transactions?")) return href;
+    const params = new URLSearchParams(href.split("?")[1]);
+    const module = params.get("module");
+    const fallback = module === "purchase" ? "supplierQuote" : module === "expense" ? "expense" : "salesQuote";
+    const type = params.get("tab") || fallback;
+    const allowed = new Set(["salesQuote","salesOrder","deliveryNote","salesInvoice","salesPayment","supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment","expense"]);
+    if (!allowed.has(type)) return href;
+    params.delete("tab");
+    params.delete("module");
+    if (!params.has("mode")) params.set("mode", "list");
+    return "/doctype/" + type + "?" + params.toString();
+  };
+
   const actions = [...mainActions, ...extraActions].map(action =>
     action.href === "/migration/opening-subledger" && openingSubledgerLocked
-      ? { ...action, disabled: true, disabledReason: "Opening AR/AP import is locked for the current company setup." }
-      : action
+      ? { ...action, href: directDocumentLink(action.href), disabled: true, disabledReason: "Opening AR/AP import is locked for the current company setup." }
+      : { ...action, href: directDocumentLink(action.href) }
   );
 
   const workspace: WorkspaceDefinition = configured
