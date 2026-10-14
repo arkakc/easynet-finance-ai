@@ -5437,3 +5437,5 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 @keyframes ef-nav-spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.ef-navigation-pending{left:60px}}
 @media(prefers-reduced-motion:reduce){.ef-navigation-spinner{animation:none;border-top-color:#1455a4}}
+
+.ef-route-loading{min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#365474;font-size:13px;font-weight:600}
