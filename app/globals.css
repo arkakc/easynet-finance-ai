@@ -5326,3 +5326,24 @@ a.linked-document-id[href^="/stock/item/"]:focus-visible { outline: 2px solid #1
 .ef-home-module-copy strong{font-size:12px}
 .ef-home-module-copy small{font-size:10.5px}
 @media(max-width:640px){.ef-home-hero{padding:20px}.ef-home-module{min-height:66px}}
+
+/* Dense, aligned module pages: remove dead gaps without shrinking legibility. */
+.ef-compact-workspace{max-width:none;width:100%;padding-bottom:14px}
+.ef-compact-workspace .unified-workspace-header{margin-bottom:8px}
+.ef-compact-workspace .unified-workspace-content{padding:12px 14px!important;margin-top:0}
+.ef-compact-workspace .unified-workspace-section-head{align-items:center;gap:12px}
+.ef-compact-workspace .unified-workspace-section-head h2{font-size:15px;line-height:1.35}
+.ef-compact-workspace .unified-workspace-search input{min-height:34px}
+.ef-compact-workspace .unified-workspace-tabs{margin:8px 0 6px;padding-bottom:7px;gap:5px}
+.ef-compact-workspace .unified-workspace-tab{padding:5px 9px;font-size:11px}
+.ef-compact-workspace .unified-workspace-register-controls{margin:6px 0;gap:8px}
+.ef-compact-workspace .unified-workspace-action-grid{gap:7px}
+.ef-compact-workspace .unified-workspace-action{padding:11px 12px;gap:4px;border-radius:8px}
+.ef-compact-workspace .unified-workspace-action-category{font-size:9px}
+.ef-compact-workspace .unified-workspace-action-title{font-size:12.5px}
+.ef-compact-workspace .unified-workspace-action-description{font-size:11px;line-height:1.35}
+.ef-compact-workspace .unified-workspace-recent{margin-top:8px}
+.ef-compact-workspace .unified-workspace-pagination{margin:6px 0}
+.ef-compact-workspace .unified-workspace-register th{font-size:10px}
+.ef-compact-workspace .unified-workspace-register td{font-size:11px}
+@media(max-width:740px){.ef-compact-workspace .unified-workspace-section-head{align-items:stretch}.ef-compact-workspace .unified-workspace-content{padding:12px!important}.ef-compact-workspace .unified-workspace-search{width:100%}}
