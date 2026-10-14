@@ -145,7 +145,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
 
   useEffect(()=>{setSelectedListKeys([]);},[tab,sectionMode]);
 
-  const salesSide=module==="sales";const commercial=["salesQuote","supplierQuote"].includes(tab);const controlledCreateBlocked=["salesOrder","salesInvoice","purchaseOrder","supplierInvoice"].includes(tab);const supplierQuotation=tab==="supplierQuote";const partyOptions=salesSide?masters.customers:masters.suppliers;
+  const salesSide=module==="sales";const commercial=["salesQuote","supplierQuote"].includes(tab);const controlledCreateBlocked=["salesOrder","deliveryNote","salesInvoice","purchaseOrder","supplierInvoice"].includes(tab);const supplierQuotation=tab==="supplierQuote";const partyOptions=salesSide?masters.customers:masters.suppliers;
   const projectOptions=useMemo(()=>{if(!salesSide||!selectedParty)return masters.projects;const linked=masters.projects.filter(project=>String(project.customerId||"")===selectedParty);return linked.length?linked:masters.projects;},[salesSide,selectedParty,masters.projects]);
   const subtotal=useMemo(()=>lines.reduce((sum,line)=>sum+(Number(line.qty)||0)*(Number(line.rate)||0),0),[lines]);const gstAmount=useMemo(()=>subtotal*((Number(gstRate)||0)/100),[subtotal,gstRate]);const netTotal=subtotal+gstAmount;
   const deliveryReadySalesOrders=useMemo(()=>tx.salesOrders.filter((row:any)=>["APPROVED","PART DELIVERED"].includes(normalizedStatus(row.status))),[tx.salesOrders]);
@@ -499,6 +499,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
       >
         <span>{controlledCreateBlocked?"🔗":"➕"}</span> {controlledCreateBlocked?(
           tab==="salesOrder"?"Create from Sales Quotation":
+          tab==="deliveryNote"?"Create from Sales Order":
           tab==="salesInvoice"?"Create from Delivery Note":
           tab==="purchaseOrder"?"Create from Supplier Quotation":
           tab==="supplierInvoice"?"Create from Purchase Receipt / GRN":
@@ -519,7 +520,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
       </div>
       <div className="button-row">
         <button type="button" onClick={()=>{
-          const upstream:Tab=tab==="salesOrder"?"salesQuote":tab==="salesInvoice"?"deliveryNote":tab==="supplierInvoice"?"purchaseReceipt":"supplierQuote";
+          const upstream:Tab=tab==="deliveryNote"?"salesOrder":tab==="salesOrder"?"salesQuote":tab==="salesInvoice"?"deliveryNote":tab==="supplierInvoice"?"purchaseReceipt":"supplierQuote";
           setTab(upstream);
           setSectionMode("list");
           syncUrl(module,upstream,"list");
