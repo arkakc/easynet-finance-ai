@@ -479,12 +479,11 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
       </div>
     )}
 
-    {!sourceBillPaymentFlow&&(<div style={{display:"flex",gap:"10px",margin:directDocumentType?"0 0 10px":"14px 0 16px",flexWrap:"wrap",alignItems:"center"}}>
+    {!sourceBillPaymentFlow&&(<div className="ef-doctype-action-bar">
       <button
         type="button"
         disabled={globallyBusy}
-        className={sectionMode==="list"?"tab active":"tab"}
-        style={{padding:"8px 18px",borderRadius:"6px",fontWeight:600,display:"inline-flex",alignItems:"center",gap:"8px"}}
+        className={sectionMode==="list"?"ef-doctype-action active":"ef-doctype-action"}
         onClick={()=>openMode("list")}
       >
         <span>📋</span> {section.listLabel} ({existingCount()})
@@ -492,8 +491,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
       <button
         type="button"
         disabled={globallyBusy||controlledCreateBlocked}
-        className={sectionMode==="create"?"tab active":"tab"}
-        style={{padding:"8px 18px",borderRadius:"6px",fontWeight:600,display:"inline-flex",alignItems:"center",gap:"8px"}}
+        className={sectionMode==="create"?"ef-doctype-action ef-doctype-create active":"ef-doctype-action ef-doctype-create"}
         onClick={()=>openMode("create")}
         title={controlledCreateBlocked?"Created only from the previous approved document in the controlled flow.":undefined}
       >
