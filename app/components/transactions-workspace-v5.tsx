@@ -83,7 +83,7 @@ function isSalesOrderRecord(row:any){return salesDocumentNumber(row).toUpperCase
 function isSalesQuoteRecord(row:any){return !isSalesOrderRecord(row);}
 function sameAmount(left:unknown,right:unknown){return Math.abs(Number(left||0)-Number(right||0))<0.01;}
 
-export default function TransactionsWorkspaceV5(){
+export default function TransactionsWorkspaceV5({directDocumentType}:{directDocumentType?:string}={}){
   const router=useRouter();
   const pathname=usePathname();
   const searchParams=useSearchParams();
@@ -98,7 +98,7 @@ export default function TransactionsWorkspaceV5(){
   const[selectedListKeys,setSelectedListKeys]=useState<string[]>([]);
   const[bulkDeleteBusy,setBulkDeleteBusy]=useState(false);
 
-  function syncUrl(nextModule:Module,nextTab:Tab,nextMode:SectionMode){const params=new URLSearchParams(searchParams.toString());params.set("module",nextModule);params.set("tab",nextTab);params.set("mode",nextMode);router.replace(`${pathname}?${params.toString()}`,{scroll:false});}
+  function syncUrl(nextModule:Module,nextTab:Tab,nextMode:SectionMode){const params=new URLSearchParams(searchParams.toString());params.set("module",nextModule);params.set("tab",nextTab);params.set("mode",nextMode);router.replace(`${directDocumentType ? "/doctype/" + nextTab : pathname}?${params.toString()}`,{scroll:false});}
 
   const loadMasters=useCallback(async(force=false)=>{if(mastersLoaded&&!force)return;try{const response=await fetch("/api/masters",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Master-data load failed");setMasters({customers:body.customers||[],suppliers:body.suppliers||[],projects:body.projects||[]});setMastersLoaded(true);}catch(error){setStatus(error instanceof Error?error.message:"Master-data load failed");}},[mastersLoaded]);
   const loadItems=useCallback(async(force=false)=>{if(itemsLoaded&&!force)return;try{const response=await fetch("/api/stock?scope=items",{cache:"no-store"});const body=await response.json();if(!response.ok||!body.ok)throw new Error(body.error||"Item Master load failed");setItems(body.items||[]);setItemsLoaded(true);}catch(error){setStatus(error instanceof Error?error.message:"Item Master load failed");}},[itemsLoaded]);
@@ -140,7 +140,7 @@ export default function TransactionsWorkspaceV5(){
 
   async function loadNextDocumentNo(currentTab:Tab){const meta=numberMeta[currentTab];if(!meta){setNextDocumentNo("");return;}setNextDocumentNo("Loading…");try{const params=new URLSearchParams({nextNumberFor:meta.action});if(meta.partyType)params.set("partyType",meta.partyType);const response=await fetch(`/api/erp/transactions?${params}`,{cache:"no-store"});const body=await response.json();setNextDocumentNo(response.ok&&body.ok?body.nextNumber||"AUTO":"AUTO");}catch{setNextDocumentNo("AUTO");}}
 
-  useEffect(()=>{const params=new URLSearchParams(searchParamsKey);const requestedModule=params.get("module");const resolvedModule:Module=requestedModule==="purchase"||requestedModule==="expense"?requestedModule:"sales";const requestedTab=params.get("tab") as Tab|null;const resolvedTab=requestedTab&&MODULE_TABS[resolvedModule].includes(requestedTab)?requestedTab:defaultTab(resolvedModule);const requestedMode=params.get("mode");const resolvedMode:SectionMode=requestedMode==="create"?requestedMode:"list";setModule(resolvedModule);setTab(resolvedTab);setSectionMode(resolvedMode);setInitialized(true);},[searchParamsKey]);
+  useEffect(()=>{const params=new URLSearchParams(searchParamsKey);const requestedModule=params.get("module");const directModule=directDocumentType==="expense"?"expense":directDocumentType&&["supplierQuote","purchaseOrder","purchaseReceipt","supplierInvoice","purchasePayment"].includes(directDocumentType)?"purchase":null;const resolvedModule:Module=directModule||(requestedModule==="purchase"||requestedModule==="expense"?requestedModule:"sales");const requestedTab=(directDocumentType||params.get("tab")) as Tab|null;const resolvedTab=requestedTab&&MODULE_TABS[resolvedModule].includes(requestedTab)?requestedTab:defaultTab(resolvedModule);const requestedMode=params.get("mode");const resolvedMode:SectionMode=requestedMode==="create"?requestedMode:"list";setModule(resolvedModule);setTab(resolvedTab);setSectionMode(resolvedMode);setInitialized(true);},[searchParamsKey,directDocumentType]);
   useEffect(()=>{if(!initialized)return;if(sectionMode==="list"){void loadTransactions(true);if(!mastersLoaded)void loadMasters();if(tab==="purchaseOrder"&&!receiptStatesLoaded)void loadReceiptStates();}if(sectionMode==="create"){if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder","supplierInvoice","expense"].includes(tab)&&!mastersLoaded)void loadMasters();if(["salesQuote","salesOrder","salesInvoice","supplierQuote","purchaseOrder"].includes(tab)&&!itemsLoaded)void loadItems();if(["supplierInvoice","deliveryNote","purchaseReceipt"].includes(tab)&&!existingLoaded)void loadTransactions();if(tab==="expense"||tab==="salesInvoice")void loadAccountOptions();if(numberMeta[tab])void loadNextDocumentNo(tab);}},[initialized,sectionMode,tab]);
 
   useEffect(()=>{setSelectedListKeys([]);},[tab,sectionMode]);
@@ -439,7 +439,7 @@ export default function TransactionsWorkspaceV5(){
   }
 
   return <>
-    <div className="page-head">
+    {!directDocumentType && <div className="page-head">
       <div>
         <h2>{title}</h2>
         <p className="small">{title} → {section.title} → {sectionMode==="create"?"Create Form":"List View"}</p>
@@ -458,9 +458,9 @@ export default function TransactionsWorkspaceV5(){
         )}
         <span className="badge">{section.title}</span>
       </div>
-    </div>
+    </div>}
 
-    {!sourceBillPaymentFlow && module === "sales" && (
+    {!directDocumentType && !sourceBillPaymentFlow && module === "sales" && (
       <div className="tabs wrap-tabs">
         {tabButton("salesQuote", "Sales Quotation")}
         {tabButton("salesOrder", "Sales Order")}
@@ -469,7 +469,7 @@ export default function TransactionsWorkspaceV5(){
         {tabButton("salesPayment", "Sales Payment Entry / Receipt")}
       </div>
     )}
-    {!sourceBillPaymentFlow && module === "purchase" && (
+    {!directDocumentType && !sourceBillPaymentFlow && module === "purchase" && (
       <div className="tabs wrap-tabs">
         {tabButton("supplierQuote", "Supplier Quotation")}
         {tabButton("purchaseOrder", "Purchase Order")}
@@ -479,7 +479,7 @@ export default function TransactionsWorkspaceV5(){
       </div>
     )}
 
-    {!sourceBillPaymentFlow&&(<div style={{display:"flex",gap:"10px",margin:"14px 0 16px",flexWrap:"wrap",alignItems:"center"}}>
+    {!sourceBillPaymentFlow&&(<div style={{display:"flex",gap:"10px",margin:directDocumentType?"0 0 10px":"14px 0 16px",flexWrap:"wrap",alignItems:"center"}}>
       <button
         type="button"
         disabled={globallyBusy}
