@@ -23,7 +23,7 @@ export default function CollapsibleSidebarNav({groups,onNavigate}:Props){
    const Icon=icons[group.label]||Package;
    const active=pathname==="/module/"+encodeURIComponent(group.label.toLowerCase().replace(/[^a-z0-9]+/g,"-"))||group.links.some(link=>selected(link.href,pathname,query));
    const href=group.label==="Home"?"/home":"/module/"+encodeURIComponent(group.label.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
-   return <Link key={group.label} href={href} prefetch={false} onClick={event=>{if(!event.defaultPrevented&&event.button===0&&!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey)onNavigate?.(href);}} title={group.label} className={`nav-label ef-main-menu-link ${active?"ef-main-menu-active":""}`} aria-current={active?"page":undefined}>
+   return <Link key={group.label} href={href} title={group.label} className={`nav-label ef-main-menu-link ${active?"ef-main-menu-active":""}`} aria-current={active?"page":undefined}>
     <span className="nav-label-main"><span className="nav-section-icon"><Icon size={19} strokeWidth={2} aria-hidden="true"/></span><span className="nav-label-text">{group.label}</span></span>
     {group.label!=="Home"&&<ChevronRight size={15} aria-hidden="true"/>}
    </Link>;
