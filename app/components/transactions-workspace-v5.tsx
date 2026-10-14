@@ -507,7 +507,7 @@ export default function TransactionsWorkspaceV5({directDocumentType}:{directDocu
       </button>
     </div>)}
 
-    {sectionMode==="create"&&!sourceBillPaymentFlow&&<section className={`panel ${styles.contextBar}`}><button type="button" disabled={globallyBusy} className="secondary" onClick={()=>openMode("list")}>← Back to {section.listLabel}</button><span className={styles.contextTitle}>{section.createLabel}</span></section>}
+    {sectionMode==="create"&&!sourceBillPaymentFlow&&!directDocumentType&&<section className={`panel ${styles.contextBar}`}><button type="button" disabled={globallyBusy} className="secondary" onClick={()=>openMode("list")}>← Back to {section.listLabel}</button><span className={styles.contextTitle}>{section.createLabel}</span></section>}
 
     {sectionMode==="create"&&controlledCreateBlocked&&<section className="panel">
       <div className="form-title-row">
