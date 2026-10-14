@@ -15,7 +15,15 @@ export async function GET(request: Request) {
   try {
     await requirePermission("sales.read");
     const invoiceId = new URL(request.url).searchParams.get("invoiceId")?.trim() || "";
-    if (!invoiceId) throw new Error("Original Sales Invoice is required");
+    if (!invoiceId) {
+      const results = await listTable<any>("Invoices", 500, 0);
+      return NextResponse.json({ ok: true, returns: (results.rows || []).filter(isCreditNote).map((row: any) => ({
+        invoiceId: String(row.invoiceId || ""), invoiceNumber: String(row.invoiceNumber || ""),
+        originalInvoiceId: String(row.sourceDocumentId || ""), customerId: String(row.customerId || ""),
+        invoiceDate: String(row.invoiceDate || ""), status: String(row.status || ""),
+        totalAmount: Number(row.totalAmount || 0),
+      })) });
+    }
     const [invoiceResult, invoiceLinesResult, itemResult, creditResult, allLines] = await Promise.all([
       findRecords<any>("Invoices", { invoiceId }, 1),
       findRecords<any>("InvoiceLines", { invoiceId }, 500),
