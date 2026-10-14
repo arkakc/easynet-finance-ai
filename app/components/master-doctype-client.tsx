@@ -237,9 +237,9 @@ export default function MasterDoctypeClient({ type, title, description, createLa
       <div className="page-head">
         <div>
           <h2>{title}</h2>
-          {type !== "customer" && <p className="small">{description}</p>}
+          {type !== "customer" && type !== "project" && <p className="small">{description}</p>}
         </div>
-        {type !== "customer" && <div className="page-head-actions">
+        {type !== "customer" && type !== "project" && <div className="page-head-actions">
           <button type="button" className="secondary" onClick={() => void loadRows()} disabled={loading}>
             {loading ? "Refreshing…" : "Refresh"}
           </button>
@@ -248,12 +248,12 @@ export default function MasterDoctypeClient({ type, title, description, createLa
           </button>
         </div>}
       </div>
-      {type === "customer" && <nav className="ef-customer-doctype-toolbar" aria-label="Customer register actions">
+      {(type === "customer" || type === "project") && <nav className="ef-customer-doctype-toolbar" aria-label={`${title} register actions` }>
         <button type="button" className="ef-customer-doctype-tab active" aria-current="page">
-          <span aria-hidden="true">📋</span> View Existing Customers ({rows.length})
+          <span aria-hidden="true">📋</span> View Existing {title} ({rows.length})
         </button>
         <button type="button" className="ef-customer-doctype-tab ef-customer-create-action" onClick={() => setModalOpen(true)}>
-          <span className="ef-customer-create-icon" aria-hidden="true">＋</span> Create New Customer
+          <span className="ef-customer-create-icon" aria-hidden="true">＋</span> Create New {type === "project" ? "Project" : "Customer"}
         </button>
       </nav>}
 
