@@ -12,7 +12,7 @@ export default function SidebarShell({ groups, homeHref }: Props) {
   return (
     <aside className={`sidebar sidebar-navigation-refresh ef-slide-sidebar ${pinned ? "ef-slide-pinned" : ""}`} aria-label="Main navigation">
       <div className="ef-sidebar-head">
-        <Link prefetch={false} className="brand" href={homeHref} aria-label="Easynet Finance Home">
+        <Link className="brand" href={homeHref} aria-label="Easynet Finance Home">
           <div className="brand-icon">EN</div>
           <div className="brand-copy"><strong>EASYNET FINANCE AI</strong><span>Enterprise Mini ERP · PGK</span></div>
         </Link>
