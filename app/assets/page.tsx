@@ -193,7 +193,7 @@ export default function AssetsPage() {
         </div>
       </form>}
 
-      <section className="panel table-wrap">
+      <section id="fixed-asset-register" className="panel table-wrap">
         <div className="form-title-row">
           <h3>Asset Ledger</h3>
           <span className="auto-badge">{assets.length} Assets Registered</span>
