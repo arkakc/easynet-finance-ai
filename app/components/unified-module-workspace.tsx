@@ -52,7 +52,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
     <header className="unified-workspace-header">
       <div>
         <p className="unified-workspace-eyebrow">{workspace.eyebrow}</p>
-        <h1>{workspace.title}</h1>
+        <h1>{workspace.title.replace(/ Workspace$/, "")}</h1>
         {!streamlinedLayout && <p>{workspace.description}</p>}
       </div>
       {!streamlinedLayout && <div className="unified-workspace-header-actions">
