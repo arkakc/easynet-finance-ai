@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { POST as convertOrder } from "@/app/api/erp/sales-invoice-conversion/route";
 import { withConversionGuard } from "@/lib/erp/conversion-guard";
+import { appendAuditEvent } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
 const schema = z.object({
@@ -65,7 +66,19 @@ export async function POST(request:Request){
     results.push({sourceId,status:data.status==="existing-draft"?"existing":"created",createdId:str(data.createdId),documentNumber:str(data.documentNumber),message:str(data.status||"Draft invoice created")});
    }catch(e){results.push({sourceId,status:"failed",message:e instanceof Error?e.message:"Outcome uncertain; reconcile before retry"});}
   }
-  console.info("sales.bulk-invoices.completed",{batchId,results});
-  return NextResponse.json({ok:true,batchId,results});
+  const auditErrors: string[] = [];
+  for (const row of results) {
+   try {
+    await appendAuditEvent({ action:"BULK_CONVERT", entityType:"SalesInvoiceBulk", entityId:row.sourceId,
+     entityCode:row.documentNumber || null, description:row.message,
+     metadata:{ batchId, sourceId:row.sourceId, destinationId:row.createdId || null, result:row.status },
+     outcome:row.status==="failed" ? "FAILURE" : row.status==="blocked" ? "DENIED" : "SUCCESS" });
+   } catch (error) {
+    auditErrors.push(row.sourceId);
+    console.error("sales.bulk-invoices.audit-error", { batchId, sourceId:row.sourceId, error });
+   }
+  }
+  console.info("sales.bulk-invoices.completed",{batchId,results,auditErrors});
+  return NextResponse.json({ok:true,batchId,results,auditWarning:auditErrors.length ? "Some results could not be recorded in audit history. Save this batch CSV and contact an administrator." : null});
  }catch(e){const msg=e instanceof Error?e.message:"Bulk invoice generation failed";return NextResponse.json({ok:false,error:msg},{status:msg==="Forbidden"?403:msg==="Unauthorized"?401:400});}
 }
