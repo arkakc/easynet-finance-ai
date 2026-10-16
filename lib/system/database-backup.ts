@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { databaseRuntimeInfo, prisma } from "@/src/lib/prisma";
+import { prisma } from "@/src/lib/prisma";
 
 export const databasePath = path.join(process.cwd(), "prisma", "dev.db");
 export const databaseBackupDirectory = path.join(process.cwd(), "backups", "database");
@@ -63,10 +63,7 @@ async function pragmaResult(client: PrismaClient, pragma: "quick_check" | "integ
 }
 
 function assertSqliteRuntime() {
-  const runtime = databaseRuntimeInfo();
-  if (runtime.provider !== "sqlite") {
-    throw new Error("SQLite backup/restore utilities are disabled while DATABASE_PROVIDER=postgresql; use managed PostgreSQL backups/PITR.");
-  }
+  throw new Error("SQLite backup/restore utilities are unavailable in the PostgreSQL-only runtime.");
 }
 
 export async function verifyLiveDatabase() {
