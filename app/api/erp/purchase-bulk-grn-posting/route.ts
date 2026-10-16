@@ -14,8 +14,18 @@ function readLines(raw:string|null){try{const rows=JSON.parse(raw||"[]");return 
 export async function GET(){
  try{
   await requirePermission("post.approve");
-  const receipts=await prisma.purchaseReceipt.findMany({where:{status:"DRAFT"},orderBy:{createdAt:"desc"},take:100,include:{purchaseOrder:{select:{code:true,supplier:{select:{name:true,code:true}}}}}});
-  return NextResponse.json({ok:true,limit:10,receipts:receipts.map(r=>({id:r.id,number:r.code,orderNumber:r.purchaseOrder?.code||"",supplier:r.purchaseOrder?.supplier?.name||r.purchaseOrder?.supplier?.code||"",receiptDate:r.receiptDate.toISOString().slice(0,10),lines:readLines(r.items).map((l:any)=>({itemId:String(l.itemId||""),itemCode:String(l.itemCode||l.itemId||""),itemName:String(l.itemName||""),remainingQty:Number(l.remainingQty||0),qty:Number(l.qty||0)}))}))});
+  // PurchaseReceipt has a purchaseOrderId scalar, not a Prisma relation.
+  const receipts=await prisma.purchaseReceipt.findMany({where:{status:"DRAFT"},orderBy:{createdAt:"desc"},take:100});
+  const purchaseOrderIds=[...new Set(receipts.map(r=>r.purchaseOrderId))];
+  const orders=await prisma.purchaseOrder.findMany({
+   where:{id:{in:purchaseOrderIds}},
+   select:{id:true,code:true,supplier:{select:{name:true,code:true}}},
+  });
+  const orderById=new Map(orders.map(order=>[order.id,order]));
+  return NextResponse.json({ok:true,limit:10,receipts:receipts.map(r=>{
+   const order=orderById.get(r.purchaseOrderId);
+   return {id:r.id,number:r.code,orderNumber:order?.code||"",supplier:order?.supplier?.name||order?.supplier?.code||"",receiptDate:r.receiptDate.toISOString().slice(0,10),lines:readLines(r.items).map((l:any)=>({itemId:String(l.itemId||""),itemCode:String(l.itemCode||l.itemId||""),itemName:String(l.itemName||""),remainingQty:Number(l.remainingQty||0),qty:Number(l.qty||0)}))};
+  })});
  }catch(e){const m=e instanceof Error?e.message:"Unable to load draft GRNs";return NextResponse.json({ok:false,error:m},{status:m==="Unauthorized"?401:m==="Forbidden"?403:500});}
 }
 export async function POST(request:Request){
