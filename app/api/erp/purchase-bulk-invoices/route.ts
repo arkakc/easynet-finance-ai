@@ -3,10 +3,10 @@ import {NextResponse} from "next/server";
 import {z} from "zod";
 import {requirePermission} from "@/lib/auth";
 import {prisma} from "@/src/lib/prisma";
-import {POST as convert} from "@/app/api/erp/purchase-conversions/route";
+import {nextDocumentSeriesId} from "@/lib/accounting/document-numbering";
 import {appendAuditEvent} from "@/lib/security/audit";
 export const dynamic="force-dynamic";
-const schema=z.object({action:z.literal("createMatchedSupplierBills"),purchaseOrderIds:z.array(z.string().trim().min(1)).min(1).max(20).refine(ids=>new Set(ids).size===ids.length,"Duplicate Purchase Orders"),confirmation:z.literal("CREATE DRAFT BILLS"),evidence:z.array(z.object({purchaseOrderId:z.string().min(1),invoiceNumber:z.string().trim().min(1).max(100),total:z.number().finite().positive(),gst:z.number().finite().min(0),documentId:z.string().min(1)})).min(1).max(20)});
+const schema=z.object({action:z.literal("createMatchedSupplierBills"),purchaseOrderIds:z.array(z.string().trim().min(1)).min(1).max(20).refine(ids=>new Set(ids).size===ids.length,"Duplicate Purchase Orders"),confirmation:z.literal("CREATE DRAFT BILLS"),evidence:z.array(z.object({purchaseOrderId:z.string().min(1),invoiceNumber:z.string().trim().min(1).max(100),total:z.number().finite().positive(),gst:z.number().finite().min(0),documentId:z.string().min(1),lines:z.array(z.object({itemId:z.string().min(1),quantity:z.number().finite().positive(),unitPrice:z.number().finite().min(0),gst:z.number().finite().min(0)})).min(1)})).min(1).max(20)});
 const epsilon=0.0001;
 const money=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
 async function evaluate(ref:string){
@@ -19,7 +19,12 @@ async function evaluate(ref:string){
  const purchaseLines=order.lines.filter(line=>line.item?.type==="GOOD"&&line.itemId);
  const totals=new Map<string,number>();
  for(const line of purchaseLines){const id=String(line.itemId);totals.set(id,(totals.get(id)||0)+Number(line.quantity));}
- const lines=[...totals.entries()].map(([itemId,ordered])=>({itemId,ordered,received:received.get(itemId)||0}));
+ const lines=[...totals.entries()].map(([itemId,ordered])=>{
+ const matching=order.lines.filter(l=>l.itemId===itemId);
+ const net=matching.reduce((n,l)=>n+Number(l.amount||0),0);
+ const gst=matching.reduce((n,l)=>n+Number(l.taxAmount||0),0);
+ return {itemId,ordered,received:received.get(itemId)||0,unitPrice:matching.length===1?Number(matching[0].unitPrice):null,net,gst};
+});
  const statuses=["SENT","PARTIAL_RECEIVED","RECEIVED","BILLED"];
  let reason="";
  if(existing)reason="An existing Supplier Bill is linked to this Purchase Order";
@@ -52,16 +57,40 @@ export async function POST(request:Request){
    if(!check.eligible){results.push({sourceId,number,status:"blocked",message:check.reason});continue;}
    const ev=evidenceById.get(sourceId)!;
    if(money(ev.total)!==money(check.total)||money(ev.gst)!==money(check.gst)){results.push({sourceId,number,status:"blocked",message:"Supplier invoice amount or GST differs from PO; manual variance review required"});continue;}
+   const linesById=new Map(ev.lines.map(line=>[line.itemId,line]));
+   if(linesById.size!==check.lines.length||ev.lines.length!==check.lines.length||check.lines.some(line=>{
+     const v=linesById.get(line.itemId);
+     return !v||Math.abs(v.quantity-line.ordered)>epsilon||line.unitPrice===null||money(v.unitPrice)!==money(line.unitPrice)||money(v.gst)!==money(line.gst);
+   })){results.push({sourceId,number,status:"blocked",message:"Supplier invoice line quantity, unit price or GST differs from PO. Reconcile line-level variance manually."});continue;}
    const document=await prisma.document.findFirst({where:{id:ev.documentId,documentId:{in:[check.id,check.number]},documentType:{in:["PO","PURCHASE_ORDER"]}},select:{id:true}});
    if(!document){results.push({sourceId,number,status:"blocked",message:"Supplier invoice evidence must be attached to this Purchase Order"});continue;}
    const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},select:{supplierId:true}});
    const existingReference=await prisma.supplierBill.findFirst({where:{supplierId:po?.supplierId||"",notes:{contains:"Supplier invoice reference: "+ev.invoiceNumber+";"}}});
    if(existingReference){results.push({sourceId,number,status:"blocked",message:"Supplier invoice number already recorded for this supplier"});continue;}
-   const response=await convert(new Request("http://localhost/api/erp/purchase-conversions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({purchaseOrderId:sourceId})}));
-   const data=await response.json();
-   if(!response.ok||!data.ok){results.push({sourceId,number,status:"failed",message:String(data.error||"Conversion uncertain; reconcile before retry")});continue;}
-   if(data.status==="created"&&data.createdId){await prisma.supplierBill.updateMany({where:{OR:[{id:String(data.createdId)},{code:String(data.documentNumber||"")}]},data:{notes:"Supplier invoice reference: "+ev.invoiceNumber+"; evidence document: "+ev.documentId+"; total: "+ev.total+"; GST: "+ev.gst}});}
-   results.push({sourceId,number,status:data.status==="created"?"created":"blocked",createdId:String(data.createdId||""),documentNumber:String(data.documentNumber||""),message:String(data.status||"Draft supplier bill created")});
+   // Create the draft directly in the same Prisma store used by matching and GRNs.
+   // The legacy purchase-conversions service expects different PO lifecycle statuses.
+   const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},include:{lines:true}});
+   if(!po||!["SENT","PARTIAL_RECEIVED","RECEIVED","BILLED"].includes(String(po.status)))throw Error("Purchase Order is no longer eligible");
+   if(po.lines.some(line=>!line.itemId||!Number.isFinite(Number(line.quantity))))throw Error("Unresolved PO item");
+   const billNumber=await nextDocumentSeriesId("PB",Number(new Intl.DateTimeFormat("en",{timeZone:"Pacific/Port_Moresby",year:"numeric"}).format(new Date())));
+   const created=await prisma.$transaction(async tx=>{
+    const linked=await tx.supplierBill.findFirst({where:{OR:[{orderId:po.id},{sourceDocId:po.id},{sourceDocId:po.code},{poReference:po.code}]}});
+    if(linked)throw Error("PO already linked to a Supplier Bill; reconcile before retry");
+    const sameReference=await tx.supplierBill.findFirst({where:{supplierId:po.supplierId,notes:{contains:"Supplier invoice reference: "+ev.invoiceNumber+";"}}});
+    if(sameReference)throw Error("Supplier invoice reference already used for this supplier");
+    return tx.supplierBill.create({data:{
+     code:billNumber,supplierId:po.supplierId,projectId:po.projectId,billDate:new Date(),
+     status:"DRAFT",currency:po.currency,subtotal:po.subtotal,taxTotal:po.taxTotal,
+     freight:po.freight,discountTotal:po.discountTotal,total:po.total,outstanding:po.total,
+     orderId:po.id,sourceDocId:po.id,poReference:po.code,
+     notes:"Supplier invoice reference: "+ev.invoiceNumber+"; evidence document: "+ev.documentId+"; total: "+ev.total+"; GST: "+ev.gst,
+     createdBy:"bulk-three-way-match",
+     lines:{create:po.lines.map(line=>({lineNo:line.lineNo,itemId:line.itemId,description:line.description,
+       quantity:line.quantity,unitPrice:line.unitPrice,unit:line.unit,taxRate:line.taxRate,taxAmount:line.taxAmount,
+       discountPercent:line.discountPercent,discountAmount:line.discountAmount,amount:line.amount,sortOrder:line.sortOrder}))}
+    }});
+   });
+   results.push({sourceId,number,status:"created",createdId:created.id,documentNumber:created.code,message:"Draft Supplier Bill created in Prisma; approval and accounting posting remain separate"});
   }catch(e){results.push({sourceId,number,status:"failed",message:e instanceof Error?e.message:"Uncertain conversion outcome; reconcile first"});}
  }
  const auditFailures:string[]=[];
