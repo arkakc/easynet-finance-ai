@@ -27,3 +27,15 @@ test("supplier quotations in PurchaseOrder storage do not count as PO commitment
   assert.equal(outstandingPurchaseCommitments([supplierQuote], [], []), 0);
   assert.equal(outstandingPurchaseCommitments([supplierQuote, po], [], []), 550);
 });
+
+
+test("rejects invalid non-finite or negative PO values rather than reporting a misleading commitment", () => {
+  assert.throws(() => outstandingPurchaseCommitments([{ ...po, lines: [{ ...po.lines[0], quantity: -5 }] }], [], []), /Invalid ordered quantity/);
+  assert.throws(() => outstandingPurchaseCommitments([{ ...po, lines: [{ ...po.lines[0], unitPrice: Number.NaN }] }], [], []), /Invalid unit price/);
+  assert.throws(() => outstandingPurchaseCommitments([{ ...po, baseTotal: Number.POSITIVE_INFINITY }], [], []), /Invalid base total/);
+  assert.throws(() => outstandingPurchaseCommitments([po], [{ referenceId: "p1", itemId: "i1", quantity: -1 }], []), /Invalid received quantity/);
+});
+
+test("over-receipt cannot make the remaining PO commitment negative", () => {
+  assert.equal(outstandingPurchaseCommitments([po], [{ referenceId: "p1", itemId: "i1", quantity: 8 }], []), 0);
+});
