@@ -6,6 +6,7 @@ import { listTable, findRecords } from "@/lib/backend/apps-script";
 import { env } from "@/lib/env";
 import { POST as approveInvoice } from "@/app/api/approvals/route";
 import { appendAuditEvent } from "@/lib/security/audit";
+import { prisma } from "@/src/lib/prisma";
 
 export const dynamic = "force-dynamic";
 const inputSchema = z.object({
@@ -42,6 +43,8 @@ export async function POST(request:Request){
     const row=(await findRecords<Invoice>("Invoices",{invoiceId:sourceId},1)).rows[0];
     documentNumber=String(row?.invoiceNumber||"");
     if(!row||!allowed(row)){results.push({sourceId,documentNumber,status:"blocked",message:"Invoice is missing, posted, or no longer an eligible draft"});continue;}
+    const review=await prisma.approvalRequest.findFirst({where:{type:"PHASE3_INVOICE_REVIEW",documentCode:sourceId},orderBy:{createdAt:"desc"},select:{status:true}});
+    if(review&&["PENDING","IN_REVIEW"].includes(review.status)){results.push({sourceId,documentNumber,status:"blocked",message:"Submitted maker-checker review is pending; complete it through the review workflow"});continue;}
     const response=await approveInvoice(new Request("http://localhost/api/approvals",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
       secret:env.APP_SECRET,payload:{recordType:"invoice",recordId:sourceId,decision:"APPROVE",note},
     })}));
