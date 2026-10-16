@@ -8,23 +8,14 @@ export type GoLiveCheck = { key: string; label: string; blocking: boolean; passe
 
 async function postgresReadinessCheck(): Promise<GoLiveCheck> {
   const runtime = databaseRuntimeInfo();
-  const productionRequiresTarget = process.env.GO_LIVE_REQUIRE_POSTGRES === "true" || runtime.productionLike;
-  const configured = productionRequiresTarget
-    ? runtime.provider === "postgresql" && runtime.postgresConfigured
-    : runtime.provider === "sqlite" || (runtime.provider === "postgresql" && runtime.postgresConfigured);
-
+  const configured = runtime.provider === "postgresql" && runtime.postgresConfigured;
+  const connectivity = configured && await prisma.$queryRawUnsafe<Array<{result:number}>>("SELECT 1 AS result").then(rows=>Number(rows[0]?.result)===1).catch(()=>false);
   return {
-    key: "postgres",
-    label: productionRequiresTarget
-      ? "Application runtime is using PostgreSQL"
-      : "Database runtime configured for current environment",
-    blocking: true,
-    passed: configured && (runtime.provider !== "postgresql" || await prisma.$queryRawUnsafe<Array<{result:number}>>("SELECT 1 AS result").then(rows => Number(rows[0]?.result)===1).catch(()=>false)),
-    detail: productionRequiresTarget
-      ? configured
-        ? "Runtime provider is PostgreSQL and target connection is configured"
-        : `Production requires DATABASE_PROVIDER=postgresql with DATABASE_URL_POSTGRES configured; active provider is ${runtime.provider}`
-      : `Active database provider: ${runtime.provider}`,
+    key:"postgres",
+    label:"Production runtime must use reachable PostgreSQL",
+    blocking:true,
+    passed:connectivity,
+    detail:connectivity?"PostgreSQL connection verified":`Production requires DATABASE_PROVIDER=postgresql and a working DATABASE_URL_POSTGRES; current provider: ${runtime.provider}`,
   };
 }
 
@@ -91,9 +82,7 @@ export async function buildGoLiveReadiness() {
       key: "multi-instance",
       label: "Independent PostgreSQL multi-instance contention test verified",
       blocking: true,
-      passed: databaseRuntimeInfo().provider !== "postgresql"
-        ? !databaseRuntimeInfo().productionLike && process.env.GO_LIVE_REQUIRE_POSTGRES !== "true"
-        : productionEvidenceChecks({ verifiedAt: process.env.POSTGRES_MULTI_INSTANCE_VERIFIED_AT }).backupFresh,
+      passed: databaseRuntimeInfo().provider === "postgresql" && productionEvidenceChecks({ verifiedAt: process.env.POSTGRES_MULTI_INSTANCE_VERIFIED_AT }).backupFresh,
       detail: "Run db:phase6:verify-postgres against a separate, disposable PostgreSQL QA database using two independent Prisma clients. Record verified execution evidence (POSTGRES_MULTI_INSTANCE_VERIFIED_AT) only after real PASS; timestamps are operator attestations.",
     },
     { key: "session", label: "Application session secret configured", blocking: true, passed: Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32), detail: process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 32 ? "Secret present" : "SESSION_SECRET must be at least 32 characters" },
