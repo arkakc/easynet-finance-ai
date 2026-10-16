@@ -6,7 +6,7 @@ import {prisma} from "@/src/lib/prisma";
 import {nextDocumentSeriesId} from "@/lib/accounting/document-numbering";
 import {appendAuditEvent} from "@/lib/security/audit";
 export const dynamic="force-dynamic";
-const schema=z.object({action:z.literal("createMatchedSupplierBills"),purchaseOrderIds:z.array(z.string().trim().min(1)).min(1).max(20).refine(ids=>new Set(ids).size===ids.length,"Duplicate Purchase Orders"),confirmation:z.literal("CREATE DRAFT BILLS"),evidence:z.array(z.object({purchaseOrderId:z.string().min(1),invoiceNumber:z.string().trim().min(1).max(100),total:z.number().finite().positive(),gst:z.number().finite().min(0),documentId:z.string().min(1)})).min(1).max(20)});
+const schema=z.object({action:z.literal("createMatchedSupplierBills"),purchaseOrderIds:z.array(z.string().trim().min(1)).min(1).max(20).refine(ids=>new Set(ids).size===ids.length,"Duplicate Purchase Orders"),confirmation:z.literal("CREATE DRAFT BILLS"),evidence:z.array(z.object({purchaseOrderId:z.string().min(1),invoiceNumber:z.string().trim().min(1).max(100),total:z.number().finite().positive(),gst:z.number().finite().min(0),documentId:z.string().min(1),lines:z.array(z.object({itemId:z.string().min(1),quantity:z.number().finite().positive(),unitPrice:z.number().finite().min(0),gst:z.number().finite().min(0)})).min(1)})).min(1).max(20)});
 const epsilon=0.0001;
 const money=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
 async function evaluate(ref:string){
@@ -19,7 +19,12 @@ async function evaluate(ref:string){
  const purchaseLines=order.lines.filter(line=>line.item?.type==="GOOD"&&line.itemId);
  const totals=new Map<string,number>();
  for(const line of purchaseLines){const id=String(line.itemId);totals.set(id,(totals.get(id)||0)+Number(line.quantity));}
- const lines=[...totals.entries()].map(([itemId,ordered])=>({itemId,ordered,received:received.get(itemId)||0}));
+ const lines=[...totals.entries()].map(([itemId,ordered])=>{
+ const matching=order.lines.filter(l=>l.itemId===itemId);
+ const net=matching.reduce((n,l)=>n+Number(l.amount||0),0);
+ const gst=matching.reduce((n,l)=>n+Number(l.taxAmount||0),0);
+ return {itemId,ordered,received:received.get(itemId)||0,unitPrice:matching.length===1?Number(matching[0].unitPrice):null,net,gst};
+});
  const statuses=["SENT","PARTIAL_RECEIVED","RECEIVED","BILLED"];
  let reason="";
  if(existing)reason="An existing Supplier Bill is linked to this Purchase Order";
@@ -52,6 +57,11 @@ export async function POST(request:Request){
    if(!check.eligible){results.push({sourceId,number,status:"blocked",message:check.reason});continue;}
    const ev=evidenceById.get(sourceId)!;
    if(money(ev.total)!==money(check.total)||money(ev.gst)!==money(check.gst)){results.push({sourceId,number,status:"blocked",message:"Supplier invoice amount or GST differs from PO; manual variance review required"});continue;}
+   const linesById=new Map(ev.lines.map(line=>[line.itemId,line]));
+   if(linesById.size!==check.lines.length||ev.lines.length!==check.lines.length||check.lines.some(line=>{
+     const v=linesById.get(line.itemId);
+     return !v||Math.abs(v.quantity-line.ordered)>epsilon||line.unitPrice===null||money(v.unitPrice)!==money(line.unitPrice)||money(v.gst)!==money(line.gst);
+   })){results.push({sourceId,number,status:"blocked",message:"Supplier invoice line quantity, unit price or GST differs from PO. Reconcile line-level variance manually."});continue;}
    const document=await prisma.document.findFirst({where:{id:ev.documentId,documentId:{in:[check.id,check.number]},documentType:{in:["PO","PURCHASE_ORDER"]}},select:{id:true}});
    if(!document){results.push({sourceId,number,status:"blocked",message:"Supplier invoice evidence must be attached to this Purchase Order"});continue;}
    const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},select:{supplierId:true}});
