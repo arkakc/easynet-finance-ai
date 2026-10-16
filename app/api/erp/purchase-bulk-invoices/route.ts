@@ -64,9 +64,6 @@ export async function POST(request:Request){
    })){results.push({sourceId,number,status:"blocked",message:"Supplier invoice line quantity, unit price or GST differs from PO. Reconcile line-level variance manually."});continue;}
    const document=await prisma.document.findFirst({where:{id:ev.documentId,documentId:{in:[check.id,check.number]},documentType:{in:["PO","PURCHASE_ORDER"]}},select:{id:true}});
    if(!document){results.push({sourceId,number,status:"blocked",message:"Supplier invoice evidence must be attached to this Purchase Order"});continue;}
-   const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},select:{supplierId:true}});
-   const existingReference=await prisma.supplierBill.findFirst({where:{supplierId:po?.supplierId||"",notes:{contains:"Supplier invoice reference: "+ev.invoiceNumber+";"}}});
-   if(existingReference){results.push({sourceId,number,status:"blocked",message:"Supplier invoice number already recorded for this supplier"});continue;}
    // Create the draft directly in the same Prisma store used by matching and GRNs.
    // The legacy purchase-conversions service expects different PO lifecycle statuses.
    const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},include:{lines:true}});
