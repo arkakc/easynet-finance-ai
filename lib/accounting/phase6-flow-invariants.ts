@@ -11,13 +11,16 @@ export type AccountingFlowEvidence = {
 };
 
 const money = (n: number) => Math.round(n * 100);
+const isCentAmount = (n: number) => Number.isFinite(n) && Math.abs(n * 100 - Math.round(n * 100)) < 0.000001;
 export function checkAccountingFlow(evidence: AccountingFlowEvidence): string[] {
   const issues: string[] = [];
   const nums = [evidence.net, evidence.gst, evidence.gross, evidence.receivableOrPayableControl, evidence.allocatedPayments, evidence.remainingBalance];
   if (!evidence.sourceId.trim()) issues.push("Source reference required");
   if (nums.some(n => !Number.isFinite(n))) issues.push("Non-finite financial amount");
+  if (nums.some(n => n < 0)) issues.push("Negative invoice, payment or outstanding amount");
+  if (nums.some(n => !isCentAmount(n))) issues.push("Financial amount exceeds cent precision");
   if (!evidence.journal.length) issues.push("Missing posted journal lines");
-  if (evidence.journal.some(line => !line.accountId.trim() || !Number.isFinite(line.debit) || !Number.isFinite(line.credit) || line.debit < 0 || line.credit < 0 || (line.debit > 0 && line.credit > 0))) issues.push("Invalid debit or credit journal line");
+  if (evidence.journal.some(line => !line.accountId.trim() || !Number.isFinite(line.debit) || !Number.isFinite(line.credit) || line.debit < 0 || line.credit < 0 || !isCentAmount(line.debit) || !isCentAmount(line.credit) || (line.debit > 0 && line.credit > 0))) issues.push("Invalid debit or credit journal line");
   if (issues.length) return issues;
   if (money(evidence.net + evidence.gst) !== money(evidence.gross)) issues.push("Net plus GST does not equal gross");
   const debit = evidence.journal.reduce((sum, line) => sum + money(line.debit), 0);
