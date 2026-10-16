@@ -21,6 +21,7 @@
     "db:reconcile:snapshot": "tsx scripts/database/reconciliation-snapshot.ts",
     "db:sequence:preview": "tsx scripts/database/repair-empty-document-series.ts",
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
+    "launch:preflight": "tsx scripts/database/production-launch-preflight.ts",
     "db:uat:deep-audit": "tsx scripts/database/finance-uat-deep-audit.ts",
     "db:uat:close-controls": "tsx scripts/database/finance-close-controls.ts",
     "test:phase8": "tsx --test tests/system/conversion-release-check.test.ts tests/system/recovery-evidence.test.ts tests/system/release-evidence.test.ts tests/system/recovery-resolution.test.ts",
