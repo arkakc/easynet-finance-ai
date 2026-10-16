@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { existsSync } from "node:fs";
+import { loadEnvFile } from "node:process";
+
+// npm prebuild runs outside Next.js, so load its local environment explicitly.
+if (existsSync(path.resolve(process.cwd(), ".env.local"))) {
+  loadEnvFile(path.resolve(process.cwd(), ".env.local"));
+}
 
 if (process.env.DATABASE_PROVIDER && process.env.DATABASE_PROVIDER.trim().toLowerCase() !== "postgresql") {
   throw new Error("SQLite runtime has been removed; set DATABASE_PROVIDER=postgresql or unset it.");
