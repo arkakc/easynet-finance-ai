@@ -58,12 +58,14 @@ export async function POST(request:Request){
    const ev=evidenceById.get(sourceId)!;
    if(money(ev.total)!==money(check.total)||money(ev.gst)!==money(check.gst)){results.push({sourceId,number,status:"blocked",message:"Supplier invoice amount or GST differs from PO; manual variance review required"});continue;}
    const linesById=new Map(ev.lines.map(line=>[line.itemId,line]));
+   const sumGst=ev.lines.reduce((sum,line)=>sum+line.gst,0);
+   if(money(sumGst)!==money(ev.gst)){results.push({sourceId,number,status:"blocked",message:"Supplier line GST does not sum to invoice GST"});continue;}
    if(linesById.size!==check.lines.length||ev.lines.length!==check.lines.length||check.lines.some(line=>{
      const v=linesById.get(line.itemId);
      return !v||Math.abs(v.quantity-line.ordered)>epsilon||line.unitPrice===null||money(v.unitPrice)!==money(line.unitPrice)||money(v.gst)!==money(line.gst);
    })){results.push({sourceId,number,status:"blocked",message:"Supplier invoice line quantity, unit price or GST differs from PO. Reconcile line-level variance manually."});continue;}
-   const document=await prisma.document.findFirst({where:{id:ev.documentId,documentId:{in:[check.id,check.number]},documentType:{in:["PO","PURCHASE_ORDER"]}},select:{id:true}});
-   if(!document){results.push({sourceId,number,status:"blocked",message:"Supplier invoice evidence must be attached to this Purchase Order"});continue;}
+   const document=await prisma.document.findFirst({where:{id:ev.documentId,documentId:{in:[check.id,check.number]},documentType:{in:["PO","PURCHASE_ORDER"]},status:{not:"ARCHIVED"},fileUrl:{not:null}},select:{id:true,fileUrl:true}});
+   if(!document?.fileUrl?.trim()){results.push({sourceId,number,status:"blocked",message:"Supplier invoice evidence file must be retained on the Purchase Order"});continue;}
    // Create the draft directly in the same Prisma store used by matching and GRNs.
    // The legacy purchase-conversions service expects different PO lifecycle statuses.
    const po=await prisma.purchaseOrder.findUnique({where:{id:check.id},include:{lines:true}});
@@ -71,6 +73,8 @@ export async function POST(request:Request){
    if(po.lines.some(line=>!line.itemId||!Number.isFinite(Number(line.quantity))))throw Error("Unresolved PO item");
    const billNumber=await nextDocumentSeriesId("PB",Number(new Intl.DateTimeFormat("en",{timeZone:"Pacific/Port_Moresby",year:"numeric"}).format(new Date())));
    const created=await prisma.$transaction(async tx=>{
+    const receiptCount=await tx.purchaseReceipt.count({where:{purchaseOrderId:po.id,status:"POSTED",journalId:{not:null}}});
+    if(receiptCount===0)throw Error("Posted GRN and GRNI journal required before bill creation");
     const linked=await tx.supplierBill.findFirst({where:{OR:[{orderId:po.id},{sourceDocId:po.id},{sourceDocId:po.code},{poReference:po.code}]}});
     if(linked)throw Error("PO already linked to a Supplier Bill; reconcile before retry");
     const sameReference=await tx.supplierBill.findFirst({where:{supplierId:po.supplierId,notes:{contains:"Supplier invoice reference: "+ev.invoiceNumber+";"}}});
