@@ -16,7 +16,7 @@ async function main() {
     /datasource\s+db\s*\{[\s\S]*?\}/,
     'datasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL_POSTGRES")\n}',
   );
-  if (converted === source) throw new Error("Could not locate the Prisma datasource block");
+  if (converted === withDedicatedClient && !withDedicatedClient.includes('provider = "postgresql"')) throw new Error("Could not locate the Prisma datasource block");
   await fs.mkdir(outputDirectory, { recursive: true });
   await fs.writeFile(outputPath, `// Generated from prisma/schema.prisma. Do not edit manually.\n${converted}`, "utf8");
   console.log(`Generated PostgreSQL schema: ${outputPath}`);
