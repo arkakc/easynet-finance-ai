@@ -40,6 +40,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Bulk GRN Posting", description: "Review warehouse and received quantities before controlled Stock In", href: "/purchases/bulk-grn-posting", section: "Receipts", permission: "post.approve" },
     { title: "Goods Receipts (GRN)", description: "Warehouse receiving and GRNI", href: transaction("purchase", "purchaseReceipt"), section: "Receipts", permission: "purchase.read" },
     { title: "Bulk Supplier Invoice Matching", description: "Three-way match purchase orders and posted receipts before draft supplier bills", href: "/purchases/bulk-invoices", section: "Bills", permission: "purchase.read" },
+    { title: "PO / GRN / Bill Reconciliation", description: "Read-only ordered, received and billed quantity exceptions", href: "/reports/purchase-quantity-reconciliation", section: "Bills", permission: "reports.read" },
     { title: "Supplier Bills", description: "Three-way match, input GST and accounts payable", href: transaction("purchase", "supplierInvoice"), section: "Bills", permission: "purchase.read" },
     { title: "Supplier Payments", description: "Supplier advances, allocations and settlement", href: transaction("purchase", "purchasePayment"), section: "Payments", permission: "purchase.read" },
     { title: "Suppliers", description: "Supplier master and contacts", href: "/suppliers", section: "Masters", permission: "purchase.read" },
