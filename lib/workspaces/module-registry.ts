@@ -26,6 +26,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Bulk Sales Invoices", description: "Generate draft invoices from fulfilled sales orders", href: "/sales/bulk-invoices", section: "Registers", permission: "sales.read" },
     { title: "Bulk Invoice Approval", description: "Review and post draft invoices with controller approval", href: "/sales/bulk-invoice-approval", section: "Registers", permission: "post.approve" },
     { title: "Bulk Customer Allocations", description: "Allocate existing customer advances to posted Sales Invoices", href: "/sales/bulk-allocations", section: "Receipts", permission: "sales.read" },
+    { title: "Bulk Receipt Finalization", description: "Finalize existing approved customer receipt entries in controlled batches", href: "/sales/bulk-receipts", section: "Receipts", permission: "sales.write" },
     { title: "Sales Returns", description: "Invoice-linked partial returns and draft credit notes", href: "/sales/returns", section: "Returns", permission: "sales.read" },
     { title: "Customers", description: "Customer master and contact records", href: "/customers", section: "Masters", permission: "sales.read" },
     { title: "Payment Schedules", description: "Customer payment schedules and deferred revenue", href: "/payment-schedules", section: "Receipts", permission: "sales.read" },
