@@ -21,10 +21,11 @@ export default function BulkInvoiceClient(){
   setBusy(true);setError("");setBatch(null);
   try{const response=await fetch("/api/erp/sales-bulk-invoices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"createDraftInvoices",salesOrderIds:chosen,invoiceDate:date,confirm:true})});
   const data=await response.json();if(!response.ok||!data.ok)throw Error(data.error||"Batch failed");
-  setBatch({batchId:data.batchId,results:data.results||[]});setSelected([]);await load();
+  setBatch({batchId:data.batchId,results:data.results||[]});if(data.auditWarning)setError(String(data.auditWarning));setSelected([]);await load();
   }catch(e){setError(e instanceof Error?e.message:"Batch failed");}finally{setBusy(false);}
  }
  return <div><div className="page-head"><div><h2>Bulk Sales Invoices</h2><p className="small">Stage 3: Delivered Sales Orders → Draft Sales Invoices</p></div></div>
+ <p className="small"><Link href="/sales/bulk-invoice-history">View Batch Audit History (audit permission required)</Link></p>
  <section className="panel"><div className="form-title-row"><div><h3>Invoice Preflight</h3><p className="small">Available delivered quantities only. Each order is rechecked before conversion.</p></div><button type="button" className="secondary" disabled={loading||busy} onClick={()=>void load()}>Refresh Eligibility</button></div>
  <p className="small"><Link href="/sales/bulk-processing">Quotation → Order</Link> · <Link href="/sales/bulk-deliveries">Order → Delivery</Link> · Invoice drafts</p>
  <div className="ef-erp-action-feedback" data-tone="warning">Only draft invoices are generated. Invoice approval, financial posting, GST release and customer payment allocation are separate workflows. Verify the batch results before retrying failed conversions.</div>
