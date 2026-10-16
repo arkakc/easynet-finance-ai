@@ -23,6 +23,7 @@ export const groups: readonly NavGroup[] = [
       ["Sales Transactions", "/transactions?module=sales", "sales.read"],
       ["Sales Returns", "/sales/returns", "sales.read"],
       ["Bulk Processing", "/sales/bulk-processing", "sales.read"],
+      ["Bulk Sales Invoices", "/sales/bulk-invoices", "sales.read"],
       ["Customers", "/customers", "sales.read"],
       ["Projects", "/projects/master", "sales.read"],
       ["Retail POS Terminal", "/pos", "sales.read"],
