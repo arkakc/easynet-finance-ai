@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/auth";
 import { listTable } from "@/lib/backend/apps-script";
 import { POST as convertOrder } from "@/app/api/erp/sales-invoice-conversion/route";
+import { withConversionGuard } from "@/lib/erp/conversion-guard";
 
 export const dynamic = "force-dynamic";
 const schema = z.object({
@@ -53,9 +54,14 @@ export async function POST(request:Request){
     const row=(await sources()).find(o=>o.salesOrderId===sourceId);
     if(!row||!row.eligible){results.push({sourceId,status:"blocked",message:row?.reason||"Order unavailable in current preflight"});continue;}
     // Reuse the established single-order invoice calculation, GST allocation and quantity checks.
-    const response=await convertOrder(new Request("http://localhost/api/erp/sales-invoice-conversion",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({quoteId:sourceId,mode:"AVAILABLE",invoiceDate:input.invoiceDate})}));
-    const data=await response.json();
-    if(!response.ok||!data.ok){results.push({sourceId,status:"failed",message:String(data.error||"Invoice creation outcome uncertain; reconcile source before retry")});continue;}
+    // Durable claim is acquired before writing legacy invoice rows.
+    // A failed/uncertain write is retained for reconciliation; never auto-release.
+    const data=await withConversionGuard("salesBulkOrderToInvoice",sourceId,async()=>{
+      const response=await convertOrder(new Request("http://localhost/api/erp/sales-invoice-conversion",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({quoteId:sourceId,mode:"AVAILABLE",invoiceDate:input.invoiceDate})}));
+      const output=await response.json();
+      if(!response.ok||!output.ok)throw new Error(String(output.error||"Invoice conversion outcome uncertain; reconcile source before retry"));
+      return output;
+    });
     results.push({sourceId,status:data.status==="existing-draft"?"existing":"created",createdId:str(data.createdId),documentNumber:str(data.documentNumber),message:str(data.status||"Draft invoice created")});
    }catch(e){results.push({sourceId,status:"failed",message:e instanceof Error?e.message:"Outcome uncertain; reconcile before retry"});}
   }
