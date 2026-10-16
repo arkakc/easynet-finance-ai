@@ -2,12 +2,14 @@ import { PrismaClient } from "@prisma/client";
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { resolveBackupPath, verifyDatabaseBackup } from "../../lib/system/database-backup";
+import { listDatabaseBackups, resolveBackupPath, verifyDatabaseBackup } from "../../lib/system/database-backup";
 
 // Isolated restore drill: never replaces the live database.
 async function main() {
- const file = process.argv.find(a=>a.startsWith("--file="))?.slice(7);
- if(!file)throw new Error("Specify --file=<existing-backup.sqlite>");
+ const supplied = process.argv.find(a=>a.startsWith("--file="))?.slice(7);
+ const file = supplied || (await listDatabaseBackups())[0]?.fileName;
+ if(!file)throw new Error("No backup found. Run npm run db:backup or specify --file=<existing-backup.sqlite>");
+ console.log(supplied ? "Verifying specified SQLite backup:" : "Verifying latest SQLite backup:", file);
  const verified=await verifyDatabaseBackup(file);
  const dir=path.resolve(process.cwd(),"backups","restore-drills");
  await fs.mkdir(dir,{recursive:true});
