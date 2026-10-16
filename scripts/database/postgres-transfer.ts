@@ -13,7 +13,7 @@ import {
   type FinancialReconciliationSnapshot,
   type SnapshotComparison,
 } from "../../lib/system/financial-reconciliation";
-import { databaseRuntimeInfo, prisma } from "../../src/lib/prisma";
+import { prisma } from "../../src/lib/prisma";
 
 type FieldMeta = {
   name: string;
@@ -231,9 +231,7 @@ async function saveMigrationReport(input: {
 }
 
 function assertSqliteSourceRuntime() {
-  if (databaseRuntimeInfo().provider !== "sqlite") {
-    throw new Error("PostgreSQL migration must run with DATABASE_PROVIDER=sqlite so the source remains the local SQLite database until cutover.");
-  }
+  throw new Error("Legacy SQLite-to-PostgreSQL transfer is unavailable in the PostgreSQL-only runtime.");
 }
 
 async function preflight() {
