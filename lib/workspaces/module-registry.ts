@@ -37,6 +37,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "Bulk Supplier Quote Conversion", description: "Convert approved supplier quotations into draft purchase orders", href: "/purchases/bulk-processing", section: "Quotations", permission: "purchase.read" },
     { title: "Purchase Orders", description: "Ordered goods and outstanding commitments", href: transaction("purchase", "purchaseOrder"), section: "Orders", permission: "purchase.read" },
     { title: "Bulk Goods Receipt Drafts", description: "Create draft GRNs from approved Purchase Orders", href: "/purchases/bulk-receipts", section: "Receipts", permission: "purchase.read" },
+    { title: "Bulk GRN Posting", description: "Review warehouse and received quantities before controlled Stock In", href: "/purchases/bulk-grn-posting", section: "Receipts", permission: "post.approve" },
     { title: "Goods Receipts (GRN)", description: "Warehouse receiving and GRNI", href: transaction("purchase", "purchaseReceipt"), section: "Receipts", permission: "purchase.read" },
     { title: "Supplier Bills", description: "Three-way match, input GST and accounts payable", href: transaction("purchase", "supplierInvoice"), section: "Bills", permission: "purchase.read" },
     { title: "Supplier Payments", description: "Supplier advances, allocations and settlement", href: transaction("purchase", "purchasePayment"), section: "Payments", permission: "purchase.read" },
