@@ -11,7 +11,7 @@ const epsilon=0.0001;
 const money=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
 async function evaluate(ref:string){
  const order=await prisma.purchaseOrder.findFirst({where:{OR:[{id:ref},{code:ref}]},include:{supplier:{select:{name:true,code:true}},lines:{include:{item:{select:{type:true,code:true}}}}}});
- if(!order||!order.code.startsWith("PO-"))return {id:ref,number:ref,supplier:"",status:"UNKNOWN",eligible:false,reason:"Purchase Order not found",lines:[]};
+ if(!order||!order.code.startsWith("PO-"))return {id:ref,number:ref,supplier:"",status:"UNKNOWN",eligible:false,reason:"Purchase Order not found",total:0,gst:0,lines:[]};
  const existing=await prisma.supplierBill.findFirst({where:{OR:[{orderId:order.id},{sourceDocId:order.id},{sourceDocId:order.code},{poReference:order.code}]}});
  const legacyReceipts=await prisma.purchaseReceipt.findMany({where:{purchaseOrderId:order.id,status:"POSTED"},select:{id:true,journalId:true}});
  const movements=await prisma.stockMovement.groupBy({by:["itemId"],where:{type:"PURCHASE_RECEIPT",referenceId:{in:[order.id,order.code]}},_sum:{quantity:true}});
