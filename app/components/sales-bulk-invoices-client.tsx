@@ -21,7 +21,7 @@ export default function BulkInvoiceClient(){
   setBusy(true);setError("");setBatch(null);
   try{const response=await fetch("/api/erp/sales-bulk-invoices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"createDraftInvoices",salesOrderIds:chosen,invoiceDate:date,confirm:true})});
   const data=await response.json();if(!response.ok||!data.ok)throw Error(data.error||"Batch failed");
-  setBatch({batchId:data.batchId,results:data.results||[]});if(data.auditWarning)setError(String(data.auditWarning));setSelected([]);await load();
+  setBatch({batchId:data.batchId,results:data.results||[]});setSelected([]);await load();if(data.auditWarning)setError(String(data.auditWarning));
   }catch(e){setError(e instanceof Error?e.message:"Batch failed");}finally{setBusy(false);}
  }
  return <div><div className="page-head"><div><h2>Bulk Sales Invoices</h2><p className="small">Stage 3: Delivered Sales Orders → Draft Sales Invoices</p></div></div>
