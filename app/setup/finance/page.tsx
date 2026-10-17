@@ -155,6 +155,7 @@ export default function FinanceSetupPage() {
   const [coaFile, setCoaFile] = useState<File | null>(null);
   const [coaImporting, setCoaImporting] = useState(false);
   const [standardCoaCreating, setStandardCoaCreating] = useState(false);
+  const [coaResetting, setCoaResetting] = useState(false);
   const [setupAccounts, setSetupAccounts] = useState<SetupAccount[]>([]);
   const [coaLoading, setCoaLoading] = useState(false);
   const [coaView, setCoaView] = useState<"tree" | "list">("tree");
@@ -272,6 +273,22 @@ export default function FinanceSetupPage() {
       await loadSetupAccounts();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Chart of Accounts import failed"); }
     finally { setCoaImporting(false); }
+  };
+  const resetSetupCoa = async () => {
+    const count = overview?.metrics.coaCount ?? 0;
+    if (!window.confirm(`Reset the Chart of Accounts? This will permanently delete all ${count} existing accounts and clear account mappings, only if the server verifies that no linked financial records exist. This cannot be undone.`)) return;
+    setCoaResetting(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/ui/accounts/reset-setup", { method: "POST" });
+      const body = await response.json() as { ok?: boolean; error?: string; message?: string };
+      if (!response.ok || !body.ok) throw new Error(body.error || "COA reset was blocked");
+      setMessage(body.message || "Chart of Accounts reset.");
+      setSetupAccounts([]);
+      setConfig((current) => ({ ...current, ...Object.fromEntries(mappingAccountFields.map((field) => [field.configKey, ""])) }));
+      await load();
+      await loadSetupAccounts();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "COA reset failed"); }
+    finally { setCoaResetting(false); }
   };
   const createStandardCoa = async () => {
     setStandardCoaCreating(true); setError(""); setMessage("");
@@ -748,9 +765,9 @@ export default function FinanceSetupPage() {
           <p className="small">Use this when the company does not have a COA. The system creates a standard hierarchy: Application of Funds (Assets), Source of Funds (Liabilities), Equity, Income, and Expenses with ledger/control accounts below.</p>
         </div>
         <div className="form-wide button-row">
-          <button type="button" onClick={() => void createStandardCoa()} disabled={busy || coaImporting || standardCoaCreating || (overview?.metrics.coaCount ?? 0) > 0}>{standardCoaCreating ? "Creating standard COA…" : "Create standard COA"}</button>
+          <button type="button" onClick={() => void createStandardCoa()} disabled={busy || coaImporting || standardCoaCreating || (overview?.metrics.coaCount ?? 0) > 0}>{standardCoaCreating ? "Creating standard COA…" : "Create standard COA"}</button>{(overview?.metrics.coaCount ?? 0) > 0 && !overview?.setupActive && <button type="button" className="secondary-btn" onClick={() => void resetSetupCoa()} disabled={busy || coaImporting || standardCoaCreating || coaResetting}>{coaResetting ? "Resetting COA…" : "Reset COA"}</button>}
         </div>
-        {(overview?.metrics.coaCount ?? 0) > 0 && <p className="small form-wide">Standard COA creation is available only when Chart of Accounts is empty. If you need a fresh standard COA, delete full system master data first.</p>}
+        {(overview?.metrics.coaCount ?? 0) > 0 && <p className="small form-wide">To create a new COA, use Reset COA. Reset is only allowed before Go Live and when there are no journals, bank account links, budgets or other protected account references.</p>}
       </div>
       {chartReady && <div className="table-wrap" style={{ marginTop: 18 }}><div className="form-title-row"><div><h3>Chart of Accounts preview</h3><p className="small">Use Tree view to verify parent/child structure, or List view to audit every imported/generated ledger/group account.</p></div><div className="button-row"><button type="button" className={coaView === "tree" ? "" : "secondary-btn"} onClick={() => setCoaView("tree")}>Tree view</button><button type="button" className={coaView === "list" ? "" : "secondary-btn"} onClick={() => setCoaView("list")}>List view</button></div></div>{coaLoading ? <p className="small" style={{ marginTop: 12 }}>Loading Chart of Accounts…</p> : setupAccounts.length ? <table className="data-table" style={{ marginTop: 16 }}><thead>{coaView === "tree" ? <tr><th>Account hierarchy</th><th>Type</th><th>Status</th><th>Posting mode</th></tr> : <tr><th>Code</th><th>Account name</th><th>Type</th><th>Parent</th><th>Normal balance</th><th>Status</th><th>Posting mode</th></tr>}</thead><tbody>{coaView === "tree" ? renderAccountTreeRows(coaTree) : setupAccounts.map((account) => <tr key={account.accountId}><td><strong>{account.accountCode}</strong></td><td>{account.accountName}</td><td>{account.accountType.replaceAll("_", " ")}</td><td>{account.parentAccount || "—"}</td><td>{account.normalBalance || "—"}</td><td><span className={`coa-status-pill ${account.active ? "valid" : "invalid"}`}>{account.active ? "Active" : "Inactive"}</span></td><td>{account.isGroup ? "Group" : "Ledger"}</td></tr>)}</tbody></table> : <p className="small" style={{ marginTop: 12 }}>No account rows loaded yet. Import a formatted file or create the standard COA.</p>}</div>}
     </section>}
