@@ -47,7 +47,9 @@
     "prebuild": "npm run clean:next && npm run db:runtime-client",
     "pretypecheck": "npm run clean:next && npm run db:runtime-client",
     "clean:next": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\"",
-    "db:runtime-client": "tsx scripts/database/generate-runtime-client.ts"
+    "db:runtime-client": "tsx scripts/database/generate-runtime-client.ts",
+    "db:backup:list": "tsx scripts/database/backup.ts --list",
+    "db:backup:prune": "tsx scripts/database/backup.ts --prune"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.0.0",

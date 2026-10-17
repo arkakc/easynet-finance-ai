@@ -31,8 +31,43 @@ function run(name: string, args: string[]) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(name + " failed: " + (result.stderr || "").trim());
 }
+type BackupRecord = { fileName: string; createdAt: string; engine: string; database: string; sha256: string; sizeBytes: number };
+async function listBackups(): Promise<BackupRecord[]> {
+  await fs.mkdir(backupDir, { recursive: true });
+  const names = (await fs.readdir(backupDir)).filter(name => /^easynet-postgres-[0-9-]+-[0-9a-f]{8}\\.dump$/.test(name));
+  const backups: BackupRecord[] = [];
+  for (const name of names) {
+    try {
+      const record = JSON.parse(await fs.readFile(path.join(backupDir, name + ".json"), "utf8")) as BackupRecord;
+      if (record.fileName === name && record.engine === "postgresql" && record.database === pgEnv.PGDATABASE) backups.push(record);
+    } catch { /* Incomplete manifests are deliberately excluded from managed retention. */ }
+  }
+  return backups.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+async function pruneBackups(maxCount: number) {
+  if (!Number.isInteger(maxCount) || maxCount < 7 || maxCount > 365) throw new Error("Retention must be 7..365");
+  const records = await listBackups();
+  for (const record of records.slice(maxCount)) {
+    const fullPath = path.join(backupDir, record.fileName);
+    const content = await fs.readFile(fullPath);
+    if (createHash("sha256").update(content).digest("hex") !== record.sha256) {
+      throw new Error("Refusing to prune a backup with invalid checksum: " + record.fileName);
+    }
+    await fs.rm(fullPath);
+    await fs.rm(fullPath + ".json");
+    console.log("Pruned: " + record.fileName);
+  }
+}
 async function main() {
   await fs.mkdir(backupDir, { recursive: true });
+  if (process.argv.includes("--list")) {
+    for (const backup of await listBackups()) console.log(backup.createdAt + " " + backup.fileName + " " + backup.sizeBytes + " bytes");
+    return;
+  }
+  if (process.argv.includes("--prune")) {
+    await pruneBackups(Number(process.env.BACKUP_RETENTION_COUNT || "30"));
+    return;
+  }
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   const name = "easynet-postgres-" + stamp + "-" + randomUUID().slice(0, 8) + ".dump";
   const temp = path.join(backupDir, name + ".tmp");
