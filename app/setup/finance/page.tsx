@@ -59,6 +59,8 @@ const initialConfig: Config = {
   customBusinessType: "",
   openingMode: "NEW_BUSINESS",
   openingDate: "2026-09-01",
+  firstTransactionDate: "",
+  plannedGoLiveDate: "",
   ...DEFAULT_FINANCE_SETUP_SETTINGS,
 };
 const steps = ["Company", "Business & accounting", "Chart of Accounts", "Default accounts", "Opening position", "Balances", "Review", "Go live"];
