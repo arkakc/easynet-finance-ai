@@ -16,7 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const actor = await requirePermission("settings.manage");
-    const body = await request.json() as { action?: string; config?: unknown; entries?: OpeningBalanceEntry[]; completedStepIndex?: number };
+    const body = await request.json() as { action?: string; config?: unknown; entries?: OpeningBalanceEntry[]; completedStepIndex?: number; confirmZeroOpening?: boolean };
     if (body.action === "save-config") return NextResponse.json({ ok: true, ...(await saveSetupConfig(body.config, actor.email, prisma, body.completedStepIndex)) });
     if (body.action === "validate-opening" || body.action === "post-opening") {
       const current = await getSetupOverview();
@@ -30,7 +30,9 @@ export async function POST(request: Request) {
       if (postingRequested && !result.valid) {
         return NextResponse.json({ ok: false, error: result.errors.join("; "), ...result }, { status: 400 });
       }
+      if (postingRequested && openingEntries.length === 0 && current.config.openingMode === "NEW_BUSINESS" && body.confirmZeroOpening !== true) return NextResponse.json({ ok: false, error: "Explicit zero opening position confirmation is required." }, { status: 400 });
       const openingJournal = postingRequested && result.valid ? await postOpeningBalanceJournal(openingEntries, actor.email) : null;
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_zero_confirmed" }, create: { key: "opening_zero_confirmed", value: String(openingEntries.length === 0 && body.confirmZeroOpening === true), updatedBy: actor.email }, update: { value: String(openingEntries.length === 0 && body.confirmZeroOpening === true), updatedBy: actor.email, updatedAt: new Date() } });
       if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_status" }, create: { key: "opening_validation_status", value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email }, update: { value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email, updatedAt: new Date() } });
       if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_difference" }, create: { key: "opening_validation_difference", value: String(result.difference), updatedBy: actor.email }, update: { value: String(result.difference), updatedBy: actor.email, updatedAt: new Date() } });
       if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_balance_entries" }, create: { key: "opening_balance_entries", value: JSON.stringify(openingEntries), updatedBy: actor.email }, update: { value: JSON.stringify(openingEntries), updatedBy: actor.email, updatedAt: new Date() } });
@@ -44,7 +46,7 @@ export async function POST(request: Request) {
     }
     if (body.action === "activate") {
       const overview = await getSetupOverview();
-      if (!overview.readyForGoLive) return NextResponse.json({ ok: false, error: "Setup cannot be activated until company configuration, Chart of Accounts and balanced opening validation are complete.", overview }, { status: 400 });
+      if (!overview.readyForGoLive) return NextResponse.json({ ok: false, error: "Activation blocked. Verify first transaction date, opening balance confirmation and all required migration reconciliations in addition to account configuration.", overview }, { status: 400 });
       await prisma.globalSettings.upsert({ where: { key: "setup_status" }, create: { key: "setup_status", value: "ACTIVE", updatedBy: actor.email }, update: { value: "ACTIVE", updatedBy: actor.email, updatedAt: new Date() } });
       await markSetupStepComplete(7, actor.email);
       return NextResponse.json({ ok: true, ...(await getSetupOverview()), status: "ACTIVE" });
