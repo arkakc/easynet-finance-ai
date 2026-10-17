@@ -470,6 +470,8 @@ export async function postOpeningBalanceJournal(entries: OpeningBalanceEntry[], 
     });
 
     if (existing) {
+      throw new Error("Opening journal is already posted. Posted entries cannot be overwritten; use a controlled reversal workflow.");
+      /* Legacy posted-journal replacement deliberately disabled.
       await tx.journalLine.deleteMany({ where: { journalId: existing.id } });
       return tx.journalHeader.update({
         where: { id: existing.id },
@@ -491,26 +493,5 @@ export async function postOpeningBalanceJournal(entries: OpeningBalanceEntry[], 
       });
     }
 
-    return tx.journalHeader.create({
-      data: {
-        code: documentSeriesId("Opening Journal"),
-        date,
-        description: "Opening balances from Fresh Company Setup Wizard",
-        reference: "SETUP-WIZARD",
-        sourceDocType: "OPENING",
-        sourceDocId: SETUP_OPENING_SOURCE_DOC_ID,
-        status: "POSTED",
-        currency,
-        totalDebit: validation.totalDebit,
-        totalCredit: validation.totalCredit,
-        isBalanced: true,
-        createdBy: actorEmail,
-        approvedBy: actorEmail,
-        approvedAt: now,
-        postedAt: now,
-        lines: { create: lineData },
-      },
-      select: { id: true, code: true, totalDebit: true, totalCredit: true },
-    });
-  });
-}
+    */
+
