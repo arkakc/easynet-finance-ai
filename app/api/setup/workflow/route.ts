@@ -25,15 +25,15 @@ export async function POST(request: Request) {
       }
       const openingEntries = body.entries || [];
       const result = await validateOpeningBalances(openingEntries);
-      if (body.action === "post-opening") await prisma.globalSettings.upsert({ where: { key: "opening_validation_status" }, create: { key: "opening_validation_status", value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email }, update: { value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email, updatedAt: new Date() } });
-      if (body.action === "post-opening") await prisma.globalSettings.upsert({ where: { key: "opening_validation_difference" }, create: { key: "opening_validation_difference", value: String(result.difference), updatedBy: actor.email }, update: { value: String(result.difference), updatedBy: actor.email, updatedAt: new Date() } });
-      if (body.action === "post-opening") await prisma.globalSettings.upsert({ where: { key: "opening_balance_entries" }, create: { key: "opening_balance_entries", value: JSON.stringify(openingEntries), updatedBy: actor.email }, update: { value: JSON.stringify(openingEntries), updatedBy: actor.email, updatedAt: new Date() } });
       // Preview-only validation never posts or mutates a posted journal.
       const postingRequested = body.action === "post-opening";
       if (postingRequested && !result.valid) {
         return NextResponse.json({ ok: false, error: result.errors.join("; "), ...result }, { status: 400 });
       }
       const openingJournal = postingRequested && result.valid ? await postOpeningBalanceJournal(openingEntries, actor.email) : null;
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_status" }, create: { key: "opening_validation_status", value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email }, update: { value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email, updatedAt: new Date() } });
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_difference" }, create: { key: "opening_validation_difference", value: String(result.difference), updatedBy: actor.email }, update: { value: String(result.difference), updatedBy: actor.email, updatedAt: new Date() } });
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_balance_entries" }, create: { key: "opening_balance_entries", value: JSON.stringify(openingEntries), updatedBy: actor.email }, update: { value: JSON.stringify(openingEntries), updatedBy: actor.email, updatedAt: new Date() } });
       const overview = postingRequested && result.valid ? await markSetupStepComplete(5, actor.email) : await getSetupOverview();
       return NextResponse.json({ ok: true, ...result, openingJournal, overview });
     }
