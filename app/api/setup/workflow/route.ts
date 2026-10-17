@@ -18,18 +18,23 @@ export async function POST(request: Request) {
     const actor = await requirePermission("settings.manage");
     const body = await request.json() as { action?: string; config?: unknown; entries?: OpeningBalanceEntry[]; completedStepIndex?: number };
     if (body.action === "save-config") return NextResponse.json({ ok: true, ...(await saveSetupConfig(body.config, actor.email, prisma, body.completedStepIndex)) });
-    if (body.action === "validate-opening") {
+    if (body.action === "validate-opening" || body.action === "post-opening") {
       const current = await getSetupOverview();
       if ((!body.entries || body.entries.length === 0) && current.config.openingMode === "EXISTING_BUSINESS") {
         return NextResponse.json({ ok: false, error: "Existing business setup requires opening balances or controlled AR/AP, inventory and asset migration before validation." }, { status: 400 });
       }
       const openingEntries = body.entries || [];
       const result = await validateOpeningBalances(openingEntries);
-      await prisma.globalSettings.upsert({ where: { key: "opening_validation_status" }, create: { key: "opening_validation_status", value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email }, update: { value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email, updatedAt: new Date() } });
-      await prisma.globalSettings.upsert({ where: { key: "opening_validation_difference" }, create: { key: "opening_validation_difference", value: String(result.difference), updatedBy: actor.email }, update: { value: String(result.difference), updatedBy: actor.email, updatedAt: new Date() } });
-      await prisma.globalSettings.upsert({ where: { key: "opening_balance_entries" }, create: { key: "opening_balance_entries", value: JSON.stringify(openingEntries), updatedBy: actor.email }, update: { value: JSON.stringify(openingEntries), updatedBy: actor.email, updatedAt: new Date() } });
-      const openingJournal = result.valid ? await postOpeningBalanceJournal(openingEntries, actor.email) : null;
-      const overview = result.valid ? await markSetupStepComplete(5, actor.email) : await getSetupOverview();
+      // Preview-only validation never posts or mutates a posted journal.
+      const postingRequested = body.action === "post-opening";
+      if (postingRequested && !result.valid) {
+        return NextResponse.json({ ok: false, error: result.errors.join("; "), ...result }, { status: 400 });
+      }
+      const openingJournal = postingRequested && result.valid ? await postOpeningBalanceJournal(openingEntries, actor.email) : null;
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_status" }, create: { key: "opening_validation_status", value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email }, update: { value: result.valid ? "VALID" : "INVALID", updatedBy: actor.email, updatedAt: new Date() } });
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_validation_difference" }, create: { key: "opening_validation_difference", value: String(result.difference), updatedBy: actor.email }, update: { value: String(result.difference), updatedBy: actor.email, updatedAt: new Date() } });
+      if (postingRequested) await prisma.globalSettings.upsert({ where: { key: "opening_balance_entries" }, create: { key: "opening_balance_entries", value: JSON.stringify(openingEntries), updatedBy: actor.email }, update: { value: JSON.stringify(openingEntries), updatedBy: actor.email, updatedAt: new Date() } });
+      const overview = postingRequested && result.valid ? await markSetupStepComplete(5, actor.email) : await getSetupOverview();
       return NextResponse.json({ ok: true, ...result, openingJournal, overview });
     }
     if (body.action === "mark-review-complete") {
