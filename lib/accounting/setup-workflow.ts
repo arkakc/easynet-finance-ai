@@ -48,6 +48,7 @@ export const SETUP_KEYS = [
   "opening_validation_status",
   "opening_validation_difference",
   "opening_balance_entries",
+  "opening_zero_confirmed",
 ] as const;
 
 const LOCKED_ACCOUNTING_METHOD = "ACCRUAL" as const;
@@ -287,7 +288,12 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const gstReady = Boolean(config.gstStatus && (!gstNeedsCertificate || (config.gstEvidenceDocId && config.gstEvidenceDocName && config.gstNumber)));
   const configurationReady = Boolean(config.companyName && config.companyShortName && config.country && config.registrationNo && config.baseCurrency && config.financialYearPeriod && gstReady && businessTypeReady && config.openingMode && config.openingDate && requiredAccountDefaultsReady && requiredCostCentersReady && costCentersValid && mappingsValid);
   const openingValidated = valueOf(settings, "opening_validation_status") === "VALID";
+  const firstTransactionDateReady = Boolean(config.firstTransactionDate && config.openingDate && config.firstTransactionDate > config.openingDate);
+  const zeroOpeningConfirmed = valueOf(settings, "opening_zero_confirmed") === "true";
   const openingBalanceEntries = parseOpeningBalanceEntries(valueOf(settings, "opening_balance_entries", "[]"));
+  const openingConfirmed = config.openingMode === "NEW_BUSINESS" ? (openingBalanceEntries.length > 0 || zeroOpeningConfirmed) : openingBalanceEntries.length > 0;
+  // Fail closed: subledger reconciliation requires a separately verified completion source.
+  const migrationReconciled = config.openingMode !== "EXISTING_BUSINESS";
   const rawStatus = valueOf(settings, "setup_status", configurationReady ? "CONFIGURATION" : "NEW_INSTALLATION").toUpperCase();
   const completedStepIndex = parseSetupStepIndex(valueOf(settings, "setup_completed_step_index", "-1"));
   const setupActive = rawStatus === "ACTIVE" && completedStepIndex >= SETUP_FINAL_STEP_INDEX;
@@ -307,11 +313,14 @@ export async function getSetupOverview(client: DbClient = prisma) {
       mappings: mappingsValid && costCentersValid,
       costCenters: costCentersValid,
       openingValidated,
+      firstTransactionDateReady,
+      openingConfirmed,
+      migrationReconciled,
     },
     configurationReady,
     openingValidated,
     openingBalanceEntries,
-    readyForGoLive: configurationReady && coaCount > 0 && openingValidated,
+    readyForGoLive: configurationReady && coaCount > 0 && openingValidated && firstTransactionDateReady && openingConfirmed && migrationReconciled,
   };
 }
 
