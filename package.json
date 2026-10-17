@@ -50,7 +50,7 @@
     "db:runtime-client": "tsx scripts/database/generate-runtime-client.ts",
     "db:backup:list": "tsx scripts/database/backup.ts --list",
     "db:backup:prune": "tsx scripts/database/backup.ts --prune",
-    "test:finance-setup": "node --env-file=.env.local --import tsx --test tests/accounting/finance-setup-wizard.test.ts"
+    "test:finance-setup": "node --require ./tests/support/node-server-only-shim.cjs --env-file=.env.local --import tsx --test tests/accounting/finance-setup-wizard.test.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.0.0",
