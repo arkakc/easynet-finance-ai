@@ -473,5 +473,26 @@ export async function postOpeningBalanceJournal(entries: OpeningBalanceEntry[], 
       throw new Error("Opening journal is already posted. Use a controlled reversal for corrections.");
     }
 
-
-
+    return tx.journalHeader.create({
+      data: {
+        code: documentSeriesId("Opening Journal"),
+        date,
+        description: "Opening balances from Fresh Company Setup Wizard",
+        reference: "SETUP-WIZARD",
+        sourceDocType: "OPENING",
+        sourceDocId: SETUP_OPENING_SOURCE_DOC_ID,
+        status: "POSTED",
+        currency,
+        totalDebit: validation.totalDebit,
+        totalCredit: validation.totalCredit,
+        isBalanced: true,
+        createdBy: actorEmail,
+        approvedBy: actorEmail,
+        approvedAt: now,
+        postedAt: now,
+        lines: { create: lineData },
+      },
+      select: { id: true, code: true, totalDebit: true, totalCredit: true },
+    });
+  });
+}
