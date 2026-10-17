@@ -597,7 +597,7 @@ export default function FinanceSetupPage() {
           .map((account) => ({ account, score: scoreSuggestedAccount(field, account) }))
           .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode, undefined, { numeric: true }));
         const best = ranked[0];
-        if (best && best.score > 0) {
+        if (best && best.score >= 34) {
           proposals[field.configKey] = { code: best.account.accountCode, score: best.score };
           notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (${confidenceLabel(best.score)})`;
         } else {
@@ -606,8 +606,8 @@ export default function FinanceSetupPage() {
       }
       setMappingProposals(proposals);
       setMappingSuggestionNotes(notes);
-      setMessage("Account mapping suggestions are ready for review. No account mappings have been changed.");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "AI suggested account selection failed"); }
+      setMessage("Rule-based account recommendations are ready. No account mappings have been changed. Only high-confidence matches may be applied directly.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Account recommendation failed"); }
     finally { setAiSuggesting(false); }
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => { setValidation(null); setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); };
@@ -774,13 +774,17 @@ export default function FinanceSetupPage() {
     {step === 3 && <section className="panel form-grid">
       <div className="form-wide form-title-row">
         <div>
-          <h2>4. Easynet-style Accounts & Stock Settings</h2>
-          <p className="small">These linked defaults drive invoices, payments, inventory valuation, COGS, payroll, opening balances and financial statements.</p>
+          <h2>4. Default Accounts & Posting Controls</h2>
+          <p className="small">Review linked posting accounts used by invoices, payments, inventory, payroll and financial reporting. Recommendations are rule-based and require your approval.</p>
         </div>
         <div className="button-row">
           <button type="button" className="secondary-btn" onClick={() => void loadSetupAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{coaLoading ? "Loading accounts…" : "Refresh account list"}</button>
-          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "AI suggesting…" : "Suggest Account Mappings"}</button>
+          <button type="button" onClick={() => void suggestMappingAccounts()} disabled={busy || coaLoading || aiSuggesting || !chartReady}>{aiSuggesting ? "Finding matches…" : "Suggest Account Mappings"}</button>
         </div>
+      </div>
+      <div className="form-wide finance-mapping-readiness" aria-live="polite">
+        <div><strong>Account mapping readiness</strong><p className="small">Required ledger mappings must reference active posting accounts of the correct type.</p></div>
+        <div className="finance-mapping-count"><strong>{mappingAccountFields.filter((field) => !field.required || Boolean(accountByCode.get(cleanAccountCode(String(config[field.configKey] || ""))) && (() => { const account = accountByCode.get(cleanAccountCode(String(config[field.configKey] || "")))!; return account.active && !account.isGroup && accountTypeAllowed(account, field.allowedTypes); })())).length} / {mappingAccountFields.length}</strong><span className="small">Mappings valid or optional</span></div>
       </div>
       <div className="form-wide warning-panel">
         <strong>Account mapping review required</strong>
@@ -789,29 +793,29 @@ export default function FinanceSetupPage() {
       {renderQuickAccountCreator()}
       {renderQuickCostCenterCreator()}
       {Object.keys(mappingSuggestionNotes).length > 0 && <div className="form-wide conversion-box">
-        <strong>Suggested mappings (not applied)</strong>
-        <p className="small">Review each suggested mapping before applying. Low-confidence suggestions require manual selection. Existing mapping selections are protected.</p>
-        {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <div key={field.settingKey} className="button-row" style={{ justifyContent: "space-between", marginTop: 8 }}><span className="small">{mappingSuggestionNotes[field.configKey]}</span>{mappingProposals[field.configKey] && mappingProposals[field.configKey]!.score >= 34 && !String(config[field.configKey] || "").trim() && <button type="button" className="secondary-btn" onClick={() => { const proposed = mappingProposals[field.configKey]; if (proposed) setConfig((current) => String(current[field.configKey] || "").trim() ? current : { ...current, [field.configKey]: proposed.code }); }}>Apply suggestion</button>}</div> : null)}
+        <strong>Recommended mappings — review before applying</strong>
+        <p className="small">Suggestions use account type, ledger status, names and code patterns—not AI. Existing selections are never replaced. Review account purpose before accepting a recommendation.</p>
+        {mappingAccountFields.map((field) => mappingSuggestionNotes[field.configKey] ? <div key={field.settingKey} className="button-row" style={{ justifyContent: "space-between", marginTop: 8 }}><span className="small">{mappingSuggestionNotes[field.configKey]}</span>{mappingProposals[field.configKey] && mappingProposals[field.configKey]!.score >= 58 && !String(config[field.configKey] || "").trim() && <button type="button" className="secondary-btn" onClick={() => { const proposed = mappingProposals[field.configKey]; if (proposed) setConfig((current) => String(current[field.configKey] || "").trim() ? current : { ...current, [field.configKey]: proposed.code }); }}>Apply suggestion</button>}</div> : null)}
       </div>}
       <div className="form-wide settings-section-title">
-        <h3>Accounts Settings</h3>
+        <h3>General Ledger & Transaction Defaults</h3>
         <p className="small">Easynet-style company default accounts. All required fields must link to active ledger accounts with the correct account type.</p>
       </div>
       {ERP_ACCOUNT_SETTING_FIELDS.map(renderMappingAccountField)}
       <div className="form-wide settings-section-title">
-        <h3>Stock Settings</h3>
+        <h3>Inventory & Stock Posting</h3>
         <p className="small">Perpetual inventory is locked on for Easynet Finance AI. These accounts control inventory asset, GRNI, stock adjustment and valuation posting.</p>
       </div>
       <label>Enable Perpetual Inventory<input type="checkbox" checked={config.enablePerpetualInventory} onChange={(event) => patchBoolean("enablePerpetualInventory", event.target.checked)} required disabled aria-readonly="true" /><span className="small">Read-only. System always uses perpetual inventory for stock accounting.</span></label>
       <label>Enable Perpetual Inventory For Non Stock Items<input type="checkbox" checked={config.enablePerpetualInventoryForNonStockItems} onChange={(event) => patchBoolean("enablePerpetualInventoryForNonStockItems", event.target.checked)} disabled aria-readonly="true" /><span className="small">Read-only. Non-stock items do not create stock ledger valuation entries.</span></label>
       {ERP_STOCK_SETTING_FIELDS.map(renderMappingAccountField)}
       <div className="form-wide settings-section-title">
-        <h3>Fixed Asset Depreciation Settings</h3>
+        <h3>Fixed Assets & Depreciation</h3>
         <p className="small">Optional defaults used when fixed asset depreciation/disposal flows are enabled.</p>
       </div>
       {ERP_FIXED_ASSET_SETTING_FIELDS.map(renderMappingAccountField)}
       <div className="form-wide settings-section-title">
-        <h3>Cost Center & Terms Defaults</h3>
+        <h3>Cost Centres & Commercial Defaults</h3>
         <p className="small">Cost Centers are real master records now. Revenue, Expense and COGS journal lines use these defaults for reporting.</p>
       </div>
       <div className="form-wide button-row">
@@ -848,6 +852,11 @@ export default function FinanceSetupPage() {
       .finance-setup-workspace .finance-business-field select { width: 100%; margin: 0; }
       @media (max-width: 1100px) { .finance-setup-workspace .finance-accounting-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
       @media (max-width: 760px) { .finance-setup-workspace .finance-accounting-columns { grid-template-columns: minmax(0, 1fr); } }
+      .finance-setup-workspace .finance-mapping-readiness { display: flex; align-items: center; justify-content: space-between; gap: 20px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; background: #f8fafc; }
+      .finance-setup-workspace .finance-mapping-readiness p { margin: 4px 0 0; }
+      .finance-setup-workspace .finance-mapping-count { display: flex; flex-direction: column; text-align: right; white-space: nowrap; }
+      .finance-setup-workspace .finance-mapping-count strong { font-size: 20px; }
+      @media (max-width: 760px) { .finance-setup-workspace .finance-mapping-readiness { flex-direction: column; align-items: stretch; } .finance-setup-workspace .finance-mapping-count { text-align: left; } }
       .finance-setup-workspace .finance-fixed-field { display: flex; flex-direction: column; align-self: start; min-width: 0; }
       .finance-setup-workspace .finance-fixed-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin-bottom: 6px; }
       .finance-setup-workspace .finance-fixed-status { white-space: nowrap; font-size: 11px; font-weight: 500; color: #64748b; }
