@@ -784,7 +784,7 @@ export default function FinanceSetupPage() {
       </div>
       <div className="form-wide finance-mapping-readiness" aria-live="polite">
         <div><strong>Account mapping readiness</strong><p className="small">Required ledger mappings must reference active posting accounts of the correct type.</p></div>
-        <div className="finance-mapping-count"><strong>{mappingAccountFields.filter((field) => !field.required || Boolean(accountByCode.get(cleanAccountCode(String(config[field.configKey] || ""))) && (() => { const account = accountByCode.get(cleanAccountCode(String(config[field.configKey] || "")))!; return account.active && !account.isGroup && accountTypeAllowed(account, field.allowedTypes); })())).length} / {mappingAccountFields.length}</strong><span className="small">Mappings valid or optional</span></div>
+        <div className="finance-mapping-count"><strong>{mappingAccountFields.filter((field) => field.required && (() => { const account = accountByCode.get(cleanAccountCode(String(config[field.configKey] || ""))); return Boolean(account && account.active && !account.isGroup && accountTypeAllowed(account, field.allowedTypes)); })()).length} / {mappingAccountFields.filter((field) => field.required).length}</strong><span className="small">Required mappings valid</span></div>
       </div>
       <div className="form-wide warning-panel">
         <strong>Account mapping review required</strong>
