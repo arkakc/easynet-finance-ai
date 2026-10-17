@@ -304,11 +304,11 @@ export default function FinanceSetupPage() {
       const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "post-opening", entries: balances.filter(({ debit, credit }) => debit.trim() || credit.trim()).map(({ accountCode, debit, credit, label }) => ({ accountCode, debit: Number(debit || 0), credit: Number(credit || 0), label })) }) });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Opening balance posting failed");
-      setValidation(body); setMessage(body.valid ? `Opening balances posted${body.openingJournal?.code ? ` and posted as ${body.openingJournal.code}` : ""}.` : "Opening balance requires correction before go-live.");
+      setValidation(body); setMessage(body.valid ? `Opening balances saved${body.openingJournal?.code ? ` as journal ${body.openingJournal.code}` : " (no journal required)"}.` : "Opening balance requires correction before go-live.");
       if (body.overview) setOverview(body.overview as Overview);
       else await load();
       return Boolean(body.valid);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Opening balance validation failed"); return false; }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Opening balance posting failed"); return false; }
     finally { setBusy(false); }
   };
   const saveReview = async (): Promise<Overview | null> => {
@@ -593,7 +593,7 @@ export default function FinanceSetupPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "AI suggested account selection failed"); }
     finally { setAiSuggesting(false); }
   };
-  const updateBalance = (index: number, field: "debit" | "credit", value: string) => setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row));
+  const updateBalance = (index: number, field: "debit" | "credit", value: string) => { setValidation(null); setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); };
   const gstSetupReady = Boolean(config.gstStatus && (!["REGISTERED", "VERIFIED"].includes(config.gstStatus) || (config.gstNumber.trim() && config.gstEvidenceDocName.trim() && (config.gstEvidenceDocId.trim() || gstCertificateFile))));
   const companyReady = Boolean(config.companyName.trim().length >= 2 && config.companyShortName.trim() && config.country.trim() && config.registrationNo.trim() && config.baseCurrency.trim() && config.financialYearPeriod.trim() && gstSetupReady);
   const customBusinessTypeReady = config.businessType !== "OTHER" || config.customBusinessType.trim().length >= 2;
