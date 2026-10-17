@@ -35,6 +35,8 @@ export const SETUP_KEYS = [
   "business_type_other",
   "opening_mode",
   "opening_date",
+  "opening_first_transaction_date",
+  "opening_planned_go_live_date",
   "default_receivable_account",
   "default_payable_account",
   "default_cash_account",
@@ -73,6 +75,8 @@ export const setupConfigSchema = z.object({
   customBusinessType: z.string().trim().max(120).optional().default(""),
   openingMode: z.enum(["NEW_BUSINESS", "EXISTING_BUSINESS"]).default("NEW_BUSINESS"),
   openingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")).default(""),
+  firstTransactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")).default(""),
+  plannedGoLiveDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")).default(""),
   defaultReceivableAccount: z.string().trim().max(40).optional().default(""),
   defaultPayableAccount: z.string().trim().max(40).optional().default(""),
   defaultCashAccount: z.string().trim().max(40).optional().default(""),
@@ -109,6 +113,8 @@ export const setupConfigSchema = z.object({
   enablePerpetualInventory: z.boolean().optional().default(true),
   enablePerpetualInventoryForNonStockItems: z.boolean().optional().default(false),
 }).superRefine((config, context) => {
+  if (config.openingDate && config.firstTransactionDate && config.firstTransactionDate <= config.openingDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ["firstTransactionDate"], message: "First transaction date must be after opening balance as-of date" });
+  if (config.firstTransactionDate && config.plannedGoLiveDate && config.plannedGoLiveDate > config.firstTransactionDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ["plannedGoLiveDate"], message: "Go-live date cannot be after the first transaction date" });
   if (config.businessType === "OTHER" && !config.customBusinessType.trim()) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -229,6 +235,8 @@ export async function getSetupOverview(client: DbClient = prisma) {
     customBusinessType: valueOf(settings, "business_type_other"),
     openingMode: valueOf(settings, "opening_mode", "NEW_BUSINESS"),
     openingDate: valueOf(settings, "opening_date"),
+    firstTransactionDate: valueOf(settings, "opening_first_transaction_date"),
+    plannedGoLiveDate: valueOf(settings, "opening_planned_go_live_date"),
     defaultReceivableAccount: valueOf(settings, "default_receivable_account"),
     defaultPayableAccount: valueOf(settings, "default_payable_account"),
     defaultCashAccount: valueOf(settings, "default_cash_account"),
@@ -360,6 +368,8 @@ export async function saveSetupConfig(input: unknown, actorEmail: string, client
     business_type_other: config.businessType === "OTHER" ? config.customBusinessType.trim() : "",
     opening_mode: config.openingMode,
     opening_date: config.openingDate || "",
+    opening_first_transaction_date: config.firstTransactionDate || "",
+    opening_planned_go_live_date: config.plannedGoLiveDate || "",
     default_receivable_account: normalizeMappingCode(config.defaultReceivableAccount),
     default_payable_account: normalizeMappingCode(config.defaultPayableAccount),
     default_cash_account: normalizeMappingCode(config.defaultCashAccount),
