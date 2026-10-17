@@ -23,7 +23,29 @@ export async function POST() {
     const currency = valueOf("base_currency") || valueOf("currency") || "PGK";
     const rows = standardCoaRows(companyShortName, currency);
 
+    // Validate the entire template before any database writes.
+    const codes = new Set<string>();
+    const byCode = new Map(rows.map((row) => [row.code, row]));
+    for (const row of rows) {
+      if (codes.has(row.code)) throw new Error(`Duplicate standard COA code: ${row.code}`);
+      codes.add(row.code);
+      if (row.parentCode && !byCode.has(row.parentCode)) throw new Error(`Missing parent account ${row.parentCode} for ${row.code}`);
+      if (row.parentCode === row.code) throw new Error(`Account ${row.code} cannot parent itself`);
+      const parent = row.parentCode ? byCode.get(row.parentCode) : null;
+      if (parent && parent.type !== row.type && !(parent.type === "ASSET" && row.type === "CONTRA_ASSET") && !(parent.type === "LIABILITY" && row.type === "CONTRA_LIABILITY")) {
+        throw new Error(`Account ${row.code} has incompatible parent type ${parent.type}`);
+      }
+      const visited = new Set([row.code]);
+      let cursor = row.parentCode;
+      while (cursor) {
+        if (visited.has(cursor)) throw new Error(`Cycle in standard COA at ${row.code}`);
+        visited.add(cursor);
+        cursor = byCode.get(cursor)?.parentCode || "";
+      }
+    }
+
     const result = await prisma.$transaction(async (tx) => {
+      if (await tx.chartOfAccounts.count() > 0) throw new Error("Chart of Accounts is no longer empty; refresh and retry.");
       const codeToId = new Map<string, string>();
       let createdCount = 0;
       for (const row of rows) {
