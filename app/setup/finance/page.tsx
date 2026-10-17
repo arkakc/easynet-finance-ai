@@ -108,6 +108,22 @@ const accountTypeAllowed = (account: SetupAccount, allowedTypes: readonly string
   return allowedTypes.some((type) => normalizeAccountType(type) === accountType || (type === "INCOME" && accountType === "REVENUE"));
 };
 const mappingAccountFields = ALL_ERP_ACCOUNT_SETTING_FIELDS;
+// Exact-code recommendations for the Easynet standard COA; used only when the
+// account is an active posting ledger of the field's permitted GL type.
+const standardMappingCodes: Partial<Record<MappingAccountKey, string>> = {
+  defaultBankAccount: "1121", defaultCashAccount: "1111", defaultReceivableAccount: "1131",
+  defaultPayableAccount: "2111", roundOffAccount: "5308", writeOffAccount: "5309",
+  exchangeGainLossAccount: "5305", defaultEmployeeAdvanceAccount: "1141",
+  defaultCostOfGoodsSoldAccount: "5111", defaultPayrollPayableAccount: "2120",
+  defaultInventoryAccount: "1161", stockAdjustmentAccount: "5114",
+  stockReceivedButNotBilledAccount: "2152", expensesIncludedInValuationAccount: "5113",
+  defaultDeferredRevenueAccount: "2160", defaultDeferredExpenseAccount: "1180",
+  accumulatedDepreciationAccount: "1210", depreciationExpenseAccount: "5303",
+  gainLossAccountOnAssetDisposal: "5307", capitalWorkInProgressAccount: "1230",
+  assetReceivedButNotBilledAccount: "2151", expensesIncludedInAssetValuationAccount: "5112",
+};
+const industryIncomeAccount = (businessType: string) =>
+  ["SERVICE", "IT_TECHNOLOGY", "PROFESSIONAL_SERVICES"].includes(businessType) ? "4102" : "4101";
 const suggestionProfiles: Partial<Record<MappingAccountKey, { positive: string[]; negative: string[]; codeHints: string[] }>> = {
   defaultReceivableAccount: { positive: ["accounts receivable", "trade receivable", "receivables", "debtors", "customer receivable", "customer outstanding"], negative: ["gst", "tax", "input", "prepaid", "advance", "deposit"], codeHints: ["113", "120"] },
   defaultPayableAccount: { positive: ["accounts payable", "trade payable", "payables", "creditors", "supplier payable", "supplier outstanding"], negative: ["gst", "tax", "output", "loan", "payroll", "salary"], codeHints: ["211", "210"] },
@@ -585,29 +601,72 @@ export default function FinanceSetupPage() {
   const suggestMappingAccounts = async () => {
     setAiSuggesting(true); setError(""); setMessage("");
     try {
-      let accounts = setupAccounts;
-      if (!accounts.length) accounts = await loadSetupAccounts();
+      const accounts = await fetchSetupAccounts();
+      setSetupAccounts(accounts);
       const activeLedgers = accounts.filter((account) => account.active && !account.isGroup);
-      if (!activeLedgers.length) throw new Error("No active ledger accounts found. Import or refresh the Chart of Accounts first.");
-      const proposals: Partial<Record<MappingAccountKey, { code: string; score: number }>> = {};
+      if (!activeLedgers.length) throw new Error("No active posting accounts found.");
+      const updates: Partial<Record<MappingAccountKey, string>> = {};
       const notes: MappingSuggestionNotes = {};
+      const proposals: Partial<Record<MappingAccountKey, { code: string; score: number }>> = {};
       for (const field of mappingAccountFields) {
-        const candidates = activeLedgers.filter((account) => accountTypeAllowed(account, field.allowedTypes));
-        const ranked = candidates
+        const current = String(config[field.configKey] || "").trim();
+        if (current) continue; // Never overwrite a user-selected mapping.
+        const expectedCode = field.configKey === "defaultIncomeAccount"
+          ? industryIncomeAccount(config.businessType)
+          : standardMappingCodes[field.configKey];
+        const exact = expectedCode && activeLedgers.find((account) =>
+          account.accountCode === expectedCode && accountTypeAllowed(account, field.allowedTypes));
+        if (exact) {
+          updates[field.configKey] = exact.accountCode;
+          notes[field.configKey] = `${field.label}: ${accountLabel(exact)} (verified standard-COA match)`;
+          continue;
+        }
+        const ranked = activeLedgers.filter((account) => accountTypeAllowed(account, field.allowedTypes))
           .map((account) => ({ account, score: scoreSuggestedAccount(field, account) }))
-          .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode, undefined, { numeric: true }));
+          .sort((left, right) => right.score - left.score || left.account.accountCode.localeCompare(right.account.accountCode));
         const best = ranked[0];
         if (best && best.score >= 34) {
           proposals[field.configKey] = { code: best.account.accountCode, score: best.score };
-          notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (${confidenceLabel(best.score)})`;
+          notes[field.configKey] = `${field.label}: ${accountLabel(best.account)} (${confidenceLabel(best.score)} — review required)`;
         } else {
-          notes[field.configKey] = `${field.label}: no accurate active ledger match found`;
+          notes[field.configKey] = `${field.label}: no safe match found; select or create an appropriate ledger`;
         }
       }
+      // Cost centre matching is business-type aware but may only choose real active centres.
+      const centres = await fetch("/api/cost-centers", { cache: "no-store" }).then(async (response) => {
+        const payload = await response.json() as { ok?: boolean; costCenters?: CostCenterOption[] };
+        if (!response.ok || !payload.ok) throw new Error("Unable to verify Cost Centres");
+        return (payload.costCenters || []).filter((centre) => centre.isActive);
+      });
+      setCostCenters(centres);
+      const industryTerms: Record<string, string[]> = {
+        IT_TECHNOLOGY: ["it", "technology", "software"], SERVICE: ["service"],
+        PROFESSIONAL_SERVICES: ["professional", "consulting"], TRADING: ["trading", "retail"],
+        WHOLESALE: ["wholesale"], MANUFACTURING: ["manufacturing", "production"],
+        CONSTRUCTION: ["construction", "project"], OTHER: [],
+      };
+      const main = centres.find((row) => row.code.toLowerCase() === "main") || centres.find((row) => row.name.toLowerCase() === "main");
+      const terms = industryTerms[config.businessType] || [];
+      const industryCentre = centres.find((row) => terms.some((term) => [row.code, row.name].some((value) => value.toLowerCase().includes(term))));
+      const suggestedCentre = industryCentre || main || (centres.length === 1 ? centres[0] : undefined);
+      const costUpdates: Partial<Pick<Config, "roundOffCostCenter" | "defaultCostCenter" | "assetDepreciationCostCenter">> = {};
+      for (const field of ERP_COST_CENTER_SETTING_FIELDS) {
+        if (!String(config[field.configKey] || "").trim() && suggestedCentre) costUpdates[field.configKey] = suggestedCentre.code;
+      }
+      setConfig((current) => {
+        const next = { ...current };
+        for (const [key, value] of Object.entries(updates)) {
+          if (!String(next[key as MappingAccountKey] || "").trim()) (next as unknown as Record<string, unknown>)[key] = value;
+        }
+        for (const [key, value] of Object.entries(costUpdates)) {
+          if (!String(next[key as keyof Config] || "").trim()) (next as unknown as Record<string, unknown>)[key] = value;
+        }
+        return next;
+      });
       setMappingProposals(proposals);
       setMappingSuggestionNotes(notes);
-      setMessage("Rule-based account recommendations are ready. No account mappings have been changed. Only high-confidence matches may be applied directly.");
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Account recommendation failed"); }
+      setMessage(`Applied ${Object.keys(updates).length} verified GL mappings and ${Object.keys(costUpdates).length} active Cost Centre defaults. Other recommendations need review. Save & Continue persists your choices.`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Account recommendations failed"); }
     finally { setAiSuggesting(false); }
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => { setValidation(null); setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); };
