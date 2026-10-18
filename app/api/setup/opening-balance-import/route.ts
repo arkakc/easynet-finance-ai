@@ -8,7 +8,7 @@ const MAX_SIZE = 2 * 1024 * 1024;
 const amountInCents = (value: unknown, line: number, column: string, errors: string[]): number => {
   if (value == null || String(value).trim() === "") return 0;
   const raw = String(value).trim().replace(/,/g, "");
-  if (!/^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?$/.test(raw)) {
+  if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/.test(raw)) {
     errors.push(`Row ${line}: ${column} must be a nonnegative amount with at most 2 decimal places.`);
     return 0;
   }
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     const file = (await request.formData()).get("file");
     if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "Select a CSV or Excel file." }, { status: 400 });
     if (file.size > MAX_SIZE) return NextResponse.json({ ok: false, error: "Maximum file size is 2 MB." }, { status: 400 });
-    if (!/\\.(csv|xlsx|xls)$/i.test(file.name)) return NextResponse.json({ ok: false, error: "Only CSV, XLSX or XLS files are supported." }, { status: 400 });
+    if (!/\.(csv|xlsx|xls)$/i.test(file.name)) return NextResponse.json({ ok: false, error: "Only CSV, XLSX or XLS files are supported." }, { status: 400 });
     const workbook = XLSX.read(Buffer.from(await file.arrayBuffer()), { type: "buffer", raw: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     if (!sheet) throw new Error("The workbook contains no sheet.");
