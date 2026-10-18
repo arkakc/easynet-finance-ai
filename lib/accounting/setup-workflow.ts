@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { getOpeningSubledgerPosition } from "@/lib/migration/opening-subledger";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/prisma";
@@ -49,6 +51,7 @@ export const SETUP_KEYS = [
   "opening_validation_difference",
   "opening_balance_entries",
   "opening_zero_confirmed",
+  "opening_reconciliation_evidence",
 ] as const;
 
 const LOCKED_ACCOUNTING_METHOD = "ACCRUAL" as const;
@@ -209,6 +212,56 @@ function allowedPrismaTypes(types: readonly string[]) {
   return types.flatMap((type) => type === "INCOME" ? ["REVENUE"] : [type]);
 }
 
+export const OPENING_RECON_AREAS = ["ar", "ap", "bank", "inventory", "fixedAssets", "tax", "loans"] as const;
+export type OpeningReconArea = typeof OPENING_RECON_AREAS[number];
+type ReconEvidence = { reference: string; reviewer: string; reviewedAt: string; fingerprint: string };
+function openingFingerprint(entries: OpeningBalanceEntry[], date: string) {
+  return createHash("sha256").update(JSON.stringify({ date, entries: [...entries].sort((a, b) => a.accountCode.localeCompare(b.accountCode)) })).digest("hex");
+}
+function openingArea(code: string, config: SetupConfig): OpeningReconArea | null {
+  if (code === config.defaultReceivableAccount || code.startsWith("113")) return "ar";
+  if (code === config.defaultPayableAccount || code.startsWith("211")) return "ap";
+  if ([config.defaultBankAccount, config.defaultCashAccount].includes(code) || code.startsWith("111") || code.startsWith("112")) return "bank";
+  if (code === config.defaultInventoryAccount || code.startsWith("116")) return "inventory";
+  if (code.startsWith("12") || code === config.accumulatedDepreciationAccount) return "fixedAssets";
+  if (code.startsWith("213") || code.startsWith("117")) return "tax";
+  if (code.startsWith("214")) return "loans";
+  return null;
+}
+export async function getOpeningReconciliationStatus(
+  config: SetupConfig,
+  entries: OpeningBalanceEntry[],
+  serializedEvidence: string,
+  client: DbClient = prisma,
+) {
+  const fingerprint = openingFingerprint(entries, config.openingDate);
+  let evidence: Partial<Record<OpeningReconArea, ReconEvidence>> = {};
+  try { const parsed = JSON.parse(serializedEvidence || "{}"); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) evidence = parsed; } catch { /* Invalid evidence is not accepted. */ }
+  const areas = OPENING_RECON_AREAS.map((area) => {
+    const lines = entries.filter((entry) => openingArea(entry.accountCode, config) === area);
+    const debit = Math.round(lines.reduce((sum, line) => sum + Number(line.debit || 0), 0) * 100);
+    const credit = Math.round(lines.reduce((sum, line) => sum + Number(line.credit || 0), 0) * 100);
+    const amount = Math.abs(debit - credit) / 100;
+    const required = lines.some((line) => Number(line.debit || 0) !== 0 || Number(line.credit || 0) !== 0);
+    const proof = evidence[area];
+    const attested = Boolean(proof?.reference?.trim() && proof.fingerprint === fingerprint && proof.reviewer && proof.reviewedAt);
+    return { key: area, label: ({ ar: "Accounts receivable", ap: "Accounts payable", bank: "Bank and cash", inventory: "Inventory valuation", fixedAssets: "Fixed asset register", tax: "GST and tax balances", loans: "Loan schedules" } as const)[area], amount, required, passed: !required || attested, status: !required ? "NOT_APPLICABLE" : attested ? "ATTESTED" : "REQUIRED", reference: attested ? proof!.reference : "", detail: required ? "Supporting schedule evidence and reviewer confirmation required" : "No nonzero opening position in this control group" };
+  });
+  // AR/AP require actual imported opening schedule reconciliation; manual attestations cannot override these controls.
+  const arAp = areas.filter((row) => row.key === "ar" || row.key === "ap");
+  if (arAp.some((row) => row.required)) {
+    const positions = await Promise.all(arAp.filter((row) => row.required).map(async (row) => ({ area: row.key, position: await getOpeningSubledgerPosition(row.key as "ar" | "ap", client) })));
+    for (const { area, position } of positions) {
+      const row = areas.find((item) => item.key === area)!;
+      const passed = position.openingGlBalance > 0 && Math.abs(position.remaining) < 0.005 && position.openingJournalId !== null;
+      row.passed = passed;
+      row.status = passed ? "RECONCILED" : "BLOCKED";
+      row.detail = `GL K${position.openingGlBalance.toFixed(2)}, imported K${position.importedSubledger.toFixed(2)}, remaining K${position.remaining.toFixed(2)}. ${position.message}`;
+    }
+  }
+  return { fingerprint, areas, reconciled: areas.every((area) => area.passed) };
+}
+
 export async function getSetupOverview(client: DbClient = prisma) {
   const [rows, coaCount, customerCount, supplierCount, itemCount] = await Promise.all([
     client.globalSettings.findMany({ where: { key: { in: [...SETUP_KEYS] } } }),
@@ -292,8 +345,10 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const zeroOpeningConfirmed = valueOf(settings, "opening_zero_confirmed") === "true";
   const openingBalanceEntries = parseOpeningBalanceEntries(valueOf(settings, "opening_balance_entries", "[]"));
   const openingConfirmed = config.openingMode === "NEW_BUSINESS" ? (openingBalanceEntries.length > 0 || zeroOpeningConfirmed) : openingBalanceEntries.length > 0;
-  // Fail closed: subledger reconciliation requires a separately verified completion source.
-  const migrationReconciled = config.openingMode !== "EXISTING_BUSINESS";
+  const openingReconciliation = config.openingMode === "EXISTING_BUSINESS"
+    ? await getOpeningReconciliationStatus(config, openingBalanceEntries, valueOf(settings, "opening_reconciliation_evidence"), client)
+    : { areas: [], reconciled: true, fingerprint: "" };
+  const migrationReconciled = openingReconciliation.reconciled;
   const rawStatus = valueOf(settings, "setup_status", configurationReady ? "CONFIGURATION" : "NEW_INSTALLATION").toUpperCase();
   const completedStepIndex = parseSetupStepIndex(valueOf(settings, "setup_completed_step_index", "-1"));
   const setupActive = rawStatus === "ACTIVE" && completedStepIndex >= SETUP_FINAL_STEP_INDEX;
@@ -320,6 +375,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
     configurationReady,
     openingValidated,
     openingBalanceEntries,
+    openingReconciliation,
     readyForGoLive: configurationReady && coaCount > 0 && openingValidated && firstTransactionDateReady && openingConfirmed && migrationReconciled,
   };
 }
