@@ -929,7 +929,7 @@ export default function FinanceSetupPage() {
       {resetPreflight?.eligible && <><label>Type RESET FINANCE SETUP<input value={resetPhrase} autoComplete="off" onChange={(event) => setResetPhrase(event.target.value)} /></label>
       <label>Current administrator password<input type="password" value={resetPassword} autoComplete="current-password" onChange={(event) => setResetPassword(event.target.value)} /></label></>}
       <div className="button-row"><button type="button" className="secondary-btn" onClick={() => { setResetDialogOpen(false); setResetPassword(""); }} disabled={resetLoading}>Cancel</button>
-        {resetPreflight?.eligible && <button type="button" onClick={() => void confirmFinanceReset()} disabled={resetLoading || resetPhrase !== "RESET FINANCE SETUP" || !resetPassword}>{resetLoading ? "Backing up and resetting…" : "Confirm Finance Setup Reset"}</button>}
+        {resetPreflight?.eligible && <button type="button" onClick={() => void confirmFinanceReset()} disabled={resetLoading || resetPhrase !== "RESET FINANCE SETUP" || !resetPassword}>{resetLoading ? "Resetting opening journal…" : "Confirm Finance Setup Reset"}</button>}
       </div>
     </section>}
     {(error || message) && <section className={error ? "warning-panel" : "panel"} role={error ? "alert" : "status"}><strong>{error ? "Action required" : "Saved"}</strong><p className="small">{error || message}</p></section>}
@@ -1092,7 +1092,7 @@ export default function FinanceSetupPage() {
         </div>}
       </div>}{openingResetDialog && <section className="panel" role="dialog" aria-modal="true" aria-label="Reset posted opening journal">
         <h3>Administrator: Reset first-time Opening Journal</h3>
-        <p className="small">This operation deletes the original setup opening journal and its journal lines only after verified PostgreSQL backup. It resets Step 6 to allow a new import. Other financial records are never deleted. Reset is blocked when any dependent financial activity exists.</p>
+        <p className="small">This operation resets the original setup opening journal and its journal lines after administrator verification and dependency checks. No database backup is created. It resets Step 6 to allow a new import. Other financial records are never deleted. Reset is blocked when any dependent financial activity exists.</p>
         {!openingResetEligible && <p className="warning-panel" role="alert">Reset blocked: {openingResetBlockers.join("; ") || "Not eligible"}</p>}
         {openingResetEligible && <><label>Type RESET OPENING JOURNAL<input value={openingResetPhrase} onChange={(event) => setOpeningResetPhrase(event.target.value)} autoComplete="off" /></label>
         <label>Current administrator password<input type="password" value={openingResetPassword} onChange={(event) => setOpeningResetPassword(event.target.value)} autoComplete="current-password" /></label></>}
