@@ -28,7 +28,7 @@ type BaseConfig = {
 };
 type Config = BaseConfig & FinanceSetupSettingsConfig;
 type OpeningReconRow = { key: string; label: string; amount: number; required: boolean; passed: boolean; status: string; reference: string; detail: string };
-type Overview = { status: string; completedStepIndex: number; highestUnlockedStep: number; setupActive: boolean; config: Config; metrics: { coaCount: number; customerCount: number; supplierCount: number; itemCount: number }; checks: Record<string, boolean>; configurationReady: boolean; openingValidated: boolean; readyForGoLive: boolean; openingReconciliation?: { areas: OpeningReconRow[]; reconciled: boolean } };
+type Overview = { status: string; completedStepIndex: number; highestUnlockedStep: number; setupActive: boolean; config: Config; metrics: { coaCount: number; customerCount: number; supplierCount: number; itemCount: number }; checks: Record<string, boolean>; configurationReady: boolean; openingValidated: boolean; openingFinalized?: boolean; readyForGoLive: boolean; openingReconciliation?: { areas: OpeningReconRow[]; reconciled: boolean } };
 type BalanceLine = { accountCode: string; debit: string; credit: string; label: string };
 type SavedOpeningBalanceEntry = { accountCode: string; debit?: number; credit?: number; label?: string };
 type OverviewPayload = Overview & { openingBalanceEntries?: SavedOpeningBalanceEntry[] };
@@ -355,7 +355,7 @@ export default function FinanceSetupPage() {
       if (body.overview) setOverview(body.overview as Overview);
       else await load();
       return Boolean(body.valid);
-    } catch (reason) { setOpeningAction("checked"); setError(reason instanceof Error ? reason.message : "Opening balance posting failed"); return false; }
+    } catch (reason) { setOpeningAction("idle"); setError(`Opening finalization could not be confirmed: ${reason instanceof Error ? reason.message : "Unknown error"}. Check the saved journal status before retrying; do not post twice.`); await load(); return false; }
     finally { setBusy(false); }
   };
   const confirmOpeningReconciliation = async (key: string) => {
@@ -777,7 +777,7 @@ export default function FinanceSetupPage() {
     return Boolean(row && row.isActive);
   });
   const openingPositionReady = Boolean(config.openingMode && config.openingDate && (!config.firstTransactionDate || config.firstTransactionDate > config.openingDate) && (!config.firstTransactionDate || !config.plannedGoLiveDate || config.plannedGoLiveDate <= config.firstTransactionDate));
-  const openingBalanced = openingAction === "complete" || (!openingEdited && openingAction === "idle" && Boolean(overview?.checks.openingValidated || overview?.openingValidated));
+  const openingBalanced = openingAction === "complete" || (!openingEdited && Boolean(overview?.openingFinalized || overview?.checks.openingFinalized));
   const existingBusinessMigrationReady = config.openingMode === "EXISTING_BUSINESS" && openingBalanced;
   const reviewReady = Boolean(overview?.readyForGoLive);
   const setupActivated = Boolean(overview?.setupActive || overview?.status === "ACTIVE");
@@ -792,7 +792,7 @@ export default function FinanceSetupPage() {
     "Import or create the Chart of Accounts before continuing.",
     "Complete every required Easynet-style account link and Cost Center link.",
     "Choose opening mode and opening date.",
-    "Validate opening balances before review.",
+    "Finalize opening balances before continuing. If posting fails, check the saved journal status and error message; validation alone is insufficient.",
     "Complete every readiness control before Go Live.",
     "",
   ][step];
@@ -1024,7 +1024,8 @@ export default function FinanceSetupPage() {
         <tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th><th /></tr></tfoot></table></div>
       <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button><button type="button" className="secondary-btn" onClick={resetOpeningForm} disabled={busy}>Reset Opening Form</button></div>
       <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
-      {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="finance-opening-actions">
+      {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}{error && <p role="alert" className="small" style={{ color: "#b42318", marginTop: 12 }}>{error}</p>}
+      <div className="finance-opening-actions">
         {config.openingMode === "NEW_BUSINESS" ? <>
           <div className="finance-opening-divider"><strong>New Business — Opening Position</strong><span className="small">Confirm zero opening or validate any actual opening balances.</span></div>
           {!enteredOpeningRows().length && <p className="small">Confirm the zero-opening declaration above, validate, then finalize without creating a GL journal.</p>}
