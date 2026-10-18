@@ -354,7 +354,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const openingJournal = config.openingMode === "EXISTING_BUSINESS"
     ? await client.journalHeader.findFirst({ where: { sourceDocType: "OPENING", sourceDocId: SETUP_OPENING_SOURCE_DOC_ID, status: "POSTED" }, select: { id: true, date: true } })
     : null;
-  const hasOpeningJournal = Boolean(openingJournal && openingJournal.date.toISOString().slice(0, 10) === config.openingDate);
+  const hasOpeningJournal = Boolean(openingJournal && new Date(openingJournal.date.getTime() + 10 * 60 * 60 * 1000).toISOString().slice(0, 10) === config.openingDate);
   const migrationReconciled = openingReconciliation.reconciled && (config.openingMode !== "EXISTING_BUSINESS" || hasOpeningJournal);
   const openingFinalized = openingValidated && (config.openingMode === "EXISTING_BUSINESS" ? hasOpeningJournal : (openingBalanceEntries.length === 0 ? zeroOpeningConfirmed : Boolean(await client.journalHeader.findFirst({ where: { sourceDocType: "OPENING", sourceDocId: SETUP_OPENING_SOURCE_DOC_ID, status: "POSTED" }, select: { id: true } }))));
   const rawStatus = valueOf(settings, "setup_status", configurationReady ? "CONFIGURATION" : "NEW_INSTALLATION").toUpperCase();
