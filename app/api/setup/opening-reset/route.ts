@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireConfigurationPermission, authenticateDetailed } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
-import { backupBeforeReset } from "@/app/api/setup/finance-reset/route";
+import { backupBeforeReset } from "@/lib/accounting/setup-reset-backup";
 
 export const runtime = "nodejs";
 const OPENING_SOURCE = "SETUP_OPENING_BALANCES";
