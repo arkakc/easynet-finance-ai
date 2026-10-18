@@ -174,6 +174,7 @@ export default function FinanceSetupPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [openingReconFiles, setOpeningReconFiles] = useState<Record<string, File | null>>({});
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [openingResetDialog, setOpeningResetDialog] = useState(false);
   const [openingResetEligible, setOpeningResetEligible] = useState(false);
@@ -397,15 +398,19 @@ export default function FinanceSetupPage() {
     finally { setBusy(false); }
   };
   const confirmOpeningReconciliation = async (key: string) => {
-    const evidenceReference = window.prompt("Enter the supporting statement / schedule reference (at least 8 characters). This will be recorded with your user and timestamp.");
+    const file = openingReconFiles[key];
+    if (!file) { setError("Select a supporting PDF, PNG or JPG document for this opening balance first."); return; }
+    const evidenceReference = window.prompt("Enter the supporting statement or cash count reference (at least 8 characters). The attached document and your reviewer confirmation will be retained.");
     if (evidenceReference === null) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "confirm-opening-reconciliation", reconArea: key, evidenceReference }) });
+      const form = new FormData(); form.set("area", key); form.set("reference", evidenceReference); form.set("file", file);
+      const response = await fetch("/api/setup/opening-reconciliation-evidence", { method: "POST", body: form });
       const result = await response.json() as Overview & { ok?: boolean; error?: string };
       if (!response.ok || !result.ok) throw new Error(result.error || "Reconciliation review failed");
       setOverview(result);
-      setMessage("Reconciliation evidence recorded. Review all remaining readiness checks.");
+      setOpeningReconFiles(current => ({ ...current, [key]: null }));
+      setMessage("Supporting document saved and reviewer confirmation recorded. Remaining checks are evaluated by the server.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Reconciliation review failed"); }
     finally { setBusy(false); }
   };
@@ -1128,15 +1133,16 @@ export default function FinanceSetupPage() {
       </div></section>}
     {step === 6 && <section className="panel"><h2>7. Review & reconcile</h2><p className="small">Review the configuration before activation. No financial document is posted by this screen.</p><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><tbody><tr><th>Company</th><td>{config.companyName || "Not set"}</td></tr><tr><th>Base Operating Currency</th><td>{config.baseCurrency}</td></tr><tr><th>Active Financial Year Period</th><td>{config.financialYearPeriod || "Not set"}</td></tr><tr><th>GST control status</th><td>{config.gstStatus || "Not set"}</td></tr><tr><th>GST / IRC TIN</th><td>{config.gstNumber || "—"}</td></tr><tr><th>GST retained document</th><td>{config.gstEvidenceDocId ? config.gstEvidenceDocName : "—"}</td></tr><tr><th>Accounting / inventory</th><td>{accountingMethodLabel} · {inventoryMethodLabel}</td></tr><tr><th>COA</th><td>{overview?.metrics.coaCount ?? 0} active accounts</td></tr><tr><th>Opening control</th><td>{validation?.valid || overview?.openingValidated ? "Balanced" : "Not validated"}</td></tr></tbody></table></div>{config.openingMode === "EXISTING_BUSINESS" && <div className="finance-reconciliation-review">
         <h3>Opening migration reconciliation readiness</h3>
-        <p className="small">AR/AP are checked against imported opening documents. Other applicable balances need an evidence reference and authorized confirmation. No duplicate trial balance upload is needed.</p>
+        <p className="small">Only controls with opening balances are shown. AR/AP reconcile against imported opening documents. Other controls require an uploaded supporting PDF/image and reviewer confirmation; this is not independent document verification.</p>
         <div className="table-wrap"><table className="data-table"><thead><tr><th>Control</th><th>Opening amount (PGK)</th><th>Status</th><th>Evidence / corrective action</th></tr></thead><tbody>
-          {(overview?.openingReconciliation?.areas || []).map((area) => <tr key={area.key}>
+          {(overview?.openingReconciliation?.areas || []).filter((area) => area.required).map((area) => <tr key={area.key}>
             <td>{area.label}</td><td>{money(area.amount)}</td>
             <td><span className={`coa-status-pill ${area.passed ? "valid" : "invalid"}`}>{area.status.replaceAll("_", " ")}</span></td>
             <td>{area.key === "ar" || area.key === "ap" ? <span className="small">{area.detail}</span> : area.passed ? <span className="small">{area.reference || "No opening balance — not applicable"}</span> :
-              <button type="button" className="secondary-btn" onClick={() => void confirmOpeningReconciliation(area.key)} disabled={busy || !overview?.openingValidated}>Record Evidence & Confirm</button>}</td>
+              <div><input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" aria-label={`Supporting document for ${area.label}`} onChange={(event) => setOpeningReconFiles((current) => ({ ...current, [area.key]: event.target.files?.[0] || null }))} /><button type="button" className="secondary-btn" onClick={() => void confirmOpeningReconciliation(area.key)} disabled={busy || !overview?.openingValidated || !openingReconFiles[area.key]}>Upload & Reviewer Confirm</button></div>}</td>
           </tr>)}
         </tbody></table></div>
+        {(overview?.openingReconciliation?.areas || []).every((area) => !area.required) && <p className="small">No nonzero opening balances require reconciliation. Zero-balance controls are Not Applicable, subject to separate outstanding-record checks.</p>}
         <p className="small" role="status">{overview?.openingReconciliation?.reconciled ? "All applicable opening reconciliation checks passed." : "Go Live remains blocked until outstanding reconciliation checks are complete."}</p>
       </div>}
 </section>}
