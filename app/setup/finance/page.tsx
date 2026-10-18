@@ -161,6 +161,11 @@ export default function FinanceSetupPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [step, setStep] = useState(0);
   const [balances, setBalances] = useState<BalanceLine[]>(balanceDefaults);
+  const [openingImportFile, setOpeningImportFile] = useState<File | null>(null);
+  const [openingImportLoading, setOpeningImportLoading] = useState(false);
+  const [openingImportPreview, setOpeningImportPreview] = useState<BalanceLine[] | null>(null);
+  const [openingImportErrors, setOpeningImportErrors] = useState<string[]>([]);
+
   const [validation, setValidation] = useState<Validation | null>(null);
   const [zeroOpeningConfirmed, setZeroOpeningConfirmed] = useState(false);
   const [openingAction, setOpeningAction] = useState<"idle" | "checking" | "checked" | "posting" | "complete">("idle");
@@ -693,6 +698,26 @@ export default function FinanceSetupPage() {
     setError("");
     setMessage("Opening form reset. Existing posted journals and saved financial records are unchanged.");
   };
+  const previewOpeningImport = async () => {
+    if (!openingImportFile || config.openingMode !== "EXISTING_BUSINESS") return;
+    setOpeningImportLoading(true); setOpeningImportErrors([]); setOpeningImportPreview(null); setError(""); setMessage("");
+    try {
+      const form = new FormData(); form.set("file", openingImportFile);
+      const response = await fetch("/api/setup/opening-balance-import", { method: "POST", body: form });
+      const body = await response.json() as { ok?: boolean; error?: string; errors?: string[]; entries?: Array<{ accountCode: string; label: string; debit: number; credit: number }>; count?: number };
+      if (!response.ok || !body.ok) { setOpeningImportErrors(body.errors?.length ? body.errors : [body.error || "Opening file validation failed"]); return; }
+      setOpeningImportPreview((body.entries || []).map((item) => ({ accountCode: item.accountCode, label: item.label, debit: item.debit ? String(item.debit) : "", credit: item.credit ? String(item.credit) : "" })));
+      setMessage(`Validated ${body.count || 0} opening ledgers. Review before applying to the draft. Nothing posted.`);
+    } catch (reason) { setOpeningImportErrors([reason instanceof Error ? reason.message : "Could not validate opening file"]); }
+    finally { setOpeningImportLoading(false); }
+  };
+  const applyOpeningImport = () => {
+    if (!openingImportPreview || !window.confirm("Replace the current unsaved opening form with the validated imported balances? No GL journal will be posted.")) return;
+    setBalances(openingImportPreview);
+    setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); setZeroOpeningConfirmed(false);
+    setOpeningImportPreview(null); setOpeningImportFile(null); setOpeningImportErrors([]);
+    setMessage("Imported opening balances applied to the form. Validate and review before posting.");
+  };
   const addOpeningRow = () => {
     setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => [...current, { accountCode: "", label: "", debit: "", credit: "" }]);
@@ -959,7 +984,24 @@ export default function FinanceSetupPage() {
         ? <div className="form-wide conversion-box"><strong>New business opening control</strong><p className="small">Step 6 validates a zero balance when no opening amounts are entered. If cash, capital, loans or stock already exist, enter the actual amounts instead.</p></div>
         : <><div className="form-wide warning-panel"><strong>Existing business migration controls</strong><p className="small">Step 6 requires balanced opening GL entries. Reconcile customer and supplier outstanding items, inventory, fixed assets, bank, and applicable GST/tax figures to the opening trial balance. Balancing the GL alone does not certify subledger reconciliation.</p></div><div className="form-wide button-row">{existingBusinessMigrationReady ? <Link className="secondary-btn" href="/migration/opening-subledger">Open migration centre</Link> : <button type="button" className="secondary-btn" disabled>Migration centre unlocks after Step 6 balances</button>}</div></>}
     </section>}
-        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${openingBalanced ? "valid" : "invalid"}`}>{openingBalanced ? "FINALIZED" : openingAction === "checked" ? "VALIDATED — NOT POSTED" : openingAction === "checking" ? "CHECKING" : openingAction === "posting" ? "POSTING" : "NOT FINALIZED"}</span></div><div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
+        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${openingBalanced ? "valid" : "invalid"}`}>{openingBalanced ? "FINALIZED" : openingAction === "checked" ? "VALIDATED — NOT POSTED" : openingAction === "checking" ? "CHECKING" : openingAction === "posting" ? "POSTING" : "NOT FINALIZED"}</span></div>{config.openingMode === "EXISTING_BUSINESS" && <div className="finance-opening-import">
+        <h3>Bulk import opening trial balance</h3>
+        <p className="small">Download the template with active posting accounts. Enter a Debit or Credit amount only for accounts with real opening balances. Import validation never saves or posts a journal.</p>
+        <div className="button-row">
+          <a className="secondary-btn" href="/api/setup/opening-balance-import?format=xlsx">Download Excel template</a>
+          <a className="secondary-btn" href="/api/setup/opening-balance-import?format=csv">Download CSV template</a>
+        </div>
+        <label className="finance-opening-import-file">Upload completed opening balance template
+          <input type="file" accept=".csv,.xlsx,.xls" disabled={busy || openingImportLoading} onChange={(event) => { setOpeningImportFile(event.target.files?.[0] || null); setOpeningImportPreview(null); setOpeningImportErrors([]); }} />
+        </label>
+        <div className="button-row"><button type="button" disabled={!openingImportFile || openingImportLoading || busy} onClick={() => void previewOpeningImport()}>{openingImportLoading ? "Validating import…" : "Validate & Preview Import"}</button></div>
+        {!!openingImportErrors.length && <div className="warning-panel" role="alert"><strong>Import rejected — correct these issues</strong>{openingImportErrors.map((issue, index) => <div key={index} className="small">{issue}</div>)}</div>}
+        {openingImportPreview && <div className="finance-opening-import-preview">
+          <strong>Import preview — {openingImportPreview.length} accounts</strong>
+          <table className="data-table"><thead><tr><th>Account</th><th>Debit (PGK)</th><th>Credit (PGK)</th></tr></thead><tbody>{openingImportPreview.map((row) => <tr key={row.accountCode}><td>{row.accountCode} — {row.label}</td><td>{row.debit || "—"}</td><td>{row.credit || "—"}</td></tr>)}</tbody></table>
+          <button type="button" onClick={applyOpeningImport} disabled={busy}>Apply Validated Import to Form</button>
+        </div>}
+      </div>}<div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>Posting ledger (Chart of Accounts)</th><th>Debit (PGK)</th><th>Credit (PGK)</th><th>Action</th></tr></thead><tbody>{balances.map((row, index) => <tr key={index}>
         <td><select aria-label={`Opening account ${index + 1}`} value={row.accountCode} onChange={(event) => changeOpeningAccount(index, event.target.value)} disabled={busy}><option value="">Select active posting ledger</option>{ledgerAccountOptions.map((account) => <option key={account.accountId} value={account.accountCode}>{accountLabel(account)}</option>)}</select></td>
         <td><input aria-label={`Debit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.debit} onChange={(event) => updateBalance(index, "debit", event.target.value)} disabled={busy} /></td>
@@ -1027,6 +1069,11 @@ export default function FinanceSetupPage() {
       .finance-setup-workspace .data-table select { min-width: 190px; width: 100%; }
       .finance-setup-workspace .finance-opening-divider { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid #cbd5e1; padding: 14px 0 8px; margin-top: 12px; }
       .finance-setup-workspace .finance-opening-actions { margin-top: 16px; }
+      .finance-setup-workspace .finance-opening-import { border: 1px solid #cbd5e1; border-radius: 10px; padding: 16px; margin: 14px 0; }
+      .finance-setup-workspace .finance-opening-import h3 { margin: 0 0 8px; }
+      .finance-setup-workspace .finance-opening-import-file { display: block; margin: 12px 0; }
+      .finance-setup-workspace .finance-opening-import-file input { width: 100%; }
+      .finance-setup-workspace .finance-opening-import-preview { margin-top: 16px; overflow-x: auto; }
       .finance-setup-workspace .finance-fixed-field { display: flex; flex-direction: column; align-self: start; min-width: 0; }
       .finance-setup-workspace .finance-fixed-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin-bottom: 6px; }
       .finance-setup-workspace .finance-fixed-status { white-space: nowrap; font-size: 11px; font-weight: 500; color: #64748b; }
