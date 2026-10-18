@@ -174,6 +174,12 @@ export default function FinanceSetupPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPhrase, setResetPhrase] = useState("");
+  const [resetPreflight, setResetPreflight] = useState<{ eligible: boolean; blockers: string[] } | null>(null);
+  const [resetLoading, setResetLoading] = useState(false);
+
   const [coaFile, setCoaFile] = useState<File | null>(null);
   const [coaImporting, setCoaImporting] = useState(false);
   const [standardCoaCreating, setStandardCoaCreating] = useState(false);
@@ -244,6 +250,32 @@ export default function FinanceSetupPage() {
   const patch = (key: keyof Config, value: string) => setConfig((current) => ({ ...current, [key]: value }));
   const patchBoolean = (key: keyof Pick<FinanceSetupSettingsConfig, "enablePerpetualInventory" | "enablePerpetualInventoryForNonStockItems">, value: boolean) => {
     setConfig((current) => ({ ...current, [key]: value }));
+  };
+  const openFinanceReset = async () => {
+    setResetLoading(true); setResetPreflight(null); setError("");
+    try {
+      const response = await fetch("/api/setup/finance-reset", { cache: "no-store" });
+      const result = await response.json() as { ok?: boolean; error?: string; eligible?: boolean; blockers?: string[] };
+      if (!response.ok || !result.ok) throw new Error(result.error || "Reset preflight failed.");
+      setResetPreflight({ eligible: Boolean(result.eligible), blockers: result.blockers || [] });
+      setResetDialogOpen(true); setResetPhrase(""); setResetPassword("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Reset unavailable."); }
+    finally { setResetLoading(false); }
+  };
+  const confirmFinanceReset = async () => {
+    if (resetPhrase !== "RESET FINANCE SETUP" || !resetPassword || !resetPreflight?.eligible) return;
+    setResetLoading(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/setup/finance-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmation: resetPhrase, password: resetPassword }) });
+      const result = await response.json() as { ok?: boolean; error?: string; blockers?: string[]; backup?: { fileName?: string } };
+      if (!response.ok || !result.ok) throw new Error([result.error, ...(result.blockers || [])].filter(Boolean).join(" | ") || "Finance reset failed");
+      setResetDialogOpen(false); setResetPassword(""); setResetPhrase(""); setResetPreflight(null);
+      setBalances([]); setValidation(null); setOpeningAction("idle"); setOpeningEdited(false);
+      setZeroOpeningConfirmed(false); setStep(0);
+      await load();
+      setMessage(`Finance setup settings reset. Administrator and Chart of Accounts preserved. Backup: ${result.backup?.fileName || "created"}.`);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Finance reset failed"); }
+    finally { setResetLoading(false); setResetPassword(""); }
   };
   const save = async (): Promise<Overview | null> => {
     setBusy(true); setError(""); setMessage("");
@@ -857,6 +889,19 @@ export default function FinanceSetupPage() {
 
   return <div className="page-stack finance-setup-workspace">
     <section className="page-header"><div><span className="badge">First-time accounting setup</span><h1>Fresh Company Setup Wizard</h1><p>Configure the accounting foundation before operational documents are allowed. Setup details are saved separately from financial posting. Check opening balances before explicitly posting.</p></div><span className={`coa-status-pill ${overview?.readyForGoLive ? "valid" : "invalid"}`}>{overview?.status || "NEW INSTALLATION"}</span></section>
+    {!setupActivated && <div className="button-row" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+      <button type="button" className="secondary-btn" onClick={() => void openFinanceReset()} disabled={busy || resetLoading}>Administrator: Reset Finance Setup</button>
+    </div>}
+    {resetDialogOpen && <section className="panel finance-setup-reset" role="dialog" aria-modal="true" aria-label="Administrator finance setup reset">
+      <h2>Administrator — Reset Finance Setup</h2>
+      <p className="small">This resets configuration only. It does not delete Chart of Accounts or financial/master records. If any journals, transactions or dependent masters exist, reset is blocked. A PostgreSQL backup is required first.</p>
+      {!resetPreflight?.eligible && <div className="warning-panel"><strong>Reset blocked</strong><p className="small">{resetPreflight?.blockers.join("; ") || "Preflight unavailable"}</p></div>}
+      {resetPreflight?.eligible && <><label>Type RESET FINANCE SETUP<input value={resetPhrase} autoComplete="off" onChange={(event) => setResetPhrase(event.target.value)} /></label>
+      <label>Current administrator password<input type="password" value={resetPassword} autoComplete="current-password" onChange={(event) => setResetPassword(event.target.value)} /></label></>}
+      <div className="button-row"><button type="button" className="secondary-btn" onClick={() => { setResetDialogOpen(false); setResetPassword(""); }} disabled={resetLoading}>Cancel</button>
+        {resetPreflight?.eligible && <button type="button" onClick={() => void confirmFinanceReset()} disabled={resetLoading || resetPhrase !== "RESET FINANCE SETUP" || !resetPassword}>{resetLoading ? "Backing up and resetting…" : "Confirm Finance Setup Reset"}</button>}
+      </div>
+    </section>}
     {(error || message) && <section className={error ? "warning-panel" : "panel"} role={error ? "alert" : "status"}><strong>{error ? "Action required" : "Saved"}</strong><p className="small">{error || message}</p></section>}
     <section className="panel" style={{ maxWidth: 1260, width: "100%", marginInline: "auto", padding: "24px" }}>
       <div className="form-title-row" style={{ gap: 16, flexWrap: "wrap" }}>
