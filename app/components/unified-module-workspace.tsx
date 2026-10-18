@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { WorkspaceAction, WorkspaceDefinition, WorkspaceId } from "@/lib/workspaces/module-registry";
+import { COMMERCIAL_CATEGORY_ORDER, organizeCommercialActions } from "@/lib/workspaces/commercial-navigation";
 import type { WorkspaceRecentDocument } from "@/lib/workspaces/recent-documents.server";
 
 type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; availableModules: Array<{ id: WorkspaceId; title: string }>; recentDocuments: WorkspaceRecentDocument[]; streamlined?: boolean };
@@ -16,13 +17,15 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   const [registerPage, setRegisterPage] = useState(1);
   const [registerSort, setRegisterSort] = useState<"newest" | "oldest" | "amount-high" | "amount-low">("newest");
   const pageSize = 10;
-  const sections = useMemo(() => ["All", ...new Set(actions.map(action => action.section))], [actions]);
-  const visible = useMemo(() => actions.filter(action => {
+  const commercial = workspace.id === "sales" || workspace.id === "purchases";
+  const orderedActions = useMemo(() => organizeCommercialActions(actions, workspace.id), [actions, workspace.id]);
+  const sections = useMemo(() => commercial ? [...COMMERCIAL_CATEGORY_ORDER] : ["All", ...new Set(orderedActions.map(action => action.section))], [commercial, orderedActions]);
+  const visible = useMemo(() => orderedActions.filter(action => {
     if (section !== "All" && action.section !== section) return false;
     const needle = query.toLocaleLowerCase().trim();
     return !needle || [action.title, action.description, action.section].join(" ").toLocaleLowerCase().includes(needle);
-  }), [actions, query, section]);
-  const primary = actions.find(action => action.kind === "primary") || actions[0];
+  }), [orderedActions, query, section]);
+  const primary = orderedActions.find(action => action.kind === "primary") || orderedActions[0];
   const registerKinds = useMemo(() => ["All", ...new Set(recentDocuments.map(row => row.kind))], [recentDocuments]);
   const registerStatuses = useMemo(() => ["All", ...new Set(recentDocuments.map(row => row.status))], [recentDocuments]);
   const visibleDocuments = useMemo(() => recentDocuments.filter(row => {
@@ -40,11 +43,11 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   const pageCount = Math.max(1, Math.ceil(sortedDocuments.length / pageSize));
   const currentPage = Math.min(registerPage, pageCount);
   const pageDocuments = sortedDocuments.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-  const workflow = useMemo(() => actions.reduce<Array<{ section: string; href: string }>>((items, action) => {
+  const workflow = useMemo(() => orderedActions.reduce<Array<{ section: string; href: string }>>((items, action) => {
     if (!items.some(item => item.section === action.section)) items.push({ section: action.section, href: action.href });
     return items;
-  }, []), [actions]);
-  const create = actions.find(action => action.kind === "action");
+  }, []), [orderedActions]);
+  const create = orderedActions.find(action => action.kind === "action");
 
   const streamlinedLayout = streamlined || workspace.id === "sales";
 
@@ -89,9 +92,9 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
         </label>
       </div>
       <div className="unified-workspace-tabs" role="group" aria-label="Filter by work category">
-        {sections.map(name => <button type="button" key={name} aria-pressed={section === name} className={section === name ? "unified-workspace-tab selected" : "unified-workspace-tab"} onClick={() => setSection(name)}>{name}</button>)}
+        {sections.map(name => { const available = name === "All" || orderedActions.some(action => action.section === name); return <button type="button" key={name} title={available ? `Show ${name} actions` : `No ${name} actions in this module`} disabled={!available} aria-pressed={section === name} className={section === name ? "unified-workspace-tab selected" : "unified-workspace-tab"} onClick={() => setSection(name)}>{name}</button>; })}
       </div>
-      <div className="unified-workspace-register-controls"><span>{visible.length} of {actions.length} available actions</span><button type="button" disabled={section === "All" && !query} onClick={() => { setSection("All"); setQuery(""); }}>Clear action filters</button></div>
+      <div className="unified-workspace-register-controls"><span>{visible.length} of {orderedActions.length} available actions</span><button type="button" disabled={section === "All" && !query} onClick={() => { setSection("All"); setQuery(""); }}>Clear action filters</button></div>
       <div className="unified-workspace-action-grid">
         {visible.map(action => action.disabled ? <div key={action.href + action.title} className="unified-workspace-action ef-workspace-action-disabled" aria-disabled="true" title={action.disabledReason || "This action is unavailable"}>
           <span className="unified-workspace-action-category">{action.section}</span>
