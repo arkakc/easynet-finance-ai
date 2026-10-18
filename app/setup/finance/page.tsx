@@ -893,9 +893,23 @@ export default function FinanceSetupPage() {
         <button type="button" className={config.openingMode === "NEW_BUSINESS" ? "finance-opening-selected" : "secondary-btn"} onClick={() => patch("openingMode", "NEW_BUSINESS")}><strong>New Business</strong><span className="small">No historical migration. Confirm actual opening position in Step 6.</span></button>
         <button type="button" className={config.openingMode === "EXISTING_BUSINESS" ? "finance-opening-selected" : "secondary-btn"} onClick={() => patch("openingMode", "EXISTING_BUSINESS")}><strong>Existing Business</strong><span className="small">Transfer verified GL balances and reconcile outstanding subledgers.</span></button>
       </div>
-      <label>Opening balance as-of date <span className="required-star">*</span><input type="date" value={config.openingDate} onChange={(event) => patch("openingDate", event.target.value)} required /><span className="small">The date of the opening position being recorded.</span></label>
-      <label>First transaction date<input type="date" value={config.firstTransactionDate || ""} min={config.openingDate || undefined} onChange={(event) => patch("firstTransactionDate", event.target.value)} /><span className="small">Must be after the opening balance date when provided.</span></label>
-      <label>Planned go-live date<input type="date" value={config.plannedGoLiveDate || ""} onChange={(event) => patch("plannedGoLiveDate", event.target.value)} /><span className="small">Operational launch plan, separate from accounting opening position.</span></label>
+      <div className="form-wide finance-opening-dates">
+        <label className="finance-opening-date-field">
+          <span className="finance-opening-date-label"><span>Opening balance as-of date</span><span className="finance-opening-required">Required</span></span>
+          <input type="date" value={config.openingDate} onChange={(event) => patch("openingDate", event.target.value)} required />
+          <span className="small finance-opening-date-help">Date of the opening balances being recorded.</span>
+        </label>
+        <label className="finance-opening-date-field">
+          <span className="finance-opening-date-label"><span>First transaction date</span><span className="finance-opening-optional">Required before Go Live</span></span>
+          <input type="date" value={config.firstTransactionDate || ""} min={config.openingDate || undefined} onChange={(event) => patch("firstTransactionDate", event.target.value)} />
+          <span className="small finance-opening-date-help">Must be after the opening balance date.</span>
+        </label>
+        <label className="finance-opening-date-field">
+          <span className="finance-opening-date-label"><span>Planned go-live date</span><span className="finance-opening-optional">Optional</span></span>
+          <input type="date" value={config.plannedGoLiveDate || ""} onChange={(event) => patch("plannedGoLiveDate", event.target.value)} />
+          <span className="small finance-opening-date-help">Operational launch plan; does not control accounting posting.</span>
+        </label>
+      </div>
       {config.openingMode === "NEW_BUSINESS"
         ? <div className="form-wide conversion-box"><strong>New business opening control</strong><p className="small">Step 6 validates a zero balance when no opening amounts are entered. If cash, capital, loans or stock already exist, enter the actual amounts instead.</p></div>
         : <><div className="form-wide warning-panel"><strong>Existing business migration controls</strong><p className="small">Step 6 requires balanced opening GL entries. Reconcile customer and supplier outstanding items, inventory, fixed assets, bank, and applicable GST/tax figures to the opening trial balance. Balancing the GL alone does not certify subledger reconciliation.</p></div><div className="form-wide button-row">{existingBusinessMigrationReady ? <Link className="secondary-btn" href="/migration/opening-subledger">Open migration centre</Link> : <button type="button" className="secondary-btn" disabled>Migration centre unlocks after Step 6 balances</button>}</div></>}
@@ -924,6 +938,14 @@ export default function FinanceSetupPage() {
       .finance-setup-workspace .finance-mapping-count { display: flex; flex-direction: column; text-align: right; white-space: nowrap; }
       .finance-setup-workspace .finance-mapping-count strong { font-size: 20px; }
       @media (max-width: 760px) { .finance-setup-workspace .finance-mapping-readiness { flex-direction: column; align-items: stretch; } .finance-setup-workspace .finance-mapping-count { text-align: left; } }
+      .finance-setup-workspace .finance-opening-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 20px; row-gap: 18px; align-items: start; }
+      .finance-setup-workspace .finance-opening-date-field { display: flex; flex-direction: column; min-width: 0; margin: 0; }
+      .finance-setup-workspace .finance-opening-date-label { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 22px; margin-bottom: 8px; font-weight: 600; }
+      .finance-setup-workspace .finance-opening-required, .finance-setup-workspace .finance-opening-optional { font-size: 11px; font-weight: 500; white-space: nowrap; color: #64748b; }
+      .finance-setup-workspace .finance-opening-required { color: #b42318; }
+      .finance-setup-workspace .finance-opening-date-field input { width: 100%; margin: 0; min-height: 46px; }
+      .finance-setup-workspace .finance-opening-date-help { display: block; margin-top: 8px; font-weight: 400; }
+      @media (max-width: 760px) { .finance-setup-workspace .finance-opening-dates { grid-template-columns: minmax(0, 1fr); } }
       .finance-setup-workspace .finance-opening-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
       .finance-setup-workspace .finance-opening-choice button { padding: 16px; text-align: left; display: flex; flex-direction: column; gap: 6px; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; color: #172b4d; }
       .finance-setup-workspace .finance-opening-choice button.finance-opening-selected { border: 2px solid #2563eb; background: #eff6ff; }
