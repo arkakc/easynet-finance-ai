@@ -245,7 +245,7 @@ export async function getOpeningReconciliationStatus(
     const required = lines.some((line) => Number(line.debit || 0) !== 0 || Number(line.credit || 0) !== 0);
     const proof = evidence[area];
     const attested = Boolean(proof?.reference?.trim() && proof.fingerprint === fingerprint && proof.reviewer && proof.reviewedAt);
-    return { key: area, label: ({ ar: "Accounts receivable", ap: "Accounts payable", bank: "Bank and cash", inventory: "Inventory valuation", fixedAssets: "Fixed asset register", tax: "GST and tax balances", loans: "Loan schedules" } as const)[area], amount, required, passed: !required || attested, status: !required ? "NOT_APPLICABLE" : attested ? "ATTESTED" : "REQUIRED", reference: attested ? proof!.reference : "", detail: required ? "Supporting schedule evidence and reviewer confirmation required" : "No nonzero opening position in this control group" };
+    return { key: area, label: ({ ar: "Accounts receivable", ap: "Accounts payable", bank: "Bank and cash", inventory: "Inventory valuation", fixedAssets: "Fixed asset register", tax: "GST and tax balances", loans: "Loan schedules" } as const)[area], amount, required, passed: !required || attested, status: String(!required ? "NOT_APPLICABLE" : attested ? "ATTESTED" : "REQUIRED"), reference: attested ? proof!.reference : "", detail: required ? "Supporting schedule evidence and reviewer confirmation required" : "No nonzero opening position in this control group" };
   });
   // AR/AP require actual imported opening schedule reconciliation; manual attestations cannot override these controls.
   const arAp = areas.filter((row) => row.key === "ar" || row.key === "ap");
