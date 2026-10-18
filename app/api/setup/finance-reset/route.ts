@@ -31,7 +31,7 @@ async function inspect() {
   return { eligible: blockers.length === 0, blockers, accounts, dependencies, setupStatus: setup?.value || "NEW_INSTALLATION" };
 }
 
-function backupBeforeReset() {
+export function backupBeforeReset() {
   const url = process.env.DATABASE_URL_POSTGRES;
   if (!url) throw new Error("PostgreSQL connection is not configured.");
   const database = new URL(url);
