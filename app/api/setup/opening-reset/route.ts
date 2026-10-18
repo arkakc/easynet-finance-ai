@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireConfigurationPermission, authenticateDetailed } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
-import { backupBeforeReset } from "@/lib/accounting/setup-reset-backup";
 
 export const runtime = "nodejs";
 const OPENING_SOURCE = "SETUP_OPENING_BALANCES";
@@ -50,7 +49,6 @@ export async function POST(request: Request) {
     if (!verified.ok || !verified.user.roles.includes("System Manager")) return NextResponse.json({ ok: false, error: "Administrator password verification failed." }, { status: 403 });
     const preflight = await inspect();
     if (!preflight.eligible) return NextResponse.json({ ok: false, error: "Reset blocked by related accounting records.", blockers: preflight.blockers }, { status: 409 });
-    const backup = backupBeforeReset();
     await prisma.$transaction(async (tx) => {
       const live = await inspect(tx);
       if (!live.eligible || live.journal?.id !== preflight.journal?.id) throw new Error("Accounting records changed during reset; no data cleared.");
@@ -60,8 +58,8 @@ export async function POST(request: Request) {
         "opening_zero_confirmed", "opening_reconciliation_evidence"
       ] } } });
       await tx.globalSettings.upsert({ where: { key: "setup_completed_step_index" }, create: { key: "setup_completed_step_index", value: "4", updatedBy: actor.email }, update: { value: "4", updatedBy: actor.email, updatedAt: new Date() } });
-      await tx.auditLog.create({ data: { action: "RESET", entityType: "OpeningJournal", entityId: live.journal?.id, entityCode: live.journal?.code, actorEmail: actor.email, description: "Administrator reset of first-time setup opening posting; snapshot retained in PostgreSQL backup", metadata: JSON.stringify({ backup: backup.fileName, journal: live.journal }) } });
+      await tx.auditLog.create({ data: { action: "RESET", entityType: "OpeningJournal", entityId: live.journal?.id, entityCode: live.journal?.code, actorEmail: actor.email, description: "Administrator reset of first-time setup opening posting following credential verification and dependency check", metadata: JSON.stringify({ journal: live.journal, confirmation: CONFIRM }) } });
     }, { isolationLevel: "Serializable", timeout: 30000 });
-    return NextResponse.json({ ok: true, message: "Opening journal and Step 6 state reset. You can import and validate again.", backup });
+    return NextResponse.json({ ok: true, message: "Opening journal and Step 6 state reset. You can import and validate again." });
   } catch (reason) { return error(reason); }
 }
