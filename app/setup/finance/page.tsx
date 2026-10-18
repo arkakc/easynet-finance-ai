@@ -27,7 +27,8 @@ type BaseConfig = {
   exchangeGainLossAccount: string;
 };
 type Config = BaseConfig & FinanceSetupSettingsConfig;
-type Overview = { status: string; completedStepIndex: number; highestUnlockedStep: number; setupActive: boolean; config: Config; metrics: { coaCount: number; customerCount: number; supplierCount: number; itemCount: number }; checks: Record<string, boolean>; configurationReady: boolean; openingValidated: boolean; readyForGoLive: boolean };
+type OpeningReconRow = { key: string; label: string; amount: number; required: boolean; passed: boolean; status: string; reference: string; detail: string };
+type Overview = { status: string; completedStepIndex: number; highestUnlockedStep: number; setupActive: boolean; config: Config; metrics: { coaCount: number; customerCount: number; supplierCount: number; itemCount: number }; checks: Record<string, boolean>; configurationReady: boolean; openingValidated: boolean; readyForGoLive: boolean; openingReconciliation?: { areas: OpeningReconRow[]; reconciled: boolean } };
 type BalanceLine = { accountCode: string; debit: string; credit: string; label: string };
 type SavedOpeningBalanceEntry = { accountCode: string; debit?: number; credit?: number; label?: string };
 type OverviewPayload = Overview & { openingBalanceEntries?: SavedOpeningBalanceEntry[] };
@@ -355,6 +356,19 @@ export default function FinanceSetupPage() {
       else await load();
       return Boolean(body.valid);
     } catch (reason) { setOpeningAction("checked"); setError(reason instanceof Error ? reason.message : "Opening balance posting failed"); return false; }
+    finally { setBusy(false); }
+  };
+  const confirmOpeningReconciliation = async (key: string) => {
+    const evidenceReference = window.prompt("Enter the supporting statement / schedule reference (at least 8 characters). This will be recorded with your user and timestamp.");
+    if (evidenceReference === null) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "confirm-opening-reconciliation", reconArea: key, evidenceReference }) });
+      const result = await response.json() as Overview & { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) throw new Error(result.error || "Reconciliation review failed");
+      setOverview(result);
+      setMessage("Reconciliation evidence recorded. Review all remaining readiness checks.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Reconciliation review failed"); }
     finally { setBusy(false); }
   };
   const saveReview = async (): Promise<Overview | null> => {
@@ -837,6 +851,8 @@ export default function FinanceSetupPage() {
     ["Chart of Accounts", overview?.checks.chartOfAccounts],
     ["Mandatory account mappings", overview?.checks.mappings],
     ["Opening balance control", overview?.checks.openingValidated],
+    ["First transaction cutover date", overview?.checks.firstTransactionDateReady],
+    ["Existing-business reconciliation", overview?.checks.migrationReconciled],
   ] as const;
 
   return <div className="page-stack finance-setup-workspace">
@@ -1025,7 +1041,20 @@ export default function FinanceSetupPage() {
         </div>
         <p className="small" role="status">{openingBalanced ? "Completed. Save & Continue is available." : openingAction === "checked" ? "Validation passed. The next action requires confirmation." : "Validation does not post to the ledger. Posting requires a separate confirmation."}</p>
       </div></section>}
-    {step === 6 && <section className="panel"><h2>7. Review & reconcile</h2><p className="small">Review the configuration before activation. No financial document is posted by this screen.</p><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><tbody><tr><th>Company</th><td>{config.companyName || "Not set"}</td></tr><tr><th>Base Operating Currency</th><td>{config.baseCurrency}</td></tr><tr><th>Active Financial Year Period</th><td>{config.financialYearPeriod || "Not set"}</td></tr><tr><th>GST control status</th><td>{config.gstStatus || "Not set"}</td></tr><tr><th>GST / IRC TIN</th><td>{config.gstNumber || "—"}</td></tr><tr><th>GST retained document</th><td>{config.gstEvidenceDocId ? config.gstEvidenceDocName : "—"}</td></tr><tr><th>Accounting / inventory</th><td>{accountingMethodLabel} · {inventoryMethodLabel}</td></tr><tr><th>COA</th><td>{overview?.metrics.coaCount ?? 0} active accounts</td></tr><tr><th>Opening control</th><td>{validation?.valid || overview?.openingValidated ? "Balanced" : "Not validated"}</td></tr></tbody></table></div></section>}
+    {step === 6 && <section className="panel"><h2>7. Review & reconcile</h2><p className="small">Review the configuration before activation. No financial document is posted by this screen.</p><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><tbody><tr><th>Company</th><td>{config.companyName || "Not set"}</td></tr><tr><th>Base Operating Currency</th><td>{config.baseCurrency}</td></tr><tr><th>Active Financial Year Period</th><td>{config.financialYearPeriod || "Not set"}</td></tr><tr><th>GST control status</th><td>{config.gstStatus || "Not set"}</td></tr><tr><th>GST / IRC TIN</th><td>{config.gstNumber || "—"}</td></tr><tr><th>GST retained document</th><td>{config.gstEvidenceDocId ? config.gstEvidenceDocName : "—"}</td></tr><tr><th>Accounting / inventory</th><td>{accountingMethodLabel} · {inventoryMethodLabel}</td></tr><tr><th>COA</th><td>{overview?.metrics.coaCount ?? 0} active accounts</td></tr><tr><th>Opening control</th><td>{validation?.valid || overview?.openingValidated ? "Balanced" : "Not validated"}</td></tr></tbody></table></div>{config.openingMode === "EXISTING_BUSINESS" && <div className="finance-reconciliation-review">
+        <h3>Opening migration reconciliation readiness</h3>
+        <p className="small">AR/AP are checked against imported opening documents. Other applicable balances need an evidence reference and authorized confirmation. No duplicate trial balance upload is needed.</p>
+        <div className="table-wrap"><table className="data-table"><thead><tr><th>Control</th><th>Opening amount (PGK)</th><th>Status</th><th>Evidence / corrective action</th></tr></thead><tbody>
+          {(overview?.openingReconciliation?.areas || []).map((area) => <tr key={area.key}>
+            <td>{area.label}</td><td>{money(area.amount)}</td>
+            <td><span className={`coa-status-pill ${area.passed ? "valid" : "invalid"}`}>{area.status.replaceAll("_", " ")}</span></td>
+            <td>{area.key === "ar" || area.key === "ap" ? <span className="small">{area.detail}</span> : area.passed ? <span className="small">{area.reference || "No opening balance — not applicable"}</span> :
+              <button type="button" className="secondary-btn" onClick={() => void confirmOpeningReconciliation(area.key)} disabled={busy || !overview?.openingValidated}>Record Evidence & Confirm</button>}</td>
+          </tr>)}
+        </tbody></table></div>
+        <p className="small" role="status">{overview?.openingReconciliation?.reconciled ? "All applicable opening reconciliation checks passed." : "Go Live remains blocked until outstanding reconciliation checks are complete."}</p>
+      </div>}
+</section>}
     {step === 7 && <section className="panel"><h2>8. Go live</h2><p className="small">Activation locks the setup state. Posted journals remain immutable; corrections use reversal entries.</p><div className="grid" style={{ marginTop: 16 }}><div className="card"><div className="label">Configuration</div><div className="value small-value">{overview?.configurationReady ? "PASS" : "REQUIRED"}</div></div><div className="card"><div className="label">Opening validation</div><div className="value small-value">{overview?.openingValidated ? "PASS" : "REQUIRED"}</div></div><div className="card"><div className="label">Decision</div><div className="value small-value">{overview?.readyForGoLive ? "READY" : "BLOCKED"}</div></div></div><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><thead><tr><th>Readiness control</th><th>Status</th></tr></thead><tbody>{readinessItems.map(([label, passed]) => <tr key={label}><td>{label}</td><td><span className={`coa-status-pill ${passed ? "valid" : "invalid"}`}>{passed ? "PASS" : "REQUIRED"}</span></td></tr>)}</tbody></table></div>{!overview?.readyForGoLive && <p className="small" style={{ marginTop: 12 }}>Complete every required control above.</p>}{setupActivated && <div className="conversion-box" style={{ marginTop: 16 }}><strong>Accounting system active</strong><p className="small">Successfully saved. System is ready to use. Use edit mode only when you need to update the existing accounting setup.</p></div>}<div className="button-row" style={{ marginTop: 16 }}>{setupActivated ? <button type="button" disabled>Accounting system active</button> : <button type="button" onClick={() => void activate()} disabled={busy || !overview?.readyForGoLive}>{busy ? "Saving…" : "Activate accounting system"}</button>}</div></section>}
 
     <section className="panel"><div className="button-row"><button type="button" className="secondary-btn" onClick={previous} disabled={busy || step === 0}>← Previous</button>{setupActivated && editMode ? <button type="button" onClick={() => void modify()} disabled={busy || !currentStepReady}>{busy ? "Modifying…" : "Modify"}</button> : !setupActivated && step < 7 && <button type="button" onClick={() => void next()} disabled={busy || !currentStepReady}>{busy ? "Saving…" : "Save & continue →"}</button>}</div>{!setupActivated && step < 7 && !currentStepReady && <div className="small" style={{ marginTop: 10 }}>{currentStepHint}</div>}{setupActivated && editMode && !currentStepReady && <div className="small" style={{ marginTop: 10 }}>{currentStepHint}</div>}</section>
@@ -1072,6 +1101,8 @@ export default function FinanceSetupPage() {
       .finance-setup-workspace .finance-opening-import-file { display: block; margin: 12px 0; }
       .finance-setup-workspace .finance-opening-import-file input { width: 100%; }
       .finance-setup-workspace .finance-opening-import-preview { margin-top: 16px; overflow-x: auto; }
+      .finance-setup-workspace .finance-reconciliation-review { margin-top: 20px; }
+      .finance-setup-workspace .finance-reconciliation-review .data-table td { vertical-align: middle; }
       .finance-setup-workspace .finance-fixed-field { display: flex; flex-direction: column; align-self: start; min-width: 0; }
       .finance-setup-workspace .finance-fixed-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin-bottom: 6px; }
       .finance-setup-workspace .finance-fixed-status { white-space: nowrap; font-size: 11px; font-weight: 500; color: #64748b; }
