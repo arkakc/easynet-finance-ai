@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { executeAction } from "@/lib/ui/action-contract";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -405,9 +406,9 @@ export default function FinanceSetupPage() {
     setBusy(true); setError(""); setMessage("");
     try {
       const form = new FormData(); form.set("area", key); form.set("reference", evidenceReference); form.set("file", file);
-      const response = await fetch("/api/setup/opening-reconciliation-evidence", { method: "POST", body: form });
-      const result = await response.json() as Overview & { ok?: boolean; error?: string };
-      if (!response.ok || !result.ok) throw new Error(result.error || "Reconciliation review failed");
+      const result = await executeAction<Overview & { ok?: boolean; error?: string }>("/api/setup/opening-reconciliation-evidence", { method: "POST", body: form }, "Opening reconciliation");
+      const confirmed = result.openingReconciliation?.areas.find((area) => area.key === key);
+      if (!confirmed?.passed || confirmed.status !== "RECONCILED") throw new Error("Evidence upload returned without confirmed reconciliation. Refresh and verify saved status before retrying.");
       setOverview(result);
       setOpeningReconFiles(current => ({ ...current, [key]: null }));
       setMessage("Supporting document saved and reviewer confirmation recorded. Remaining checks are evaluated by the server.");
