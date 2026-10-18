@@ -421,8 +421,10 @@ export async function validateOpeningBalances(entries: OpeningBalanceEntry[], cl
   const accounts = await client.chartOfAccounts.findMany({ where: { code: { in: codes }, isActive: true }, include: { children: { select: { id: true } } } });
   const byCode = new Map(accounts.map((account) => [account.code, account]));
   const errors: string[] = [];
-  let debit = 0;
-  let credit = 0;
+  if (codes.length !== entries.length) errors.push("Every opening line must reference a posting account.");
+  if (new Set(entries.map((entry) => String(entry.accountCode || "").trim())).size !== entries.length) errors.push("Duplicate opening account codes are not allowed.");
+  let debitCents = 0;
+  let creditCents = 0;
   for (const [index, entry] of entries.entries()) {
     const code = String(entry.accountCode || "").trim();
     const account = byCode.get(code);
@@ -431,12 +433,14 @@ export async function validateOpeningBalances(entries: OpeningBalanceEntry[], cl
     if (!account) errors.push(`Line ${index + 1}: account ${code || "(blank)"} was not found or is inactive`);
     else if (account.children.length > 0) errors.push(`Line ${index + 1}: ${code} is a group account; select a ledger account`);
     if (!Number.isFinite(d) || !Number.isFinite(c) || d < 0 || c < 0 || (d > 0 && c > 0) || (d === 0 && c === 0)) errors.push(`Line ${index + 1}: enter either a positive debit or credit amount`);
-    debit += d;
-    credit += c;
+    if (Number.isFinite(d) && Number.isFinite(c) && Math.abs(d * 100 - Math.round(d * 100)) < 0.000001 && Math.abs(c * 100 - Math.round(c * 100)) < 0.000001) {
+      debitCents += Math.round(d * 100);
+      creditCents += Math.round(c * 100);
+    } else errors.push(`Line ${index + 1}: amounts must be valid with no more than two decimal places`);
   }
-  const roundedDebit = Math.round((debit + Number.EPSILON) * 100) / 100;
-  const roundedCredit = Math.round((credit + Number.EPSILON) * 100) / 100;
-  const difference = Math.round((roundedDebit - roundedCredit + Number.EPSILON) * 100) / 100;
+  const roundedDebit = debitCents / 100;
+  const roundedCredit = creditCents / 100;
+  const difference = (debitCents - creditCents) / 100;
   if (Math.abs(difference) >= 0.01) errors.push(`Opening balances are not balanced: debit K${roundedDebit.toFixed(2)} vs credit K${roundedCredit.toFixed(2)}`);
   return { valid: errors.length === 0, errors, totalDebit: roundedDebit, totalCredit: roundedCredit, difference, lineCount: entries.length };
 }
