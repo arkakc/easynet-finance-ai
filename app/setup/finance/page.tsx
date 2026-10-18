@@ -683,6 +683,16 @@ export default function FinanceSetupPage() {
     setBalances((current) => current.map((row, rowIndex) => rowIndex === index
       ? { ...row, accountCode: code, label: account?.accountName || "" } : row));
   };
+  const resetOpeningForm = () => {
+    if (!window.confirm("Clear all opening entries and restart Step 6? This only resets the on-screen draft. It will NOT delete or reverse saved/posted opening balances or journal entries.")) return;
+    setBalances([]);
+    setValidation(null);
+    setZeroOpeningConfirmed(false);
+    setOpeningAction("idle");
+    setOpeningEdited(true);
+    setError("");
+    setMessage("Opening form reset. Existing posted journals and saved financial records are unchanged.");
+  };
   const addOpeningRow = () => {
     setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => [...current, { accountCode: "", label: "", debit: "", credit: "" }]);
@@ -956,7 +966,7 @@ export default function FinanceSetupPage() {
         <td><input aria-label={`Credit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.credit} onChange={(event) => updateBalance(index, "credit", event.target.value)} disabled={busy} /></td>
         <td><button type="button" className="secondary-btn" onClick={() => removeOpeningRow(index)} disabled={busy}>Remove</button></td></tr>)}</tbody>
         <tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th><th /></tr></tfoot></table></div>
-      <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button></div>
+      <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button><button type="button" className="secondary-btn" onClick={resetOpeningForm} disabled={busy}>Reset Opening Form</button></div>
       <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
       {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="finance-opening-actions">
         <div className="finance-opening-divider"><strong>New Business — Zero Opening</strong><span className="small">Use this path only when no opening balances exist.</span></div>
