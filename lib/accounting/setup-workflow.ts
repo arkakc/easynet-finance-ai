@@ -348,7 +348,11 @@ export async function getSetupOverview(client: DbClient = prisma) {
   const openingReconciliation = config.openingMode === "EXISTING_BUSINESS"
     ? await getOpeningReconciliationStatus(config, openingBalanceEntries, valueOf(settings, "opening_reconciliation_evidence"), client)
     : { areas: [], reconciled: true, fingerprint: "" };
-  const migrationReconciled = openingReconciliation.reconciled;
+  const openingJournal = config.openingMode === "EXISTING_BUSINESS"
+    ? await client.journalHeader.findFirst({ where: { sourceDocType: "OPENING", sourceDocId: SETUP_OPENING_SOURCE_DOC_ID, status: "POSTED" }, select: { id: true, date: true } })
+    : null;
+  const hasOpeningJournal = Boolean(openingJournal && openingJournal.date.toISOString().slice(0, 10) === config.openingDate);
+  const migrationReconciled = openingReconciliation.reconciled && (config.openingMode !== "EXISTING_BUSINESS" || hasOpeningJournal);
   const rawStatus = valueOf(settings, "setup_status", configurationReady ? "CONFIGURATION" : "NEW_INSTALLATION").toUpperCase();
   const completedStepIndex = parseSetupStepIndex(valueOf(settings, "setup_completed_step_index", "-1"));
   const setupActive = rawStatus === "ACTIVE" && completedStepIndex >= SETUP_FINAL_STEP_INDEX;
@@ -375,7 +379,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
     configurationReady,
     openingValidated,
     openingBalanceEntries,
-    openingReconciliation,
+    openingReconciliation: { ...openingReconciliation, reconciled: migrationReconciled, hasOpeningJournal: config.openingMode !== "EXISTING_BUSINESS" || hasOpeningJournal },
     readyForGoLive: configurationReady && coaCount > 0 && openingValidated && firstTransactionDateReady && openingConfirmed && migrationReconciled,
   };
 }
