@@ -1,3 +1,4 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { requireConfigurationPermission, authenticateDetailed } from "@/lib/auth";
 import { prisma } from "@/src/lib/prisma";
@@ -11,7 +12,7 @@ async function authorize() {
   if (!actor.roles.includes("System Manager")) throw new Error("Forbidden: System Manager only");
   return actor;
 }
-async function inspect(tx = prisma) {
+async function inspect(tx: PrismaClient | Prisma.TransactionClient = prisma) {
   const [status, journal, totalJournals, invoices, supplierBills, stockMovements, assetCount, payments, openingRows, approvals] = await Promise.all([
     tx.globalSettings.findUnique({ where: { key: "setup_status" } }),
     tx.journalHeader.findUnique({ where: { sourceDocId: OPENING_SOURCE }, include: { lines: { select: { id: true } } } }),
