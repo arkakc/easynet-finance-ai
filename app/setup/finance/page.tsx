@@ -64,13 +64,8 @@ const initialConfig: Config = {
   ...DEFAULT_FINANCE_SETUP_SETTINGS,
 };
 const steps = ["Company", "Business & accounting", "Chart of Accounts", "Default accounts", "Opening position", "Balances", "Review", "Go live"];
-const balanceDefaults: BalanceLine[] = [
-  { accountCode: "1121", debit: "", credit: "", label: "Bank" }, { accountCode: "1111", debit: "", credit: "", label: "Cash" },
-  { accountCode: "1131", debit: "", credit: "", label: "Accounts receivable" }, { accountCode: "1151", debit: "", credit: "", label: "Prepayments" },
-  { accountCode: "1211", debit: "", credit: "", label: "Fixed assets" }, { accountCode: "2111", debit: "", credit: "", label: "Accounts payable" },
-  { accountCode: "2131", debit: "", credit: "", label: "Loan / statutory payable" }, { accountCode: "3100", debit: "", credit: "", label: "Share capital" },
-  { accountCode: "3200", debit: "", credit: "", label: "Retained earnings" },
-];
+// Opening rows are selected from the company COA, never hardcoded standard codes.
+const balanceDefaults: BalanceLine[] = [];
 
 const money = (value: number) => new Intl.NumberFormat("en-PG", { style: "currency", currency: "PGK" }).format(value);
 const balanceValue = (value: unknown) => Number(value || 0) ? String(value) : "";
@@ -322,6 +317,7 @@ export default function FinanceSetupPage() {
     finally { setStandardCoaCreating(false); }
   };
   const validate = async (): Promise<boolean> => {
+    if (!validateOpeningRowsLocally()) return false;
     setBusy(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "validate-opening", entries: balances.filter(({ debit, credit }) => debit.trim() || credit.trim()).map(({ accountCode, debit, credit, label }) => ({ accountCode, debit: Number(debit || 0), credit: Number(credit || 0), label })) }) });
@@ -335,6 +331,12 @@ export default function FinanceSetupPage() {
     finally { setBusy(false); }
   };
   const postOpening = async (): Promise<boolean> => {
+    if (!validateOpeningRowsLocally()) return false;
+    const rows = enteredOpeningRows();
+    const preview = rows.length
+      ? rows.map((row) => `${row.accountCode} — ${row.label}: DR ${row.debit || "0.00"} / CR ${row.credit || "0.00"}`).join("\n")
+      : "ZERO OPENING: No GL journal will be created.";
+    if (!window.confirm(`Confirm opening balance posting on ${config.openingDate}?\n\n${preview}\n\nThis financial action cannot be overwritten. Continue?`)) return false;
     setBusy(true); setError(""); setMessage("");
     try {
       const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "post-opening", confirmZeroOpening: zeroOpeningConfirmed, entries: balances.filter(({ debit, credit }) => debit.trim() || credit.trim()).map(({ accountCode, debit, credit, label }) => ({ accountCode, debit: Number(debit || 0), credit: Number(credit || 0), label })) }) });
@@ -672,13 +674,43 @@ export default function FinanceSetupPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Account recommendations failed"); }
     finally { setAiSuggesting(false); }
   };
-  const updateBalance = (index: number, field: "debit" | "credit", value: string) => { setValidation(null); setZeroOpeningConfirmed(false); setBalances((current) => current.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row)); };
+  const changeOpeningAccount = (index: number, code: string) => {
+    const account = ledgerAccountOptions.find((item) => item.accountCode === code);
+    setValidation(null); setZeroOpeningConfirmed(false);
+    setBalances((current) => current.map((row, rowIndex) => rowIndex === index
+      ? { ...row, accountCode: code, label: account?.accountName || "" } : row));
+  };
+  const addOpeningRow = () => {
+    setValidation(null); setZeroOpeningConfirmed(false);
+    setBalances((current) => [...current, { accountCode: "", label: "", debit: "", credit: "" }]);
+  };
+  const removeOpeningRow = (index: number) => {
+    setValidation(null); setZeroOpeningConfirmed(false);
+    setBalances((current) => current.filter((_, rowIndex) => rowIndex !== index));
+  };
+  const updateBalance = (index: number, field: "debit" | "credit", value: string) => {
+    setValidation(null); setZeroOpeningConfirmed(false);
+    setBalances((current) => current.map((row, rowIndex) => rowIndex === index
+      ? { ...row, [field]: value, ...(value.trim() && Number(value) > 0 ? { [field === "debit" ? "credit" : "debit"]: "" } : {}) } : row));
+  };
+  const enteredOpeningRows = () => balances.filter(({ debit, credit }) => debit.trim() || credit.trim());
+  const validateOpeningRowsLocally = () => {
+    const rows = enteredOpeningRows();
+    const codes = rows.map((row) => row.accountCode.trim());
+    if (codes.some((code) => !code || !ledgerAccountOptions.some((account) => account.accountCode === code))) {
+      setError("Select a valid active posting account for every opening balance row."); return false;
+    }
+    if (new Set(codes).size !== codes.length) {
+      setError("An account can appear only once in the opening balance journal. Combine duplicate balances."); return false;
+    }
+    return true;
+  };
   const gstSetupReady = Boolean(config.gstStatus && (!["REGISTERED", "VERIFIED"].includes(config.gstStatus) || (config.gstNumber.trim() && config.gstEvidenceDocName.trim() && (config.gstEvidenceDocId.trim() || gstCertificateFile))));
   const companyReady = Boolean(config.companyName.trim().length >= 2 && config.companyShortName.trim() && config.country.trim() && config.registrationNo.trim() && config.baseCurrency.trim() && config.financialYearPeriod.trim() && gstSetupReady);
   const customBusinessTypeReady = config.businessType !== "OTHER" || config.customBusinessType.trim().length >= 2;
   const businessReady = Boolean(config.businessType && customBusinessTypeReady && config.accountingMethod === LOCKED_ACCOUNTING_METHOD && config.inventoryMethod === LOCKED_INVENTORY_METHOD);
   const chartReady = Boolean(overview?.checks.chartOfAccounts || (overview?.metrics.coaCount ?? 0) > 0);
-  useEffect(() => { if ((step === 2 || step === 3) && chartReady) void loadSetupAccounts(); }, [step, chartReady, loadSetupAccounts]);
+  useEffect(() => { if ((step === 2 || step === 3 || step === 5) && chartReady) void loadSetupAccounts(); }, [step, chartReady, loadSetupAccounts]);
   useEffect(() => { if (step === 3) void loadCostCenters(); }, [step, loadCostCenters]);
   const mappingFieldsReady = mappingAccountFields.every((field) => {
     const value = String(config[field.configKey] || "");
@@ -914,7 +946,16 @@ export default function FinanceSetupPage() {
         ? <div className="form-wide conversion-box"><strong>New business opening control</strong><p className="small">Step 6 validates a zero balance when no opening amounts are entered. If cash, capital, loans or stock already exist, enter the actual amounts instead.</p></div>
         : <><div className="form-wide warning-panel"><strong>Existing business migration controls</strong><p className="small">Step 6 requires balanced opening GL entries. Reconcile customer and supplier outstanding items, inventory, fixed assets, bank, and applicable GST/tax figures to the opening trial balance. Balancing the GL alone does not certify subledger reconciliation.</p></div><div className="form-wide button-row">{existingBusinessMigrationReady ? <Link className="secondary-btn" href="/migration/opening-subledger">Open migration centre</Link> : <button type="button" className="secondary-btn" disabled>Migration centre unlocks after Step 6 balances</button>}</div></>}
     </section>}
-        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${validation?.valid ? "valid" : "invalid"}`}>{validation ? (validation.valid ? "BALANCED" : "CORRECT REQUIRED") : "NOT VALIDATED"}</span></div><table className="data-table" style={{ marginTop: 16 }}><thead><tr><th>Account</th><th>Debit (PGK)</th><th>Credit (PGK)</th></tr></thead><tbody>{balances.map((row, index) => <tr key={row.accountCode}><td><strong>{row.label}</strong><div className="small">{row.accountCode}</div></td><td><input type="number" min="0" step="0.01" value={row.debit} onChange={(event) => updateBalance(index, "debit", event.target.value)} /></td><td><input type="number" min="0" step="0.01" value={row.credit} onChange={(event) => updateBalance(index, "credit", event.target.value)} /></td></tr>)}</tbody><tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th></tr></tfoot></table>{validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => setZeroOpeningConfirmed(event.target.checked)} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="button-row" style={{ marginTop: 16 }}><button type="button" onClick={() => void validate()} disabled={busy}>{busy ? "Validating…" : "Check balance (no posting)"}</button><button type="button" onClick={() => void postOpening()} disabled={busy || !validation?.valid || (config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && !zeroOpeningConfirmed)}>{busy ? "Posting…" : "Post opening balances"}</button></div><p className="small">Check does not create journal entries. Post is a separate financial action and cannot overwrite an existing posted opening journal.</p></section>}
+        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${validation?.valid ? "valid" : "invalid"}`}>{validation ? (validation.valid ? "BALANCED" : "CORRECT REQUIRED") : "NOT VALIDATED"}</span></div><div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
+      <div className="table-wrap"><table className="data-table"><thead><tr><th>Posting ledger (Chart of Accounts)</th><th>Debit (PGK)</th><th>Credit (PGK)</th><th>Action</th></tr></thead><tbody>{balances.map((row, index) => <tr key={index}>
+        <td><select aria-label={`Opening account ${index + 1}`} value={row.accountCode} onChange={(event) => changeOpeningAccount(index, event.target.value)} disabled={busy}><option value="">Select active posting ledger</option>{ledgerAccountOptions.map((account) => <option key={account.accountId} value={account.accountCode}>{accountLabel(account)}</option>)}</select></td>
+        <td><input aria-label={`Debit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.debit} onChange={(event) => updateBalance(index, "debit", event.target.value)} disabled={busy} /></td>
+        <td><input aria-label={`Credit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.credit} onChange={(event) => updateBalance(index, "credit", event.target.value)} disabled={busy} /></td>
+        <td><button type="button" className="secondary-btn" onClick={() => removeOpeningRow(index)} disabled={busy}>Remove</button></td></tr>)}</tbody>
+        <tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th><th /></tr></tfoot></table></div>
+      <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button></div>
+      <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
+      {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => setZeroOpeningConfirmed(event.target.checked)} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="button-row" style={{ marginTop: 16 }}><button type="button" onClick={() => void validate()} disabled={busy}>{busy ? "Validating…" : "Check balance (no posting)"}</button><button type="button" onClick={() => void postOpening()} disabled={busy || !validation?.valid || (config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && !zeroOpeningConfirmed)}>{busy ? "Posting…" : "Post opening balances"}</button></div><p className="small">Check does not create journal entries. Post is a separate financial action and cannot overwrite an existing posted opening journal.</p></section>}
     {step === 6 && <section className="panel"><h2>7. Review & reconcile</h2><p className="small">Review the configuration before activation. No financial document is posted by this screen.</p><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><tbody><tr><th>Company</th><td>{config.companyName || "Not set"}</td></tr><tr><th>Base Operating Currency</th><td>{config.baseCurrency}</td></tr><tr><th>Active Financial Year Period</th><td>{config.financialYearPeriod || "Not set"}</td></tr><tr><th>GST control status</th><td>{config.gstStatus || "Not set"}</td></tr><tr><th>GST / IRC TIN</th><td>{config.gstNumber || "—"}</td></tr><tr><th>GST retained document</th><td>{config.gstEvidenceDocId ? config.gstEvidenceDocName : "—"}</td></tr><tr><th>Accounting / inventory</th><td>{accountingMethodLabel} · {inventoryMethodLabel}</td></tr><tr><th>COA</th><td>{overview?.metrics.coaCount ?? 0} active accounts</td></tr><tr><th>Opening control</th><td>{validation?.valid || overview?.openingValidated ? "Balanced" : "Not validated"}</td></tr></tbody></table></div></section>}
     {step === 7 && <section className="panel"><h2>8. Go live</h2><p className="small">Activation locks the setup state. Posted journals remain immutable; corrections use reversal entries.</p><div className="grid" style={{ marginTop: 16 }}><div className="card"><div className="label">Configuration</div><div className="value small-value">{overview?.configurationReady ? "PASS" : "REQUIRED"}</div></div><div className="card"><div className="label">Opening validation</div><div className="value small-value">{overview?.openingValidated ? "PASS" : "REQUIRED"}</div></div><div className="card"><div className="label">Decision</div><div className="value small-value">{overview?.readyForGoLive ? "READY" : "BLOCKED"}</div></div></div><div className="table-wrap" style={{ marginTop: 16 }}><table className="data-table"><thead><tr><th>Readiness control</th><th>Status</th></tr></thead><tbody>{readinessItems.map(([label, passed]) => <tr key={label}><td>{label}</td><td><span className={`coa-status-pill ${passed ? "valid" : "invalid"}`}>{passed ? "PASS" : "REQUIRED"}</span></td></tr>)}</tbody></table></div>{!overview?.readyForGoLive && <p className="small" style={{ marginTop: 12 }}>Complete every required control above.</p>}{setupActivated && <div className="conversion-box" style={{ marginTop: 16 }}><strong>Accounting system active</strong><p className="small">Successfully saved. System is ready to use. Use edit mode only when you need to update the existing accounting setup.</p></div>}<div className="button-row" style={{ marginTop: 16 }}>{setupActivated ? <button type="button" disabled>Accounting system active</button> : <button type="button" onClick={() => void activate()} disabled={busy || !overview?.readyForGoLive}>{busy ? "Saving…" : "Activate accounting system"}</button>}</div></section>}
 
@@ -952,6 +993,9 @@ export default function FinanceSetupPage() {
       @media (max-width: 760px) { .finance-setup-workspace .finance-opening-choice { grid-template-columns: 1fr; } }
       .finance-setup-workspace .finance-zero-opening-confirm { display: flex; align-items: flex-start; gap: 10px; padding: 12px 0; font-weight: 400; }
       .finance-setup-workspace .finance-zero-opening-confirm input { min-height: auto; width: 18px; flex: 0 0 18px; }
+      .finance-setup-workspace .finance-opening-summary { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 9px; margin: 14px 0; }
+      .finance-setup-workspace .finance-opening-summary span { white-space: nowrap; }
+      .finance-setup-workspace .data-table select { min-width: 190px; width: 100%; }
       .finance-setup-workspace .finance-fixed-field { display: flex; flex-direction: column; align-self: start; min-width: 0; }
       .finance-setup-workspace .finance-fixed-field-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; margin-bottom: 6px; }
       .finance-setup-workspace .finance-fixed-status { white-space: nowrap; font-size: 11px; font-weight: 500; color: #64748b; }
