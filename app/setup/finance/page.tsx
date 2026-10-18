@@ -164,6 +164,7 @@ export default function FinanceSetupPage() {
   const [validation, setValidation] = useState<Validation | null>(null);
   const [zeroOpeningConfirmed, setZeroOpeningConfirmed] = useState(false);
   const [openingAction, setOpeningAction] = useState<"idle" | "checking" | "checked" | "posting" | "complete">("idle");
+  const [openingEdited, setOpeningEdited] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -344,7 +345,7 @@ export default function FinanceSetupPage() {
       const response = await fetch("/api/setup/workflow", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "post-opening", confirmZeroOpening: zeroOpeningConfirmed, entries: balances.filter(({ debit, credit }) => debit.trim() || credit.trim()).map(({ accountCode, debit, credit, label }) => ({ accountCode, debit: Number(debit || 0), credit: Number(credit || 0), label })) }) });
       const body = await response.json();
       if (!response.ok || !body.ok) throw new Error(body.error || "Opening balance posting failed");
-      setValidation(body); setOpeningAction(body.valid ? "complete" : "idle"); setMessage(body.valid ? `Opening balances saved${body.openingJournal?.code ? ` as journal ${body.openingJournal.code}` : " (no journal required)"}.` : "Opening balance requires correction before go-live.");
+      setValidation(body); setOpeningAction(body.valid ? "complete" : "idle"); if (body.valid) setOpeningEdited(false); setMessage(body.valid ? `Opening balances saved${body.openingJournal?.code ? ` as journal ${body.openingJournal.code}` : " (no journal required)"}.` : "Opening balance requires correction before go-live.");
       if (body.overview) setOverview(body.overview as Overview);
       else await load();
       return Boolean(body.valid);
@@ -678,20 +679,20 @@ export default function FinanceSetupPage() {
   };
   const changeOpeningAccount = (index: number, code: string) => {
     const account = ledgerAccountOptions.find((item) => item.accountCode === code);
-    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle");
+    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => current.map((row, rowIndex) => rowIndex === index
       ? { ...row, accountCode: code, label: account?.accountName || "" } : row));
   };
   const addOpeningRow = () => {
-    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle");
+    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => [...current, { accountCode: "", label: "", debit: "", credit: "" }]);
   };
   const removeOpeningRow = (index: number) => {
-    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle");
+    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => current.filter((_, rowIndex) => rowIndex !== index));
   };
   const updateBalance = (index: number, field: "debit" | "credit", value: string) => {
-    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle");
+    setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(true);
     setBalances((current) => current.map((row, rowIndex) => rowIndex === index
       ? { ...row, [field]: value, ...(value.trim() && Number(value) > 0 ? { [field === "debit" ? "credit" : "debit"]: "" } : {}) } : row));
   };
@@ -727,7 +728,7 @@ export default function FinanceSetupPage() {
     return Boolean(row && row.isActive);
   });
   const openingPositionReady = Boolean(config.openingMode && config.openingDate && (!config.firstTransactionDate || config.firstTransactionDate > config.openingDate) && (!config.firstTransactionDate || !config.plannedGoLiveDate || config.plannedGoLiveDate <= config.firstTransactionDate));
-  const openingBalanced = openingAction === "complete" || (openingAction === "idle" && Boolean(overview?.checks.openingValidated || overview?.openingValidated));
+  const openingBalanced = openingAction === "complete" || (!openingEdited && openingAction === "idle" && Boolean(overview?.checks.openingValidated || overview?.openingValidated));
   const existingBusinessMigrationReady = config.openingMode === "EXISTING_BUSINESS" && openingBalanced;
   const reviewReady = Boolean(overview?.readyForGoLive);
   const setupActivated = Boolean(overview?.setupActive || overview?.status === "ACTIVE");
@@ -948,7 +949,7 @@ export default function FinanceSetupPage() {
         ? <div className="form-wide conversion-box"><strong>New business opening control</strong><p className="small">Step 6 validates a zero balance when no opening amounts are entered. If cash, capital, loans or stock already exist, enter the actual amounts instead.</p></div>
         : <><div className="form-wide warning-panel"><strong>Existing business migration controls</strong><p className="small">Step 6 requires balanced opening GL entries. Reconcile customer and supplier outstanding items, inventory, fixed assets, bank, and applicable GST/tax figures to the opening trial balance. Balancing the GL alone does not certify subledger reconciliation.</p></div><div className="form-wide button-row">{existingBusinessMigrationReady ? <Link className="secondary-btn" href="/migration/opening-subledger">Open migration centre</Link> : <button type="button" className="secondary-btn" disabled>Migration centre unlocks after Step 6 balances</button>}</div></>}
     </section>}
-        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${validation?.valid ? "valid" : "invalid"}`}>{validation ? (validation.valid ? "BALANCED" : "CORRECT REQUIRED") : "NOT VALIDATED"}</span></div><div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
+        {step === 5 && <section className="panel table-wrap"><div className="form-title-row"><div><h2>6. Opening balance control</h2><p className="small">Enter ledger-level opening balances. The system blocks activation unless total debit equals total credit exactly.</p></div><span className={`coa-status-pill ${openingBalanced ? "valid" : "invalid"}`}>{openingBalanced ? "FINALIZED" : openingAction === "checked" ? "VALIDATED — NOT POSTED" : openingAction === "checking" ? "CHECKING" : openingAction === "posting" ? "POSTING" : "NOT FINALIZED"}</span></div><div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>Posting ledger (Chart of Accounts)</th><th>Debit (PGK)</th><th>Credit (PGK)</th><th>Action</th></tr></thead><tbody>{balances.map((row, index) => <tr key={index}>
         <td><select aria-label={`Opening account ${index + 1}`} value={row.accountCode} onChange={(event) => changeOpeningAccount(index, event.target.value)} disabled={busy}><option value="">Select active posting ledger</option>{ledgerAccountOptions.map((account) => <option key={account.accountId} value={account.accountCode}>{accountLabel(account)}</option>)}</select></td>
         <td><input aria-label={`Debit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.debit} onChange={(event) => updateBalance(index, "debit", event.target.value)} disabled={busy} /></td>
@@ -957,7 +958,7 @@ export default function FinanceSetupPage() {
         <tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th><th /></tr></tfoot></table></div>
       <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button></div>
       <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
-      {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => setZeroOpeningConfirmed(event.target.checked)} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="finance-opening-actions">
+      {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="finance-opening-actions">
         <div className="finance-opening-divider"><strong>New Business — Zero Opening</strong><span className="small">Use this path only when no opening balances exist.</span></div>
         {config.openingMode === "NEW_BUSINESS" && !enteredOpeningRows().length && <p className="small">Confirm the zero-opening declaration above, validate, then finalize without creating a GL journal.</p>}
         <div className="finance-opening-divider"><strong>Existing Business / Nonzero Opening</strong><span className="small">Validate ledger amounts before reviewing and posting the journal.</span></div>
