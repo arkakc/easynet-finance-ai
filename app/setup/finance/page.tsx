@@ -175,6 +175,12 @@ export default function FinanceSetupPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [openingResetDialog, setOpeningResetDialog] = useState(false);
+  const [openingResetEligible, setOpeningResetEligible] = useState(false);
+  const [openingResetBlockers, setOpeningResetBlockers] = useState<string[]>([]);
+  const [openingResetPassword, setOpeningResetPassword] = useState("");
+  const [openingResetPhrase, setOpeningResetPhrase] = useState("");
+  const [openingResetLoading, setOpeningResetLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState("");
   const [resetPhrase, setResetPhrase] = useState("");
   const [resetPreflight, setResetPreflight] = useState<{ eligible: boolean; blockers: string[] } | null>(null);
@@ -734,6 +740,30 @@ export default function FinanceSetupPage() {
     setBalances((current) => current.map((row, rowIndex) => rowIndex === index
       ? { ...row, accountCode: code, label: account?.accountName || "" } : row));
   };
+  const openPostedOpeningReset = async () => {
+    setOpeningResetLoading(true); setError("");
+    try {
+      const response = await fetch("/api/setup/opening-reset", { cache: "no-store" });
+      const body = await response.json() as { ok?: boolean; eligible?: boolean; blockers?: string[]; error?: string };
+      if (!response.ok || !body.ok) throw new Error(body.error || "Reset preflight unavailable");
+      setOpeningResetEligible(Boolean(body.eligible)); setOpeningResetBlockers(body.blockers || []);
+      setOpeningResetDialog(true); setOpeningResetPassword(""); setOpeningResetPhrase("");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Reset unavailable"); }
+    finally { setOpeningResetLoading(false); }
+  };
+  const confirmPostedOpeningReset = async () => {
+    setOpeningResetLoading(true); setError("");
+    try {
+      const response = await fetch("/api/setup/opening-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: openingResetPassword, confirmation: openingResetPhrase }) });
+      const body = await response.json() as { ok?: boolean; error?: string; blockers?: string[] };
+      if (!response.ok || !body.ok) throw new Error([body.error, ...(body.blockers || [])].filter(Boolean).join("; ") || "Opening reset rejected");
+      setBalances([]); setValidation(null); setZeroOpeningConfirmed(false); setOpeningAction("idle"); setOpeningEdited(false); setOpeningImportPreview(null); setOpeningImportFile(null);
+      setOpeningResetDialog(false); setOpeningResetPassword(""); setOpeningResetPhrase("");
+      await load();
+      setMessage("First-time opening journal reset completed. Import corrected opening balances and validate again.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Opening reset failed"); }
+    finally { setOpeningResetLoading(false); setOpeningResetPassword(""); }
+  };
   const resetOpeningForm = () => {
     if (!window.confirm("Clear all opening entries and restart Step 6? This only resets the on-screen draft. It will NOT delete or reverse saved/posted opening balances or journal entries.")) return;
     setBalances([]);
@@ -1060,14 +1090,23 @@ export default function FinanceSetupPage() {
           <table className="data-table"><thead><tr><th>Account</th><th>Debit (PGK)</th><th>Credit (PGK)</th></tr></thead><tbody>{openingImportPreview.map((row) => <tr key={row.accountCode}><td>{row.accountCode} — {row.label}</td><td>{row.debit || "—"}</td><td>{row.credit || "—"}</td></tr>)}</tbody></table>
           <button type="button" onClick={applyOpeningImport} disabled={busy}>Apply Validated Import to Form</button>
         </div>}
-      </div>}<div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
+      </div>}{openingResetDialog && <section className="panel" role="dialog" aria-modal="true" aria-label="Reset posted opening journal">
+        <h3>Administrator: Reset first-time Opening Journal</h3>
+        <p className="small">This operation deletes the original setup opening journal and its journal lines only after verified PostgreSQL backup. It resets Step 6 to allow a new import. Other financial records are never deleted. Reset is blocked when any dependent financial activity exists.</p>
+        {!openingResetEligible && <p className="warning-panel" role="alert">Reset blocked: {openingResetBlockers.join("; ") || "Not eligible"}</p>}
+        {openingResetEligible && <><label>Type RESET OPENING JOURNAL<input value={openingResetPhrase} onChange={(event) => setOpeningResetPhrase(event.target.value)} autoComplete="off" /></label>
+        <label>Current administrator password<input type="password" value={openingResetPassword} onChange={(event) => setOpeningResetPassword(event.target.value)} autoComplete="current-password" /></label></>}
+        <div className="button-row"><button className="secondary-btn" type="button" onClick={() => { setOpeningResetDialog(false); setOpeningResetPassword(""); }} disabled={openingResetLoading}>Cancel</button>
+        {openingResetEligible && <button type="button" onClick={() => void confirmPostedOpeningReset()} disabled={openingResetLoading || openingResetPhrase !== "RESET OPENING JOURNAL" || !openingResetPassword}>{openingResetLoading ? "Backing up and resetting…" : "Confirm Reset Posted Opening"}</button>}</div>
+      </section>}
+      <div className="finance-opening-summary"><span><strong>Debit:</strong> {money(totals.debit)}</span><span><strong>Credit:</strong> {money(totals.credit)}</span><span><strong>Difference:</strong> {money(totals.debit - totals.credit)}</span></div>
       <div className="table-wrap"><table className="data-table"><thead><tr><th>Posting ledger (Chart of Accounts)</th><th>Debit (PGK)</th><th>Credit (PGK)</th><th>Action</th></tr></thead><tbody>{balances.map((row, index) => <tr key={index}>
         <td><select aria-label={`Opening account ${index + 1}`} value={row.accountCode} onChange={(event) => changeOpeningAccount(index, event.target.value)} disabled={busy}><option value="">Select active posting ledger</option>{ledgerAccountOptions.map((account) => <option key={account.accountId} value={account.accountCode}>{accountLabel(account)}</option>)}</select></td>
         <td><input aria-label={`Debit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.debit} onChange={(event) => updateBalance(index, "debit", event.target.value)} disabled={busy} /></td>
         <td><input aria-label={`Credit for row ${index + 1}`} type="number" min="0" step="0.01" value={row.credit} onChange={(event) => updateBalance(index, "credit", event.target.value)} disabled={busy} /></td>
         <td><button type="button" className="secondary-btn" onClick={() => removeOpeningRow(index)} disabled={busy}>Remove</button></td></tr>)}</tbody>
         <tfoot><tr><th>Total</th><th>{money(totals.debit)}</th><th>{money(totals.credit)}</th><th /></tr></tfoot></table></div>
-      <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button><button type="button" className="secondary-btn" onClick={resetOpeningForm} disabled={busy}>Reset Opening Form</button></div>
+      <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button><button type="button" className="secondary-btn" onClick={resetOpeningForm} disabled={busy}>Reset Opening Form</button><button type="button" className="secondary-btn" onClick={() => void openPostedOpeningReset()} disabled={busy || openingResetLoading}>Admin: Reset Posted Opening</button></div>
       <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
       {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}{error && <p role="alert" className="small" style={{ color: "#b42318", marginTop: 12 }}>{error}</p>}
       <div className="finance-opening-actions">
