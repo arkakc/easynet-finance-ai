@@ -969,10 +969,13 @@ export default function FinanceSetupPage() {
       <div className="button-row" style={{ marginTop: 12 }}><button type="button" className="secondary-btn" onClick={addOpeningRow} disabled={busy || coaLoading}>+ Add opening ledger</button><button type="button" className="secondary-btn" onClick={resetOpeningForm} disabled={busy}>Reset Opening Form</button></div>
       <p className="small">Only active posting ledgers may be used. Select each account once. Blank rows are ignored until amounts are entered.</p>
       {validation?.errors.length ? <div className="warning-panel" style={{ marginTop: 16 }}>{validation.errors.map((item) => <div key={item}>{item}</div>)}</div> : null}{config.openingMode === "NEW_BUSINESS" && !balances.some((row) => Number(row.debit || 0) > 0 || Number(row.credit || 0) > 0) && <label className="finance-zero-opening-confirm"><input type="checkbox" checked={zeroOpeningConfirmed} onChange={(event) => { setZeroOpeningConfirmed(event.target.checked); setValidation(null); setOpeningAction("idle"); setOpeningEdited(true); }} /><span>I confirm the company has no opening assets, liabilities, equity or balances to migrate. No zero-value GL journal will be created.</span></label>}<div className="finance-opening-actions">
-        <div className="finance-opening-divider"><strong>New Business — Zero Opening</strong><span className="small">Use this path only when no opening balances exist.</span></div>
-        {config.openingMode === "NEW_BUSINESS" && !enteredOpeningRows().length && <p className="small">Confirm the zero-opening declaration above, validate, then finalize without creating a GL journal.</p>}
-        <div className="finance-opening-divider"><strong>Existing Business / Nonzero Opening</strong><span className="small">Validate ledger amounts before reviewing and posting the journal.</span></div>
-        {config.openingMode === "EXISTING_BUSINESS" && !enteredOpeningRows().length && <p className="small">Existing businesses must provide genuine opening balances; zero opening is not accepted.</p>}
+        {config.openingMode === "NEW_BUSINESS" ? <>
+          <div className="finance-opening-divider"><strong>New Business — Opening Position</strong><span className="small">Confirm zero opening or validate any actual opening balances.</span></div>
+          {!enteredOpeningRows().length && <p className="small">Confirm the zero-opening declaration above, validate, then finalize without creating a GL journal.</p>}
+        </> : <>
+          <div className="finance-opening-divider"><strong>Existing Business — Opening Journal</strong><span className="small">Validate ledger amounts before reviewing and posting the journal.</span></div>
+          {!enteredOpeningRows().length && <p className="small">Existing businesses must provide genuine opening balances; zero opening is not accepted.</p>}
+        </>}
         <div className="button-row" style={{ marginTop: 16 }}>
           {openingBalanced ? <span className="coa-status-pill valid" role="status">Opening position finalized — ready to continue</span>
           : openingAction === "checking" ? <button type="button" disabled>Checking balances…</button>
