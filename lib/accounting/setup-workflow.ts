@@ -214,7 +214,7 @@ function allowedPrismaTypes(types: readonly string[]) {
 
 export const OPENING_RECON_AREAS = ["ar", "ap", "bank", "inventory", "fixedAssets", "tax", "loans"] as const;
 export type OpeningReconArea = typeof OPENING_RECON_AREAS[number];
-type ReconEvidence = { reference: string; reviewer: string; reviewedAt: string; fingerprint: string };
+type ReconEvidence = { reference: string; reviewer: string; reviewedAt: string; fingerprint: string; documentId?: string };
 function openingFingerprint(entries: OpeningBalanceEntry[], date: string) {
   return createHash("sha256").update(JSON.stringify({ date, entries: [...entries].sort((a, b) => a.accountCode.localeCompare(b.accountCode)) })).digest("hex");
 }
@@ -237,6 +237,9 @@ export async function getOpeningReconciliationStatus(
   const fingerprint = openingFingerprint(entries, config.openingDate);
   let evidence: Partial<Record<OpeningReconArea, ReconEvidence>> = {};
   try { const parsed = JSON.parse(serializedEvidence || "{}"); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) evidence = parsed; } catch { /* Invalid evidence is not accepted. */ }
+  const storedDocumentIds = Object.values(evidence).map((item) => item?.documentId).filter((id): id is string => Boolean(id));
+  const documents = await client.document.findMany({ where: { id: { in: storedDocumentIds }, documentType: "OPENING_RECONCILIATION", status: { not: "ARCHIVED" } }, select: { id: true, fileUrl: true } });
+  const verifiedDocuments = new Set(documents.filter((document) => Boolean(document.fileUrl?.startsWith("/api/setup/opening-reconciliation-evidence?id="))).map((document) => document.id));
   const areas = OPENING_RECON_AREAS.map((area) => {
     const lines = entries.filter((entry) => openingArea(entry.accountCode, config) === area);
     const debit = Math.round(lines.reduce((sum, line) => sum + Number(line.debit || 0), 0) * 100);
@@ -244,8 +247,8 @@ export async function getOpeningReconciliationStatus(
     const amount = Math.abs(debit - credit) / 100;
     const required = lines.some((line) => Number(line.debit || 0) !== 0 || Number(line.credit || 0) !== 0);
     const proof = evidence[area];
-    const attested = Boolean(proof?.reference?.trim() && proof.fingerprint === fingerprint && proof.reviewer && proof.reviewedAt);
-    return { key: area, label: ({ ar: "Accounts receivable", ap: "Accounts payable", bank: "Bank and cash", inventory: "Inventory valuation", fixedAssets: "Fixed asset register", tax: "GST and tax balances", loans: "Loan schedules" } as const)[area], amount, required, passed: !required || attested, status: String(!required ? "NOT_APPLICABLE" : attested ? "ATTESTED" : "REQUIRED"), reference: attested ? proof!.reference : "", detail: required ? "Supporting schedule evidence and reviewer confirmation required" : "No nonzero opening position in this control group" };
+    const attested = Boolean(proof?.reference?.trim() && proof.fingerprint === fingerprint && proof.reviewer && proof.reviewedAt && proof.documentId && verifiedDocuments.has(proof.documentId));
+    return { key: area, label: ({ ar: "Accounts receivable", ap: "Accounts payable", bank: "Bank and cash", inventory: "Inventory valuation", fixedAssets: "Fixed asset register", tax: "GST and tax balances", loans: "Loan schedules" } as const)[area], amount, required, passed: !required || attested, status: String(!required ? "NOT_APPLICABLE" : attested ? "RECONCILED" : "PENDING"), reference: attested ? proof!.reference : "", detail: required ? "Upload supporting document and obtain authorized reviewer confirmation" : "No nonzero opening position in this control group" };
   });
   // AR/AP require actual imported opening schedule reconciliation; manual attestations cannot override these controls.
   const arAp = areas.filter((row) => row.key === "ar" || row.key === "ap");
@@ -255,7 +258,7 @@ export async function getOpeningReconciliationStatus(
       const row = areas.find((item) => item.key === area)!;
       const passed = position.openingGlBalance > 0 && Math.abs(position.remaining) < 0.005 && position.openingJournalId !== null;
       row.passed = passed;
-      row.status = passed ? "RECONCILED" : "BLOCKED";
+      row.status = passed ? "RECONCILED" : "PENDING";
       row.detail = `GL K${position.openingGlBalance.toFixed(2)}, imported K${position.importedSubledger.toFixed(2)}, remaining K${position.remaining.toFixed(2)}. ${position.message}`;
     }
   }
