@@ -895,7 +895,7 @@ export default function FinanceSetupPage() {
       </div>
       <div className="form-wide finance-opening-dates">
         <label className="finance-opening-date-field">
-          <span className="finance-opening-date-label"><span>Opening balance as-of date</span><span className="finance-opening-required">Required</span></span>
+          <span className="finance-opening-date-label"><span>Opening balance as-of date</span></span>
           <input type="date" value={config.openingDate} onChange={(event) => patch("openingDate", event.target.value)} required />
           <span className="small finance-opening-date-help">Date of the opening balances being recorded.</span>
         </label>
