@@ -353,6 +353,7 @@ export async function getSetupOverview(client: DbClient = prisma) {
     : null;
   const hasOpeningJournal = Boolean(openingJournal && openingJournal.date.toISOString().slice(0, 10) === config.openingDate);
   const migrationReconciled = openingReconciliation.reconciled && (config.openingMode !== "EXISTING_BUSINESS" || hasOpeningJournal);
+  const openingFinalized = openingValidated && (config.openingMode === "EXISTING_BUSINESS" ? hasOpeningJournal : (openingBalanceEntries.length === 0 ? zeroOpeningConfirmed : Boolean(await client.journalHeader.findFirst({ where: { sourceDocType: "OPENING", sourceDocId: SETUP_OPENING_SOURCE_DOC_ID, status: "POSTED" }, select: { id: true } }))));
   const rawStatus = valueOf(settings, "setup_status", configurationReady ? "CONFIGURATION" : "NEW_INSTALLATION").toUpperCase();
   const completedStepIndex = parseSetupStepIndex(valueOf(settings, "setup_completed_step_index", "-1"));
   const setupActive = rawStatus === "ACTIVE" && completedStepIndex >= SETUP_FINAL_STEP_INDEX;
@@ -372,12 +373,14 @@ export async function getSetupOverview(client: DbClient = prisma) {
       mappings: mappingsValid && costCentersValid,
       costCenters: costCentersValid,
       openingValidated,
+      openingFinalized,
       firstTransactionDateReady,
       openingConfirmed,
       migrationReconciled,
     },
     configurationReady,
     openingValidated,
+    openingFinalized,
     openingBalanceEntries,
     openingReconciliation: { ...openingReconciliation, reconciled: migrationReconciled, hasOpeningJournal: config.openingMode !== "EXISTING_BUSINESS" || hasOpeningJournal },
     readyForGoLive: configurationReady && coaCount > 0 && openingValidated && firstTransactionDateReady && openingConfirmed && migrationReconciled,
