@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/auth";
-import { getSetupOverview, markSetupStepComplete, postOpeningBalanceJournal, saveSetupConfig, validateOpeningBalances, type OpeningBalanceEntry, OPENING_RECON_AREAS } from "@/lib/accounting/setup-workflow";
+import { getSetupOverview, markSetupStepComplete, postOpeningBalanceJournal, saveSetupConfig, validateOpeningBalances, type OpeningBalanceEntry } from "@/lib/accounting/setup-workflow";
 import { prisma } from "@/src/lib/prisma";
 
 export async function GET() {
@@ -40,29 +40,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ...result, openingJournal, overview });
     }
     if (body.action === "confirm-opening-reconciliation") {
-      const overview = await getSetupOverview();
-      if (overview.config.openingMode !== "EXISTING_BUSINESS" || !overview.openingValidated) {
-        return NextResponse.json({ ok: false, error: "Posted and validated existing-business opening balances are required." }, { status: 409 });
-      }
-      const key = String(body.reconArea || "");
-      const area = overview.openingReconciliation.areas.find((item) => item.key === key);
-      if (!OPENING_RECON_AREAS.includes(key as typeof OPENING_RECON_AREAS[number]) || !area || !area.required || ["ar", "ap"].includes(key)) {
-        return NextResponse.json({ ok: false, error: "This reconciliation cannot be manually approved." }, { status: 400 });
-      }
-      const reference = String(body.evidenceReference || "").trim();
-      if (reference.length < 8 || reference.length > 250) return NextResponse.json({ ok: false, error: "Provide a real supporting statement or schedule reference (8-250 characters)." }, { status: 400 });
-      await prisma.$transaction(async (tx) => {
-        const [stored, opening] = await Promise.all([
-          tx.globalSettings.findUnique({ where: { key: "opening_reconciliation_evidence" } }),
-          tx.globalSettings.findUnique({ where: { key: "opening_balance_entries" } }),
-        ]);
-        if (String(opening?.value || "[]") !== JSON.stringify(overview.openingBalanceEntries)) throw new Error("Opening balances changed; refresh the review.");
-        let evidence: Record<string, unknown> = {};
-        try { evidence = JSON.parse(stored?.value || "{}"); } catch { /* replace invalid evidence */ }
-        evidence[key] = { reference, reviewer: actor.email, reviewedAt: new Date().toISOString(), fingerprint: overview.openingReconciliation.fingerprint };
-        await tx.globalSettings.upsert({ where: { key: "opening_reconciliation_evidence" }, create: { key: "opening_reconciliation_evidence", value: JSON.stringify(evidence), updatedBy: actor.email }, update: { value: JSON.stringify(evidence), updatedBy: actor.email, updatedAt: new Date() } });
-      });
-      return NextResponse.json({ ok: true, ...(await getSetupOverview()) });
+      return NextResponse.json({ ok: false, error: "Reference-only approval has been replaced. Upload a supporting document in Step 7." }, { status: 410 });
     }
     if (body.action === "mark-review-complete") {
       const overview = await getSetupOverview();
