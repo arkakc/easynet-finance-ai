@@ -36,6 +36,7 @@ model User {
   auditLogs         AuditLog[]
   favorites         Favorite[]
   timeEntries       TimeEntry[]
+  erpRoleAssignments ErpUserRoleAssignment[]
 }
 
 enum Role {
@@ -2064,4 +2065,34 @@ model ErpApprovalPolicyVersion {
 
   @@unique([companyId, version])
   @@index([companyId, status])
+}
+
+ 
+// Company-scoped, multi-role grants. No automatic migration of old broad roles.
+model ErpUserRoleAssignment {
+  id          String   @id @default(cuid())
+  companyId   String
+  userId      String
+  role        String
+  isActive    Boolean  @default(true)
+  grantedById String
+  grantedAt   DateTime @default(now())
+  revokedAt   DateTime?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@unique([companyId, userId, role])
+  @@index([companyId, userId, isActive])
+}
+
+model ErpCompanyPrivilegeOverride {
+  id           String   @id @default(cuid())
+  companyId    String
+  role         String
+  resourceKind String
+  resourceName String
+  action       String
+  allowed      Boolean
+  updatedById  String
+  updatedAt    DateTime @updatedAt
+  @@unique([companyId, role, resourceKind, resourceName, action])
+  @@index([companyId, role])
 }
