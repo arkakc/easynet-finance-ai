@@ -1,8 +1,8 @@
 import type { WorkspaceAction, WorkspaceId } from "@/lib/workspaces/module-registry";
 
 export const COMMERCIAL_CATEGORY_ORDER = [
-  "All", "Quotations", "Orders", "Fulfilment", "Billing",
-  "Payments", "Returns", "Bulk Operations", "Registers", "Masters", "Projects",
+  "Quotations", "Orders", "Fulfilment", "Billing",
+  "Payments", "Returns", "Bulk Operations", "Registers", "Masters", "Projects", "All",
 ] as const;
 
 type CommercialCategory = Exclude<(typeof COMMERCIAL_CATEGORY_ORDER)[number], "All">;
@@ -27,7 +27,7 @@ export function commercialCategory(action: Pick<WorkspaceAction, "title" | "href
 
 export function organizeCommercialActions(actions: readonly WorkspaceAction[], id: WorkspaceId): WorkspaceAction[] {
   if (id !== "sales" && id !== "purchases") return [...actions];
-  const order = COMMERCIAL_CATEGORY_ORDER.slice(1);
+  const order = COMMERCIAL_CATEGORY_ORDER.filter(category => category !== "All");
   return actions.map(action => ({ ...action, section: commercialCategory(action) }))
     .sort((a, b) => order.indexOf(a.section as CommercialCategory) - order.indexOf(b.section as CommercialCategory));
 }
