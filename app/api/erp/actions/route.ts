@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { prisma } from "@/src/lib/prisma";
-import { requireRequestPermission, type Permission } from "@/lib/auth";
+import { requireValidatedRequestPermission, type Permission } from "@/lib/auth";
 import { POST as approvalsPost } from "@/app/api/approvals/route";
 import { POST as assetsPost } from "@/app/api/assets/route";
 import { POST as budgetsPost } from "@/app/api/budgets/route";
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     }
 
     const body = incoming.body || {};
-    requireRequestPermission(request, permissionFor(incoming.target, body));
+    await requireValidatedRequestPermission(request, permissionFor(incoming.target, body));
     if (incoming.target === "approvals") {
       const payload = (body.payload || {}) as Record<string, unknown>;
       const type = String(payload.recordType || "");
