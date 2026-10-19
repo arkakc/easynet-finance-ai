@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { executeAction } from "@/lib/ui/action-contract";
 
-type Receipt = { id: string; code: string; date: string; supplier: string; orderCode: string };
+type Receipt = { id: string; code: string; date: string; supplier: string; orderCode: string; items: Array<{ itemId: string; qty: number }> };
 type ReturnRow = { id: string; code: string; receiptId: string; status: string; reason: string; lines: Array<{ itemId: string; qty: number }>; createdAt: string };
 type Data = { ok: boolean; error?: string; returns: ReturnRow[]; receipts: Receipt[] };
 export default function PurchaseReturnsClient() {
@@ -56,8 +56,8 @@ export default function PurchaseReturnsClient() {
       <h2>New Purchase Return Request</h2>
       <p className="small">Draft/approval UAT workflow only. Supplier Debit Note, reverse GST and inventory accounting posting are not active. No stock is moved by this form.</p>
       <div className="form-grid">
-        <label>Posted Goods Receipt (GRN)<select value={receiptId} onChange={event => setReceiptId(event.target.value)}><option value="">Select posted GRN</option>{(data?.receipts || []).map(receipt => <option key={receipt.id} value={receipt.id}>{receipt.code} · {receipt.supplier} · {receipt.orderCode}</option>)}</select></label>
-        <label>Item ID (from posted GRN)<input value={itemId} onChange={event => setItemId(event.target.value)} placeholder="Item record ID" /></label>
+        <label>Posted Goods Receipt (GRN)<select value={receiptId} onChange={event => { setReceiptId(event.target.value); setItemId(""); }}><option value="">Select posted GRN</option>{(data?.receipts || []).map(receipt => <option key={receipt.id} value={receipt.id}>{receipt.code} · {receipt.supplier} · {receipt.orderCode}</option>)}</select></label>
+        <label>Received item<select value={itemId} onChange={event => setItemId(event.target.value)}><option value="">Select received item</option>{(data?.receipts.find(row => row.id === receiptId)?.items || []).map(line => <option key={line.itemId} value={line.itemId}>{line.itemId} — received {line.qty}</option>)}</select></label>
         <label>Return quantity<input type="number" min="0.0001" step="any" value={quantity} onChange={event => setQuantity(event.target.value)} /></label>
         <label>Reason<input value={reason} onChange={event => setReason(event.target.value)} placeholder="Explain the returned goods" /></label>
       </div>
