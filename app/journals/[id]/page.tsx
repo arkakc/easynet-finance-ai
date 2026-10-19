@@ -6,6 +6,7 @@ import { prisma } from "@/src/lib/prisma";
 import JournalApprovalButton from "@/app/components/journal-approval-button";
 import JournalPreApprovalActions from "@/app/components/journal-preapproval-actions";
 import JournalReversalButton from "@/app/components/journal-reversal-button";
+import { journalAccountDirection } from "@/lib/accounting/journal-account-direction";
 
 const money = (value: unknown, currency: string) =>
   new Intl.NumberFormat("en-PG", { style: "currency", currency, minimumFractionDigits: 2 }).format(Number(value || 0));
@@ -77,6 +78,13 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
     && !reversalJournal
     && user.permissions.includes("post.approve");
 
+  const effect = (type: string, side: "debit" | "credit", value: unknown) => {
+    if (!Number(value)) return null;
+    const direction = journalAccountDirection(type, side);
+    if (!direction) return null;
+    return <span title={direction.text} aria-label={direction.text} style={{ color: direction.accountIncrease ? "#15803d" : "#dc2626", fontWeight: 600, marginInlineStart: 5 }}>{direction.arrow}<span className="sr-only"> {direction.text}</span></span>;
+  };
+
   const baseCurrency = String(header.baseCurrency || "PGK").toUpperCase();
   const sourceCurrency = String(header.currency || baseCurrency).toUpperCase();
   const debit = header.lines.reduce((sum, row) => sum + Number(row.debit), 0);
@@ -127,6 +135,7 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
           {originalJournal ? <div><span>Reversal Of</span><strong><Link href={`/journals/${originalJournal.code}`}>{originalJournal.code}</Link> · {originalJournal.sourceDocType || "JOURNAL"} · {originalJournal.sourceDocId || "—"}</strong></div> : null}
         </div>
 
+        <p className="small">↑ account balance increases · ↓ account balance decreases. For contra accounts, hover or focus on the arrow to see the impact on the parent account type. Indicators are informational and do not change journal posting.</p>
         <div className="document-lines">
           <table className="data-table">
             <thead>
@@ -152,10 +161,10 @@ export default async function JournalDetailPage({ params }: { params: Promise<{ 
                   <td>{line.projectId ? projectMap.get(line.projectId) || line.projectId : "—"}</td>
                   <td>{line.description || "—"}</td>
                   <td>{String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase()}</td>
-                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionDebit || 0)||(currency===baseCurrency?Number(line.debit||0):0);return value?money(value,currency):"—";})()}</td>
-                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionCredit || 0)||(currency===baseCurrency?Number(line.credit||0):0);return value?money(value,currency):"—";})()}</td>
-                  <td>{Number(line.debit) ? money(line.debit, baseCurrency) : "—"}</td>
-                  <td>{Number(line.credit) ? money(line.credit, baseCurrency) : "—"}</td>
+                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionDebit || 0)||(currency===baseCurrency?Number(line.debit||0):0);return value?<>{money(value,currency)}{effect(line.account.type,"debit",value)}</>:"—";})()}</td>
+                  <td>{(()=>{const currency=String(line.transactionCurrency || line.currency || baseCurrency).toUpperCase();const value=Number(line.transactionCredit || 0)||(currency===baseCurrency?Number(line.credit||0):0);return value?<>{money(value,currency)}{effect(line.account.type,"credit",value)}</>:"—";})()}</td>
+                  <td>{Number(line.debit) ? <>{money(line.debit, baseCurrency)}{effect(line.account.type, "debit", line.debit)}</> : "—"}</td>
+                  <td>{Number(line.credit) ? <>{money(line.credit, baseCurrency)}{effect(line.account.type, "credit", line.credit)}</> : "—"}</td>
                 </tr>
               ))}
             </tbody>
