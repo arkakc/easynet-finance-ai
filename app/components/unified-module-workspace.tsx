@@ -10,7 +10,13 @@ type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; avail
 
 export default function UnifiedModuleWorkspace({ workspace, actions, availableModules, recentDocuments, streamlined = false }: Props) {
   const [query, setQuery] = useState("");
-  const [section, setSection] = useState(() => workspace.id === "sales" || workspace.id === "purchases" ? "Quotations" : "All");
+  const [section, setSection] = useState(() => {
+    if (workspace.id === "sales" || workspace.id === "purchases") {
+      const available = organizeCommercialActions(actions, workspace.id);
+      return COMMERCIAL_CATEGORY_ORDER.find(name => name !== "All" && available.some(action => action.section === name)) || "All";
+    }
+    return actions.find(action => action.section !== "All")?.section || "All";
+  });
   const [registerQuery, setRegisterQuery] = useState("");
   const [registerKind, setRegisterKind] = useState("All");
   const [registerStatus, setRegisterStatus] = useState("All");
@@ -19,7 +25,7 @@ export default function UnifiedModuleWorkspace({ workspace, actions, availableMo
   const pageSize = 10;
   const commercial = workspace.id === "sales" || workspace.id === "purchases";
   const orderedActions = useMemo(() => organizeCommercialActions(actions, workspace.id), [actions, workspace.id]);
-  const sections = useMemo(() => commercial ? [...COMMERCIAL_CATEGORY_ORDER] : ["All", ...new Set(orderedActions.map(action => action.section))], [commercial, orderedActions]);
+  const sections = useMemo(() => commercial ? [...COMMERCIAL_CATEGORY_ORDER] : [...new Set(orderedActions.map(action => action.section).filter(name => name !== "All")), "All"], [commercial, orderedActions]);
   const visible = useMemo(() => orderedActions.filter(action => {
     if (section !== "All" && action.section !== section) return false;
     const needle = query.toLocaleLowerCase().trim();
