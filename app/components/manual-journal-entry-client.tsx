@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AccountPicker from "@/app/components/account-picker";
+import { journalAccountDirection } from "@/lib/accounting/journal-account-direction";
 
 export type ManualJournalAccount = {
   accountId: string;
@@ -130,6 +131,9 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
     };
   }, [lines]);
 
+  const accountTypes = useMemo(() => new Map(postingAccounts.flatMap((account) => [[account.accountId, account.accountType || ""], [account.postingAccountId || account.accountId, account.accountType || ""]])), [postingAccounts]);
+  const direction = (accountId: string, side: "debit" | "credit", value: string) => Number(value) > 0 ? journalAccountDirection(accountTypes.get(accountId), side) : null;
+
   const canPost = !busy
     && postingDate
     && reference.trim().length >= 3
@@ -214,6 +218,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
           Remarks
           <textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} disabled={busy} placeholder="Write the business reason, explanation, or evidence note for this manual journal." />
         </label>
+        <p className="small form-wide">Accounting direction preview: ↑ means the named account increases; ↓ means it decreases. Contra accounts show both the contra balance and its opposite effect on the parent category. This preview does not post a journal.</p>
         <div className="form-wide table-wrap">
           <table className="data-table">
             <thead>
@@ -223,6 +228,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
                 <th>Description</th>
                 <th>Debit ({baseCurrency})</th>
                 <th>Credit ({baseCurrency})</th>
+                <th>Effect ↑/↓</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -244,6 +250,10 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
                   <td><input value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} disabled={busy} /></td>
                   <td><input type="number" min="0" step="0.01" value={line.debit} onChange={(event) => updateLine(index, { debit: event.target.value, credit: event.target.value ? "" : line.credit })} disabled={busy} /></td>
                   <td><input type="number" min="0" step="0.01" value={line.credit} onChange={(event) => updateLine(index, { credit: event.target.value, debit: event.target.value ? "" : line.debit })} disabled={busy} /></td>
+                  <td>{(() => {
+                    const entryDirection = direction(line.accountId, Number(line.debit) > 0 ? "debit" : "credit", Number(line.debit) > 0 ? line.debit : line.credit);
+                    return entryDirection ? <span title={entryDirection.text} aria-label={entryDirection.text} style={{ color: entryDirection.accountIncrease ? "#15803d" : "#dc2626", fontWeight: 600 }}>{entryDirection.text}</span> : "—";
+                  })()}</td>
                   <td><button type="button" className="secondary" disabled={busy || lines.length <= 2} onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}>Remove</button></td>
                 </tr>
               ))}
@@ -253,7 +263,7 @@ export function ManualJournalEntryClient({ accounts, baseCurrency, defaultPostin
                 <th colSpan={3}>Total</th>
                 <th>{money(totals.debit, baseCurrency)}</th>
                 <th>{money(totals.credit, baseCurrency)}</th>
-                <th>{Math.abs(totals.difference) < 0.01 ? "Balanced" : `Diff ${money(Math.abs(totals.difference), baseCurrency)}`}</th>
+                <th colSpan={2}>{Math.abs(totals.difference) < 0.01 ? "Balanced" : `Diff ${money(Math.abs(totals.difference), baseCurrency)}`}</th>
               </tr>
             </tfoot>
           </table>
