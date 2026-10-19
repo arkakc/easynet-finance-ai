@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS "PurchaseReturn" (
   "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "PurchaseReturn_pkey" PRIMARY KEY ("id")
 );
+ALTER TABLE "PurchaseReturn" ADD COLUMN IF NOT EXISTS "requestKey" TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS "PurchaseReturn_requestKey_key" ON "PurchaseReturn"("requestKey");
 CREATE UNIQUE INDEX IF NOT EXISTS "PurchaseReturn_code_key" ON "PurchaseReturn"("code");
 CREATE INDEX IF NOT EXISTS "PurchaseReturn_receiptId_status_idx" ON "PurchaseReturn"("receiptId", "status");
 CREATE INDEX IF NOT EXISTS "PurchaseReturn_purchaseOrderId_idx" ON "PurchaseReturn"("purchaseOrderId");
