@@ -14,6 +14,7 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:backup": "tsx scripts/database/backup.ts",
+    "db:purchase-return:migrate": "tsx scripts/database/apply-purchase-return-migration.ts",
     "db:reconcile:snapshot": "tsx scripts/database/reconciliation-snapshot.ts",
     "db:sequence:preview": "tsx scripts/database/repair-empty-document-series.ts",
     "db:sequence:repair": "tsx scripts/database/repair-empty-document-series.ts --apply",
