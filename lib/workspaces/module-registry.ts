@@ -43,6 +43,7 @@ export const workspaces: Record<WorkspaceId, WorkspaceDefinition> = {
     { title: "PO / GRN / Bill Reconciliation", description: "Read-only ordered, received and billed quantity exceptions", href: "/reports/purchase-quantity-reconciliation", section: "Bills", permission: "reports.read" },
     { title: "Supplier Bills", description: "Three-way match, input GST and accounts payable", href: transaction("purchase", "supplierInvoice"), section: "Bills", permission: "purchase.read" },
     { title: "Supplier Payments", description: "Supplier advances, allocations and settlement", href: transaction("purchase", "purchasePayment"), section: "Payments", permission: "purchase.read" },
+    { title: "Purchase Returns", description: "Create, approve and track supplier return requests from posted GRNs; financial posting pending", href: "/purchases/returns", section: "Returns", permission: "purchase.read" },
     { title: "Suppliers", description: "Supplier master and contacts", href: "/suppliers", section: "Masters", permission: "purchase.read" },
     { title: "Expenses", description: "Other operating purchase costs", href: "/transactions?module=expense&tab=expense&mode=list", section: "Bills", permission: "purchase.write" },
   ]},
