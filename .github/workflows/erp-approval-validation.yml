@@ -1,0 +1,28 @@
+name: ERP Approval Validation
+on:
+  pull_request:
+    paths:
+      - "lib/workflow/**"
+      - "tests/workflow/**"
+      - "app/approvals/workflow-preview/**"
+      - "prisma/schema.prisma"
+      - ".github/workflows/erp-approval-validation.yml"
+  workflow_dispatch:
+
+jobs:
+  approval-logic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL_POSTGRES: "postgresql://ci:ci@127.0.0.1:5432/easynet_ci?schema=public"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npm run db:runtime-client
+      - run: npx tsx --test tests/workflow/*.test.ts
+      - run: npm run typecheck
