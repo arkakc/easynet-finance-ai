@@ -8,8 +8,8 @@ const action = (title: string, section: string, href = "/example"): WorkspaceAct
 
 test("Sales and Purchases share the same category order", () => {
   assert.deepEqual(COMMERCIAL_CATEGORY_ORDER, [
-    "All", "Quotations", "Orders", "Fulfilment", "Billing",
-    "Payments", "Returns", "Bulk Operations", "Registers", "Masters", "Projects",
+    "Quotations", "Orders", "Fulfilment", "Billing",
+    "Payments", "Returns", "Bulk Operations", "Registers", "Masters", "Projects", "All",
   ]);
 });
 
