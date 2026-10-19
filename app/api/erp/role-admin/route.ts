@@ -24,7 +24,7 @@ export async function POST(request:Request) {
     where:{companyId_userId_role:grant},create:{...grant,grantedById:actor.userId!,isActive:input.action==="GRANT",revokedAt:input.action==="REVOKE"?new Date():null},
     update:{isActive:input.action==="GRANT",revokedAt:input.action==="REVOKE"?new Date():null,grantedById:actor.userId!,grantedAt:new Date()},
    });
-   await tx.auditLog.create({data:{userId:actor.userId!,action:"ERP_ROLE_"+input.action,entityType:"ErpUserRoleAssignment",entityId:row.id,newValues:JSON.stringify({companyId:grant.companyId,userId:grant.userId,role:grant.role,action:input.action})}});
+   await tx.auditLog.create({data:{userId:actor.userId!,action:"ERP_ROLE_"+input.action,entityType:"ErpUserRoleAssignment",entityId:row.id,metadata:JSON.stringify({companyId:grant.companyId,userId:grant.userId,role:grant.role,action:input.action})}});
    await tx.user.update({where:{id:grant.userId},data:{sessionVersion:{increment:1}}});
    return {id:row.id,active:row.isActive};
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
