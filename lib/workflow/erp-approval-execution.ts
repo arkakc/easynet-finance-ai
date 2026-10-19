@@ -32,7 +32,8 @@ export async function executeApprovalDecision(command: Command) {
     if (record.status !== command.expectedStatus) throw new Error("Stale approval case state");
     const status = record.status as WorkflowStatus;
     const kind = record.documentKind as DocumentKind;
-    const reviewers = record.events.filter((e) => e.action === "REVIEW").map((e) => e.actorUserId);
+    const latestSubmitIndex = record.events.map((e) => e.action).lastIndexOf("SUBMIT");
+    const reviewers = record.events.slice(latestSubmitIndex + 1).filter((e) => e.action === "REVIEW").map((e) => e.actorUserId);
     const approvers = record.steps.filter((s) => s.decision === "APPROVED").map((s) => s.decidedByUserId).filter((s): s is string => Boolean(s));
     const reviewContext = {
       documentKind: kind, status, amountPgk: Number(record.amountPgk),
@@ -49,6 +50,8 @@ export async function executeApprovalDecision(command: Command) {
       : command.decision === "RETURN" || command.decision === "REJECT" ? "RETURN" : policyAction);
     if (!check.allowed) throw new Error(check.reason);
 
+    // No approval-cycle reset exists yet; fail closed after a partial approval.
+    if ((command.decision === "RETURN" || command.decision === "REJECT") && record.steps.some((s) => s.decision !== "PENDING")) throw new Error("Controlled approval reset required");
     let remaining = 0;
     if (command.decision === "APPROVE") {
       const required = requiredApproverRoles(kind, Number(record.amountPgk));
