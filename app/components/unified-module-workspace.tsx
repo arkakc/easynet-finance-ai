@@ -10,7 +10,7 @@ type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; avail
 
 export default function UnifiedModuleWorkspace({ workspace, actions, availableModules, recentDocuments, streamlined = false }: Props) {
   const [query, setQuery] = useState("");
-  const [section, setSection] = useState("All");
+  const [section, setSection] = useState(() => workspace.id === "sales" || workspace.id === "purchases" ? "Quotations" : "All");
   const [registerQuery, setRegisterQuery] = useState("");
   const [registerKind, setRegisterKind] = useState("All");
   const [registerStatus, setRegisterStatus] = useState("All");
