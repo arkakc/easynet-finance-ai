@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { executeAction } from "@/lib/ui/action-contract";
 
 type Receipt = { id: string; code: string; date: string; supplier: string; orderCode: string; items: Array<{ itemId: string; qty: number }> };
@@ -11,6 +11,8 @@ export default function PurchaseReturnsClient() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const requestAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
   const [receiptId, setReceiptId] = useState("");
   const [reason, setReason] = useState("");
   const [itemId, setItemId] = useState("");
@@ -24,17 +26,22 @@ export default function PurchaseReturnsClient() {
   useEffect(() => { void refresh().catch(reason => setError(String(reason))); }, [refresh]);
   const create = async () => {
     if (!receiptId || !itemId.trim() || !reason.trim() || !(Number(quantity) > 0)) { setError("Select posted GRN, provide Item ID, positive quantity and return reason."); return; }
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true); setError(""); setMessage("");
+    const fingerprint = JSON.stringify({ receiptId, reason, itemId: itemId.trim(), qty: Number(quantity) });
+    if (requestAttempt.current?.fingerprint !== fingerprint) requestAttempt.current = { fingerprint, key: crypto.randomUUID() };
     try {
       const result = await executeAction<{ ok: boolean; error?: string; message?: string }>("/api/erp/purchase-return", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create", receiptId, reason, lines: [{ itemId: itemId.trim(), qty: Number(quantity) }] }),
+        body: JSON.stringify({ action: "create", receiptId, requestKey: requestAttempt.current!.key, reason, lines: [{ itemId: itemId.trim(), qty: Number(quantity) }] }),
       }, "Create Purchase Return");
       await refresh();
+      requestAttempt.current = null;
       setReason(""); setItemId(""); setQuantity("1");
       setMessage(result.message || "Draft saved.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Create failed"); }
-    finally { setBusy(false); }
+    finally { setBusy(false); submitting.current = false; }
   };
   const action = async (id: string, type: "approve" | "cancel") => {
     setBusy(true); setError(""); setMessage("");

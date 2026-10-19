@@ -434,6 +434,7 @@ model PurchaseReceipt {
 
 model PurchaseReturn {
   id             String   @id @default(cuid())
+  requestKey     String?  @unique
   code           String   @unique
   receiptId      String
   purchaseOrderId String

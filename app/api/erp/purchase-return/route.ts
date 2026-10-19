@@ -9,6 +9,7 @@ const lineSchema = z.object({ itemId: z.string().trim().min(1), qty: z.coerce.nu
 const createSchema = z.object({
   action: z.literal("create"),
   receiptId: z.string().trim().min(1),
+  requestKey: z.string().uuid(),
   reason: z.string().trim().min(8).max(500),
   lines: z.array(lineSchema).min(1).max(100),
 });
@@ -55,6 +56,8 @@ export async function POST(request: Request) {
     if (data.action === "create") {
       if (new Set(data.lines.map(line => line.itemId)).size !== data.lines.length) throw new Error("Duplicate item lines are not allowed.");
       return NextResponse.json(await prisma.$transaction(async tx => {
+        const prior = await tx.purchaseReturn.findUnique({ where: { requestKey: data.requestKey } });
+        if (prior) return { ok: true, existing: true, purchaseReturn: { id: prior.id, code: prior.code, status: prior.status }, message: "Existing request loaded without duplicate." };
         const receipt = await tx.purchaseReceipt.findFirst({
           where: { OR: [{ id: data.receiptId }, { code: data.receiptId }] },
         });
@@ -74,7 +77,7 @@ export async function POST(request: Request) {
         }
         const code = "PRET-" + randomUUID().slice(0, 12).toUpperCase();
         const saved = await tx.purchaseReturn.create({ data: {
-          code, receiptId: receipt.id, purchaseOrderId: order.id, supplierId: order.supplierId,
+          code, requestKey: data.requestKey, receiptId: receipt.id, purchaseOrderId: order.id, supplierId: order.supplierId,
           warehouseId: receipt.warehouseId, reason: data.reason, linesJson: JSON.stringify(data.lines),
           createdBy: actor.email,
         } });
