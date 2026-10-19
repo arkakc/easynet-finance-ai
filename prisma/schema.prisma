@@ -1997,3 +1997,71 @@ model PosSession {
   @@index([cashierId])
   @@index([status])
 }
+
+
+// ERP approval workflow persistence (opt-in; existing document posting is unchanged).
+// Company scope is explicit because legacy document types are held in multiple stores.
+model ErpApprovalCase {
+  id              String   @id @default(cuid())
+  companyId       String
+  documentKind    String
+  documentId      String
+  creatorUserId   String
+  status          String   @default("DRAFT")
+  amountPgk       Decimal  @db.Decimal(18, 2)
+  policyVersion   Int
+  activeStepIndex Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  steps           ErpApprovalStep[]
+  events          ErpApprovalEvent[]
+
+  @@unique([companyId, documentKind, documentId])
+  @@index([companyId, status, updatedAt])
+}
+
+model ErpApprovalStep {
+  id               String   @id @default(cuid())
+  caseId           String
+  ordinal          Int
+  requiredRole     String
+  assignedUserId   String?
+  decidedByUserId  String?
+  decision         String   @default("PENDING")
+  decisionNote     String?
+  decidedAt        DateTime?
+  createdAt        DateTime @default(now())
+  approvalCase     ErpApprovalCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, ordinal])
+  @@index([assignedUserId, decision])
+}
+
+model ErpApprovalEvent {
+  id           String   @id @default(cuid())
+  caseId       String
+  actorUserId  String
+  action       String
+  fromStatus   String
+  toStatus     String
+  note         String?
+  payloadJson  Json?
+  occurredAt   DateTime @default(now())
+  approvalCase ErpApprovalCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, occurredAt])
+}
+
+model ErpApprovalPolicyVersion {
+  id            String   @id @default(cuid())
+  companyId     String
+  version       Int
+  status        String   @default("DRAFT")
+  limitsJson    Json
+  approvedById  String?
+  approvedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  @@unique([companyId, version])
+  @@index([companyId, status])
+}
