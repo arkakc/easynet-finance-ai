@@ -32,5 +32,6 @@ export function canAccessCompanyResource(
   if (!roles.length || !hasErpPrivilege(roles,resource,action)) return false;
   const key=(role:string)=>overrides.find(x=>x.companyId===actor.companyId && x.role===role
     && x.resourceKind===resource.kind && x.resourceName===resource.name && x.action===action);
-  return roles.some(role=>hasErpPrivilege([role],resource,action) && key(role)?.allowed!==false);
+  if (roles.some(role=>key(role)?.allowed===false)) return false;
+  return roles.some(role=>hasErpPrivilege([role],resource,action));
 }
