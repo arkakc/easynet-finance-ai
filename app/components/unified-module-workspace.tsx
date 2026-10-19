@@ -11,7 +11,10 @@ type Props = { workspace: WorkspaceDefinition; actions: WorkspaceAction[]; avail
 export default function UnifiedModuleWorkspace({ workspace, actions, availableModules, recentDocuments, streamlined = false }: Props) {
   const [query, setQuery] = useState("");
   const [section, setSection] = useState(() => {
-    if (workspace.id === "sales" || workspace.id === "purchases") return actions.some(action => action.section === "Quotations") ? "Quotations" : "All";
+    if (workspace.id === "sales" || workspace.id === "purchases") {
+      const available = organizeCommercialActions(actions, workspace.id);
+      return COMMERCIAL_CATEGORY_ORDER.find(name => name !== "All" && available.some(action => action.section === name)) || "All";
+    }
     return actions.find(action => action.section !== "All")?.section || "All";
   });
   const [registerQuery, setRegisterQuery] = useState("");
