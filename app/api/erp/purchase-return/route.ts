@@ -43,6 +43,7 @@ export async function GET() {
         id: receipt.id, code: receipt.code, date: receipt.receiptDate.toISOString().slice(0, 10),
         supplier: byOrder.get(receipt.purchaseOrderId)?.supplier.name || "",
         orderCode: byOrder.get(receipt.purchaseOrderId)?.code || "",
+        items: (() => { try { return JSON.parse(receipt.items || "[]") as Array<{ itemId: string; qty: number }>; } catch { return []; } })(),
       })),
     });
   } catch (error) { return fail(error); }
