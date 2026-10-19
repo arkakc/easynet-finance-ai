@@ -432,6 +432,28 @@ model PurchaseReceipt {
   @@index([journalId])
 }
 
+model PurchaseReturn {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  receiptId      String
+  purchaseOrderId String
+  supplierId     String
+  warehouseId    String
+  reason         String
+  linesJson      String
+  status         String   @default("DRAFT")
+  createdBy      String
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([receiptId, status])
+  @@index([purchaseOrderId])
+  @@index([supplierId])
+  @@index([status])
+}
+
 model StockMovement {
   id            String       @id @default(cuid())
   itemId        String
